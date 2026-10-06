@@ -23,4 +23,4 @@ To be decided.
 
 ## Reference material
 - Loot plan: robpaolella/bureaucracy-forever#89. Robert's answer #24 there: the add-on is its own planning track.
-- Guild site repo (`/git/bureaucracy-forever`) and its Discord bot (`/git/bureaucracy-forever-discord-bot`) share data through `SYNC-SPEC.md` in the site repo. Any data format shared with the site must be agreed there, in both repos.
+- Guild site repo (`/git/bureaucracy-forever`) and its Discord bot (`/git/bureaucracy-forever-discord-bot`) share data through `SYNC-SPEC.md`, kept identical in both repos. Any data format shared with the site must be agreed there, in both repos.
