@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The game runs Lua 5.1, so lint and test on it. Versions match AGENTS.md, Checks.
+      - name: Install Lua 5.1, luacheck and busted
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 liblua5.1-0-dev luarocks
+          sudo luarocks --lua-version=5.1 install luacheck 1.2.0-1
+          sudo luarocks --lua-version=5.1 install busted 2.3.0-1
+
+      - run: luacheck .
+      - run: busted
