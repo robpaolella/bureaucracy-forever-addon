@@ -6,4 +6,4 @@
 - [x] Offline check of every version (network off), both widths
 - [x] Independent critique (step 5), fixes, re-check (PASS)
 - [x] Open Design link to Robert; decisions per difference (A pop-up, B Awards grouping; combined as D)
-- [ ] Approval, freeze, screenshots, design PR
+- [x] Approval, freeze, screenshots, design PR
