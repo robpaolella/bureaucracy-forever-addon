@@ -15,6 +15,8 @@ describe("the add-on", function()
     local saved = { awards = { "kept" } }
     local ns = wow.start({ saved = { BureaucracyForeverDB = saved } })
     assert.are.equal(saved, ns.db)
+    wow.start()
+    assert.are.same({}, BureaucracyForeverDB)
   end)
 
   it("ignores ADDON_LOADED for other add-ons", function()

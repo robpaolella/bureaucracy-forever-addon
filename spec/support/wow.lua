@@ -119,6 +119,8 @@ function wow.start(options)
   local metadata, files = wow.readToc()
   wow.addonName = TOC:gsub("%.toc$", "")
   installGlobals(metadata)
+  -- Each start is a fresh session: only the saved data passed in survives from before.
+  for name in (metadata.SavedVariables or ""):gmatch("[^,%s]+") do _G[name] = nil end
   for name, value in pairs(options.saved or {}) do _G[name] = value end
   wow.ns = {}
   for _, file in ipairs(files) do
