@@ -60,9 +60,18 @@ local function repo(commits)
       end
       return false, "HTTP 404"
     end
+    local id = args[2]:match("^repos/{owner}/{repo}/releases/(%d+)$")
+    if args[1] == "api" and id then
+      for _, release in ipairs(self.releases) do
+        if release.id == tonumber(id) then return true, tostring(not release.published) .. "\n" end
+      end
+      return false, "HTTP 404"
+    end
     if args[1] == "api" and args[2] == "--paginate" then
       local out = {}
-      for _, r in ipairs(self.releases) do out[#out + 1] = r.id .. " " .. r.tag .. " " .. r.target end
+      for _, r in ipairs(self.releases) do
+        if not r.published then out[#out + 1] = r.id .. " " .. r.tag .. " " .. r.target end
+      end
       return true, table.concat(out, "\n") .. "\n"
     end
     local sha = args[2]:match("^repos/{owner}/{repo}/commits/(%x+)/pulls$")
@@ -191,6 +200,17 @@ describe("Draft.run", function()
     r.run()
     assert.equal(1, #r.releases)
     assert.equal(92, r.releases[1].id)
+  end)
+
+  it("never deletes a draft Robert publishes while the run is building", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    r.run()
+    local draft = r.releases[1]
+    r.add(pr(3, "fix: a crash", "No more crash."))
+    r.env.build = function() draft.published = true; return "dist/x.zip" end
+    assert.equal("published", r.run().status)
+    assert.same({ draft }, r.releases)
+    assert.is_false(r.called("DELETE") or r.called("release create"))
   end)
 
   it("refuses a version whose tag is already taken", function()

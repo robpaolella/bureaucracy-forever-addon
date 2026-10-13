@@ -130,7 +130,13 @@ function Draft.run(env, mode)
   -- Replace, so there is only ever one draft. The tag is made when Robert publishes, on `head`.
   local zip = env.build(plan.version)
   for _, old in ipairs(existing) do
-    call(env, "gh", "api", "-X", "DELETE", "repos/{owner}/{repo}/releases/" .. old.id)
+    -- Robert may have published it since the list: look again right before deleting.
+    local path = "repos/{owner}/{repo}/releases/" .. old.id
+    if trim(call(env, "gh", "api", path, "--jq", ".draft")) ~= "true" then
+      env.log(old.tag .. " was published during this run: the next merge drafts the release after it.")
+      return { status = "published", version = plan.version }
+    end
+    call(env, "gh", "api", "-X", "DELETE", path)
   end
   call(env, "gh", "release", "create", tag, zip, "--draft", "--target", head,
     "--title", tag, "--notes", plan.notes)
