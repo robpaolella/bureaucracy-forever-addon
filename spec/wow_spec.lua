@@ -1,0 +1,53 @@
+local wow = require("spec.support.wow")
+
+describe("the game stand-in", function()
+  before_each(function() wow.start() end)
+
+  it("allows a chat line from a click", function()
+    wow.click(function() C_ChatInfo.SendChatMessage("hello", "RAID") end)
+    assert.are.same({ { text = "hello", channel = "RAID" } }, wow.sent)
+    assert.are.same({}, wow.blocked)
+  end)
+
+  it("blocks a chat line sent from a timer, as the game does", function()
+    local blockedEvents = {}
+    wow.ns.On("ADDON_ACTION_BLOCKED", function(...) blockedEvents[#blockedEvents + 1] = { ... } end)
+    C_Timer.After(3, function() SendChatMessage("too late", "SAY") end)
+    wow.advance(2)
+    assert.are.same({}, wow.blocked)
+    wow.advance(1)
+    assert.are.same({}, wow.sent)
+    assert.are.same({ "SendChatMessage" }, wow.blocked)
+    assert.are.same({ { "BureaucracyForever", "SendChatMessage" } }, blockedEvents)
+  end)
+
+  it("lets hidden add-on messages through from a timer", function()
+    C_Timer.After(1, function() C_ChatInfo.SendAddonMessage("BF", "ping", "RAID") end)
+    wow.advance(1)
+    assert.are.same({ { prefix = "BF", text = "ping", channel = "RAID" } }, wow.addonMessages)
+  end)
+
+  it("switches the chat log on and off", function()
+    assert.is_false(LoggingChat())
+    LoggingChat(true)
+    assert.is_true(LoggingChat())
+  end)
+
+  it("fakes a master loot window", function()
+    local opened = 0
+    wow.ns.On("LOOT_OPENED", function() opened = opened + 1 end)
+    wow.openLoot({ { link = "[Ephemeral Choker]", name = "Ephemeral Choker", quality = 3,
+      sourceGuid = "Creature-1", candidates = { "Holyhek Waifu", "Shootier Hek" } } })
+    assert.are.equal(1, opened)
+    assert.are.equal(1, GetNumLootItems())
+    assert.are.equal("[Ephemeral Choker]", GetLootSlotLink(1))
+    assert.are.equal(3, select(5, GetLootSlotInfo(1)))
+    assert.are.equal("Creature-1", (GetLootSourceInfo(1)))
+    assert.are.equal("Shootier Hek", GetMasterLootCandidate(1, 2))
+    assert.is_nil(GetMasterLootCandidate(1, 3))
+    GiveMasterLoot(1, 2)
+    assert.are.same({ { slot = 1, candidate = 2 } }, wow.gives)
+    wow.closeLoot()
+    assert.are.equal(0, GetNumLootItems())
+  end)
+end)

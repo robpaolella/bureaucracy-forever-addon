@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: Bureaucracy Forever
+## Notes: Loot reserves and awards for Bureaucracy officers.
+## Author: Bureaucracy
+## Version: 0.0.0-dev
+## SavedVariables: BureaucracyForeverDB
+
+Core.lua
+Modules\Rules.lua
+Modules\Records.lua
+Modules\Tracking.lua
+Modules\Sync.lua
+Modules\UI.lua
+Inbox.lua
