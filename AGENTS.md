@@ -41,7 +41,7 @@ Releases are zips on GitHub Releases; see Releases. The game files never change 
 - **Source:** each merged pull request's title and body, looked up through the GitHub API, not commit messages. A commit with no pull request counts by its subject.
 - **Release note:** every PR body has a `Release note:` line: one plain-English sentence for officers. A `feat`, `fix` or breaking PR always has a real one; `Release note: none` is only for other types. A missing note falls back to the PR title, marked for Robert to reword.
 - **The draft:** after each merge to main, the Release workflow (`.github/workflows/release.yml`) creates or refreshes the one draft release on the repo's Releases page, targeting the merged commit's SHA. A merge that changes nothing in the release leaves the draft, and any edits to it, as it is.
-- **Publishing:** only Robert publishes, by clicking Publish on the draft; no workflow or agent does. Publishing creates the tag `v<version>`, which is never moved or reused: a bad release is fixed by a newer one.
+- **Publishing:** only Robert publishes, by clicking Publish on the draft; no workflow or agent does. Publishing creates the tag `v<version>`, which is never moved or reused: a bad release is fixed by a newer one. If Publish lands in the instant a refresh deletes the old draft, the published release is deleted; the run then fails and its error says how to restore it from the tag, which is kept.
 - **Dry run:** the workflow also runs on every PR and by hand (Actions, Release, Run workflow): it builds the zip as a downloadable artifact and creates no release or draft.
 - **Convention:** /git/maestro/docs/git-workflow.md, Releases. This section holds this repo's whole rule set, so it applies even where that file isn't at hand.
 

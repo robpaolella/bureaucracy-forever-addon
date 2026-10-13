@@ -53,10 +53,19 @@ local function repo(commits)
       self.releases[#self.releases + 1] = release
       return true, ""
     end
+    local tag = args[2]:match("^repos/{owner}/{repo}/git/ref/tags/(.+)$")
+    if args[1] == "api" and tag then
+      if self.published[tag] then return true, "{}" end
+      return false, "HTTP 404"
+    end
     if args[1] == "api" and args[2] == "-X" and args[3] == "DELETE" then
       local id = tonumber(args[4]:match("(%d+)$"))
       for i, release in ipairs(self.releases) do
-        if release.id == id then table.remove(self.releases, i); return true, "" end
+        if release.id == id then
+          table.remove(self.releases, i)
+          if self.publishBeforeDelete then self.published[release.tag] = release.target end
+          return true, ""
+        end
       end
       return false, "HTTP 404"
     end
@@ -211,6 +220,18 @@ describe("Draft.run", function()
     assert.equal("published", r.run().status)
     assert.same({ draft }, r.releases)
     assert.is_false(r.called("DELETE") or r.called("release create"))
+  end)
+
+  it("fails loudly when Robert publishes in the moment before the delete", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    r.run()
+    r.add(pr(3, "fix: a crash", "No more crash."))
+    r.publishBeforeDelete = true
+    local ok, err = pcall(r.run)
+    assert.is_false(ok)
+    assert.matches("^v1%.1%.0 was published just as this run replaced its draft", err)
+    assert.matches("To restore it", err, 1, true)
+    assert.is_false(r.called("release create"))
   end)
 
   it("refuses a version whose tag is already taken", function()
