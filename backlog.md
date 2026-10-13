@@ -1,0 +1,1 @@
+- Optional ElvUI/LUI look for the pop-up and window, if those add-ons support WoW Forever (Robert, #9, 2026-10-13).
