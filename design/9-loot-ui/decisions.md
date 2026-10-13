@@ -11,7 +11,10 @@ them, even if no single version had all of them:
 
 | # | Decision | Options (version) | Robert's pick and why |
 | --- | --- | --- | --- |
-| 1 | <e.g. how names show> | <a: ...; b: ...> | <pick, reference/date> |
+| 1 | How the pop-up shows the items | a: one list of every item beside the loot window, roll-offs inside their row; b: one item at a time with a queue; c: labels on the game's loot window plus a side window | **a**. Robert, 2026-10-13: "I agree, I think A is the best option. It allows them to see everything at once." |
+| 2 | How the Awards tab is ordered | a, c: one list by time; b: grouped by boss, time order within each | **b**. Robert, 2026-10-13: "I agree as well. I think B is the best view." |
+
+The picks come from different versions, so `versions/d.html` combines them: A's pop-up with B's Awards grouped by boss. It adds no behaviour that no version had, so it doesn't repeat the critique.
 
 Robert's exact confirmation and date/reference authorizing the
 PR. Design PR: use the linked PR on the design issue once created; the session adds

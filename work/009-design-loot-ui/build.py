@@ -14,7 +14,7 @@ def inline(text):
 css = (HERE / "src/common.css").read_text()
 js = "".join((HERE / "src" / n).read_text() for n in ["common.js", "popup-parts.js", "versions.js"])
 OUT.mkdir(parents=True, exist_ok=True)
-for v in ["a", "b", "c"]:
+for v in ["a", "b", "c", "d"]:
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Design #9, version {v.upper()}: loot pop-up and officers' window</title>

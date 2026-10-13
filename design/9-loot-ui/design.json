@@ -16,7 +16,8 @@
   "versions": {
     "a": "versions/a.html",
     "b": "versions/b.html",
-    "c": "versions/c.html"
+    "c": "versions/c.html",
+    "d": "versions/d.html"
   },
   "states": [
     "popup-typical",

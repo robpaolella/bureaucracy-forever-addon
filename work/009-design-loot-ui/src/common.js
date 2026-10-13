@@ -366,7 +366,7 @@ const STATE_IDS = GROUPS.flatMap((g) => g[1]);
 let VIEW = {};
 function sceneFor(state, V) {
   let out = "";
-  const pm = popupModel(state);
+  const pm = state === "practice" ? null : popupModel(state);
   if (pm) {
     Object.assign(pm, VIEW);
     out += V.popup(pm, state);
@@ -387,7 +387,7 @@ function sceneFor(state, V) {
     case "sync-empty": case "sync-loaded": case "sync-refused": case "sync-noraid": out += windowFrame("sync", syncBody(state)); break;
     case "sync-switch": out += windowFrame("sync", syncBody(state)) + notice(`<p>Load reserves for <b class="white">Blackwing Lair, Sun 13 Dec</b>?</p><p class="hint">You have 12 awards for ${esc(RAID)}. They stay with that raid and are still sent to the site.</p>`,
       btn("Load", { goto: "sync-loaded" }) + btn("Cancel", { goto: "sync-loaded" }), { top: 260, label: "Switch raid" }); break;
-    case "practice": { const pm2 = popupModel("practice"); out += windowFrame("awards", awardsBody(V.groupAwards, false), { practice: true, x: 640, y: 150, w: 780 }) + V.popup(pm2, "practice") + chat(chatFor("practice")); break; }
+    case "practice": { const pm2 = popupModel("practice"); out += windowFrame("awards", awardsBody(V.groupAwards, false), { practice: true, x: 610, y: 150, w: 620 }) + V.popup(pm2, "practice") + chat(chatFor("practice")); break; }
     case "notice-update": out += notice(`<div class="row" style="justify-content:center;gap:10px"><img alt="" src="${ASSET.alert}" width="36" height="36"><div style="text-align:left">A newer <b class="white">Bureaucracy Forever</b> is out: <b class="green">1.3.0</b> (you have 1.2.1).</div></div>
       <p class="hint">Copy the link (Ctrl+C), download it, replace the add-on folder, then /reload. The desktop helper updates it for you.</p>
       <input class="input selected-text" style="width:100%" readonly aria-label="Download link" value="https://github.com/robpaolella/bureaucracy-forever-addon/releases/latest"><div style="height:8px"></div>`,

@@ -4,3 +4,4 @@
 - Still to check after those fixes: Awards table width, the 390 view, C's labels against the loot window edge, scene empty space.
 - 2026-10-13 (successor session): re-screenshotted. Fixed: the game's loot window drew its 4th slot over "Page 1 of 2" (slots now 36px apart; C's labels follow); tab labels sat on the tab's bottom edge; A's pop-up ran off-screen with a roll-off open on a crowded corpse (item list now scrolls, max 510px); C's boss button wrapped "Test drop". 390 view: the scene scales down whole (phone not applicable, per brief). Offline check passed for all three versions.
 - 2026-10-13: critique by GPT-5.6 Terra: FIXES (authority note, C page 2, dead controls in B/C); fixed, new state popup-page2 (30 states); re-check PASS.
+- 2026-10-13: Robert picked A's pop-up (Q12) and B's Awards grouped by boss (Q13); combined as version D. Fixed: the practice state never drew the officers' window (all versions); the practice window no longer overlaps the minimap.

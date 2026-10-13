@@ -98,3 +98,9 @@ VERSIONS.c = {
     return lootframe(m.loot, { x: LX, y: LY, page, title: m.testDrop ? "Test drop" : m.boss }) + strip + labels + more + bannerBox + side;
   },
 };
+
+/* D: Robert's picks combined: A's pop-up with B's Awards grouped by boss. */
+VERSIONS.d = Object.assign({}, VERSIONS.a, {
+  letter: "D", name: "A's pop-up, Awards grouped by boss", groupAwards: true,
+  blurb: "Pop-up: one row per item beside the game's loot window; a roll-off opens inside its row. Awards tab: grouped by boss.",
+});
