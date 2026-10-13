@@ -1,0 +1,66 @@
+local wow = require("spec.support.wow")
+
+describe("the add-on", function()
+  it("loads its files in .toc order and handles ADDON_LOADED without errors", function()
+    local ns = wow.start()
+    assert.are.equal("BureaucracyForever", ns.name)
+    for _, module in ipairs({ "Rules", "Records", "Tracking", "Sync", "UI" }) do
+      assert.is_table(ns[module], module)
+    end
+    assert.are.same({}, BureaucracyForeverDB)
+    assert.are.equal(BureaucracyForeverDB, ns.db)
+  end)
+
+  it("keeps the saved data from an earlier session", function()
+    local saved = { awards = { "kept" } }
+    local ns = wow.start({ saved = { BureaucracyForeverDB = saved } })
+    assert.are.equal(saved, ns.db)
+  end)
+
+  it("ignores ADDON_LOADED for other add-ons", function()
+    local ns = wow.start()
+    ns.db = nil
+    wow.fire("ADDON_LOADED", "SomeOtherAddOn")
+    assert.is_nil(ns.db)
+  end)
+
+  it("prints the .toc's version for /bf", function()
+    local metadata = wow.readToc()
+    wow.start()
+    wow.slash("/bf")
+    assert.are.same({ "|cff33ff99Bureaucracy:|r version " .. metadata.Version .. "." }, wow.printed)
+  end)
+end)
+
+describe("the .toc", function()
+  local metadata, files = wow.readToc()
+
+  it("targets the WoW Forever client and saves the add-on's data", function()
+    assert.are.equal("16001", metadata.Interface)
+    assert.are.equal("BureaucracyForeverDB", metadata.SavedVariables)
+  end)
+
+  it("lists the helper's inbox file, which ships empty", function()
+    -- The game reads a new file only after a full restart, so the inbox is listed from the start.
+    local listed = false
+    for _, file in ipairs(files) do listed = listed or file == "Inbox.lua" end
+    assert.is_true(listed)
+    local handle = assert(io.open("Inbox.lua", "rb"))
+    assert.are.equal("", handle:read("*a"))
+    handle:close()
+  end)
+
+  it("lists every Lua file in the add-on, and only files that exist", function()
+    local listed = {}
+    for _, file in ipairs(files) do
+      listed[file:gsub("\\", "/")] = true
+      assert.is_truthy(io.open((file:gsub("\\", "/"))), file .. " is listed but missing")
+    end
+    local found = io.popen([[find . -name "*.lua" -not -path "./spec/*" -not -path "./.*"]])
+    for path in found:lines() do
+      path = path:gsub("^%./", "")
+      assert.is_true(listed[path] == true, path .. " is not in the .toc")
+    end
+    found:close()
+  end)
+end)
