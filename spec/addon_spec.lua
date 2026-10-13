@@ -58,7 +58,9 @@ describe("the .toc", function()
       listed[file:gsub("\\", "/")] = true
       assert.is_truthy(io.open((file:gsub("\\", "/"))), file .. " is listed but missing")
     end
-    local found = io.popen([[find . -name "*.lua" -not -path "./spec/*" -not -path "./.*"]])
+    -- spec/ and release/ (the release logic) are not part of the add-on.
+    local found = io.popen(
+      [[find . -name "*.lua" -not -path "./spec/*" -not -path "./release/*" -not -path "./.*"]])
     for path in found:lines() do
       path = path:gsub("^%./", "")
       assert.is_true(listed[path] == true, path .. " is not in the .toc")
