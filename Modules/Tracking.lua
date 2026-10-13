@@ -17,7 +17,8 @@ local orphanClears = {} -- cleared slots nobody started an attempt for
 local orphanChats = {}  -- "receives loot" lines no attempt claimed
 
 -- Tracking.On(name, fn) hears: "confirmed", "unconfirmed", "late" (a confirmation that came
--- after "unconfirmed"; attempt.superseded is true if the item was handed out again meanwhile)
+-- after "unconfirmed", with both signs; attempt.superseded is true if the item was handed out
+-- again meanwhile)
 -- and "outside" (a hand-out nobody started here, at or above the loot threshold). Each gets
 -- one table: an attempt, or { winner, link, quantity, quality } for "outside".
 function Tracking.On(name, fn)
@@ -57,15 +58,15 @@ local function prune()
   end
 end
 
-local function finish(attempt)
-  attempt.status = "confirmed"
-  report("confirmed", attempt)
-end
-
 local function checkConfirmed(attempt)
   -- With the loot window gone there is no slot clear to see, so the chat line alone counts.
-  if attempt.status == "pending" and attempt.chat and (attempt.cleared or attempt.windowClosed) then
-    finish(attempt)
+  if not (attempt.chat and (attempt.cleared or attempt.windowClosed)) then return end
+  if attempt.status == "pending" then
+    attempt.status = "confirmed"
+    report("confirmed", attempt)
+  elseif attempt.status == "unconfirmed" then
+    attempt.status = "late"
+    report("late", attempt)
   end
 end
 
@@ -170,12 +171,15 @@ ns.On("LOOT_SLOT_CLEARED", function(slot)
   local item = snapshot[slot]
   if not item or item.cleared then return end -- the game fires it twice: count it once
   item.cleared = true
-  for _, a in ipairs(attempts) do
-    local open = a.status == "pending" or a.status == "unconfirmed"
-    if a.slot == slot and open and not a.windowClosed and not a.cleared then
-      a.cleared = true
-      checkConfirmed(a)
-      return
+  -- A clear belongs to the newest waiting attempt for the slot, else to one given up on.
+  for _, status in ipairs({ "pending", "unconfirmed" }) do
+    for i = #attempts, 1, -1 do
+      local a = attempts[i]
+      if a.status == status and a.slot == slot and not a.windowClosed and not a.cleared then
+        a.cleared = true
+        checkConfirmed(a)
+        return
+      end
     end
   end
   prune()
@@ -208,12 +212,7 @@ ns.On("CHAT_MSG_LOOT", function(text)
     end
     if match then
       match.chat = true
-      if status == "pending" then
-        checkConfirmed(match)
-      else
-        match.status = "late"
-        report("late", match)
-      end
+      checkConfirmed(match)
       return
     end
   end
