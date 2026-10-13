@@ -106,6 +106,7 @@ local function installGlobals(metadata)
   _G.GiveMasterLoot = function(i, index)
     wow.gives[#wow.gives + 1] = { slot = i, candidate = index }
   end
+  _G.UnitName = function() return wow.state.player end
   _G.GetLootThreshold = function() return wow.state.lootThreshold end
 end
 
@@ -115,7 +116,7 @@ function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
-  wow.state = { loot = {}, lootThreshold = 2, chatLog = false, chatLockdown = false }
+  wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false }
   local metadata, files = wow.readToc()
   wow.addonName = TOC:gsub("%.toc$", "")
   installGlobals(metadata)

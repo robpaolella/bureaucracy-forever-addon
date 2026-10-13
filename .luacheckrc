@@ -11,7 +11,7 @@ read_globals = {
   "C_AddOns", "C_ChatInfo", "C_Timer", "CreateFrame", "GetAddOnMetadata",
   "GetLootSlotInfo", "GetLootSlotLink", "GetLootSourceInfo", "GetLootThreshold",
   "GetMasterLootCandidate", "GetNumLootItems", "GiveMasterLoot", "LoggingChat",
-  "SendChatMessage", "strtrim", "date", "GetTime",
+  "SendChatMessage", "UnitName", "strtrim", "date", "GetTime",
 }
 
 files["spec"] = { std = "+busted" }
