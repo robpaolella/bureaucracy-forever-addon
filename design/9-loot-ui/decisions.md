@@ -16,22 +16,23 @@ them, even if no single version had all of them:
 
 The picks come from different versions, so `versions/d.html` combines them: A's pop-up with B's Awards grouped by boss. It adds no behaviour that no version had, so it doesn't repeat the critique.
 
-Robert's exact confirmation and date/reference authorizing the
-PR. Design PR: use the linked PR on the design issue once created; the session adds
-that link there after opening it. Only Robert merging that PR approves it for building;
-chat approval, a critique PASS and a closed/unmerged PR do not.
+**Chosen: version D** (`index.html`): A's pop-up with B's Awards tab grouped by boss. Robert, 2026-10-13 (Q14): "D is approved." That authorizes the design PR; only Robert merging it approves the design for building. The PR link is on #9 under `## Design PR`.
 
 ## Alternatives
 | Version | What differs / why rejected or chosen | Only this version had (lost) | Robert's OK to drop | Evidence |
 | --- | --- | --- | --- | --- |
-| a | <reason> | <features no kept version has, or none> | <his words, date/reference> | [All-version manifest](screenshots/all/manifest.json) and named images |
+| a | Its pop-up was chosen (kept in D); its Awards list by time was not | Awards tab as one list by time | "D is approved", 2026-10-13, after being told what each dropped version alone had | [manifest](screenshots/all/manifest.json), `screenshots/all/a-*.png` |
+| b | Its Awards grouping was chosen (kept in D); its one-item-at-a-time pop-up was not | One-item card with a queue of item icons and previous/next | same | `screenshots/all/b-*.png` |
+| c | Neither decision picked it; labels break when an add-on replaces the game's loot window and page with its 4 slots | Labels attached to the game's loot window, separate details window | same | `screenshots/all/c-*.png` |
+| d | Chosen: combines Robert's picks | (kept) | n/a | `screenshots/all/d-*.png`, [approved manifest](screenshots/approved/manifest.json) |
 
 A version is removed, replaced or left out at freeze only after Robert confirms what it
 alone had can go.
 
-All-version captures were completed and inspected before pruning versions/. Approved
-state × theme × width evidence: [manifest](screenshots/approved/manifest.json).
-Record actual counts, inspected image paths, offline proof and any capture limitations.
+All-version captures were completed and inspected before pruning `versions/`: 240 images (4 versions × 30 states × default × 390/1440), [manifest](screenshots/all/manifest.json). Approved: 60 images (30 states × default × 390/1440), [manifest](screenshots/approved/manifest.json), every one inspected.
+- After the all-version capture, the practice view's officers' window moved up 50px so its tabs fit the 972px-tall capture; `screenshots/all/d-practice-*` show the earlier spot. Small pixel differences elsewhere are the spinner animation and text smoothing.
+- Offline proof: `index.html` opened in headless Chrome with all network blocked; the page requested only its own file and inlined `data:` assets; art and fonts rendered. Interactions (B queue, C paging and ⚠) were checked in Chrome with the network blocked before the freeze.
+- Capture limitation: the 390 captures show the desktop game windows scaled down; phone use doesn't apply to a PC game (brief).
 
 ## Independent critique
 - Maker: claude-bridge/claude-opus-5-5. Reviewer: openai/gpt-5.6-terra, thinking medium (routed with `route.ts role checker --maker claude-bridge/claude-opus-5-5`), a different company.
@@ -46,15 +47,18 @@ Record actual counts, inspected image paths, offline proof and any capture limit
 ## Comments and changes
 | ID / source | Version / element | Original note | Agreed change and verification | Resolved |
 | --- | --- | --- | --- | --- |
-| <Open Design ID or herdr reference> | <target> | <note> | <result> | <date/status> |
+| herdr, 2026-10-13 | All | Robert picked A's pop-up (Q12) and B's Awards grouping (Q13) | Combined as version D; checked at both widths | Done |
+| Maker, 2026-10-13 | All, practice state | The practice view never drew the officers' window with its "[Practice]" title | Fixed in all versions; window placed clear of the minimap | Done |
+
+No Open Design comments were left (checked 2026-10-13 after each sync).
 
 ## Experiment
-None, or Robert's permission, question, branch/preview, chosen behaviour, rejected
-attempts, static-version updates and unmerged/closed experiment PR. Code reuse: forbidden
-unless specific parts are explicitly authorized here. Keep the branch as a primary source.
+None.
 
 ## Open items
-None affecting the approved scope. Preserve any deferred, out-of-scope questions explicitly.
+None affecting the approved scope. Deferred, out of scope:
+- Roll-off countdown: waits on the timer chat beta test (#33); may come as a later revision (Q9, Q10).
+- ElvUI / LUI skins: backlog.
 
 ## Build handoff
 Merged folder/revision is the feature authority; DESIGN.md/live site govern site-wide

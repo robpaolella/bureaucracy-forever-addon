@@ -2,7 +2,7 @@
 """Builds the design's self-contained version files from src/ and assets/ (art and fonts inlined)."""
 import base64, pathlib, re
 HERE = pathlib.Path(__file__).resolve().parent
-OUT = HERE.parent.parent / "design" / "9-loot-ui" / "versions"
+OUT = HERE.parent.parent / "design" / "9-loot-ui"
 MIME = {".png": "image/png", ".ttf": "font/ttf"}
 
 def inline(text):
@@ -14,7 +14,7 @@ def inline(text):
 css = (HERE / "src/common.css").read_text()
 js = "".join((HERE / "src" / n).read_text() for n in ["common.js", "popup-parts.js", "versions.js"])
 OUT.mkdir(parents=True, exist_ok=True)
-for v in ["a", "b", "c", "d"]:
+for v in ["d"]:  # approved: version D (A's pop-up, Awards grouped by boss); A-C live in screenshots/all
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Design #9, version {v.upper()}: loot pop-up and officers' window</title>
@@ -24,5 +24,5 @@ for v in ["a", "b", "c", "d"]:
 <script>{js}
 boot(VERSIONS["{v}"]);</script></body></html>
 """
-    (OUT / f"{v}.html").write_text(inline(html))
+    (OUT / "index.html").write_text(inline(html))
     print(v, len(html))
