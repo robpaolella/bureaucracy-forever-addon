@@ -139,11 +139,18 @@ function Draft.run(env, mode)
     call(env, "gh", "api", "-X", "DELETE", path)
     -- GitHub can't delete only if still a draft, so a publish in the moment before the delete is
     -- caught here: publishing made the tag, and deleting the release keeps it.
-    if env.run("gh", { "api", "repos/{owner}/{repo}/git/ref/tags/" .. old.tag }) then
+    local restore = "To restore it: run the Release workflow by hand on the tag " .. old.tag
+      .. " for the zip, then on GitHub, Releases, Draft a new release, choose tag " .. old.tag
+      .. ", attach the zip and publish."
+    local ok, found = env.run("gh", { "api", "repos/{owner}/{repo}/git/matching-refs/tags/" .. old.tag,
+      "--jq", '.[] | select(.ref == "refs/tags/' .. old.tag .. '") | .ref' })
+    if not ok then
+      error("Deleted the draft " .. old.tag .. " but couldn't check whether it had just been published. "
+        .. "If the Releases page has no " .. old.tag .. " but its tag exists, it was. " .. restore, 0)
+    end
+    if trim(found or "") ~= "" then
       error(old.tag .. " was published just as this run replaced its draft, so the release was deleted. "
-        .. "Its tag is kept. To restore it: run the Release workflow by hand on the tag " .. old.tag
-        .. " for the zip, then on GitHub, Releases, Draft a new release, choose tag " .. old.tag
-        .. ", attach the zip and publish.", 0)
+        .. "Its tag is kept. " .. restore, 0)
     end
   end
   call(env, "gh", "release", "create", tag, zip, "--draft", "--target", head,

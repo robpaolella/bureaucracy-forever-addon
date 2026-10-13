@@ -53,10 +53,10 @@ local function repo(commits)
       self.releases[#self.releases + 1] = release
       return true, ""
     end
-    local tag = args[2]:match("^repos/{owner}/{repo}/git/ref/tags/(.+)$")
+    local tag = args[2]:match("^repos/{owner}/{repo}/git/matching%-refs/tags/(.+)$")
     if args[1] == "api" and tag then
-      if self.published[tag] then return true, "{}" end
-      return false, "HTTP 404"
+      if self.tagLookupFails then return false, "HTTP 503" end
+      return true, self.published[tag] and ("refs/tags/" .. tag .. "\n") or ""
     end
     if args[1] == "api" and args[2] == "-X" and args[3] == "DELETE" then
       local id = tonumber(args[4]:match("(%d+)$"))
@@ -230,6 +230,18 @@ describe("Draft.run", function()
     local ok, err = pcall(r.run)
     assert.is_false(ok)
     assert.matches("^v1%.1%.0 was published just as this run replaced its draft", err)
+    assert.matches("To restore it", err, 1, true)
+    assert.is_false(r.called("release create"))
+  end)
+
+  it("fails loudly when it can't check whether the deleted draft was published", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    r.run()
+    r.add(pr(3, "fix: a crash", "No more crash."))
+    r.tagLookupFails = true
+    local ok, err = pcall(r.run)
+    assert.is_false(ok)
+    assert.matches("couldn't check whether it had just been published", err, 1, true)
     assert.matches("To restore it", err, 1, true)
     assert.is_false(r.called("release create"))
   end)
