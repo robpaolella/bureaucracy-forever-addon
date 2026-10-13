@@ -1,0 +1,58 @@
+name: Release
+
+# After each merge to main: create or refresh the one draft release (release/Draft.lua).
+# Robert publishes it on GitHub; nothing here publishes. By hand, or on a pull request: a dry
+# run that builds the zip as a downloadable artifact and makes no release or draft.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    name: Draft release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One run at a time and none cancelled half-way, so two quick merges can't make two drafts.
+    # A run still waiting is replaced by a newer one, which covers both merges.
+    concurrency:
+      group: release-draft
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      # Full history and tags: the release covers every commit since the last published tag.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - run: lua5.1 release/main.lua draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+
+  dry-run:
+    name: Dry run
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - run: lua5.1 release/main.lua dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+      # The zip itself, not zipped again: the artifact takes the zip's name.
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/*.zip
+          archive: false
+          if-no-files-found: error
