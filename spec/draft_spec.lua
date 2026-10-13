@@ -1,0 +1,233 @@
+local Draft = dofile("release/Draft.lua")
+
+local TOC = "## Version: 0.0.0-dev\nCore.lua\nInbox.lua\n"
+
+-- A stand-in for git and GitHub: a straight line of commits on main, published tags and drafts.
+-- Each commit: { pr = { number, title, body } } or { subject }, plus toc to change the .toc.
+local function repo(commits)
+  local self = { commits = {}, releases = {}, published = {}, calls = {}, built = {}, nextId = 1 }
+  local index = {}
+  function self.add(commit)
+    local sha = string.rep(string.format("%x", (#self.commits + 1) % 16), 40)
+    commit.sha = sha
+    commit.toc = commit.toc or (self.commits[#self.commits] or { toc = TOC }).toc
+    self.commits[#self.commits + 1] = commit
+    index[sha] = #self.commits
+    self.head = sha
+    return sha
+  end
+  for _, commit in ipairs(commits) do self.add(commit) end
+
+  local function at(ref) return index[ref] or index[self.published[ref]] end
+  function self.publish(tag) self.published[tag] = self.head; self.latest = tag end
+  function self.drafts()
+    local out = {}
+    for _, release in ipairs(self.releases) do out[#out + 1] = release end
+    return out
+  end
+
+  local function git(args)
+    local cmd = args[1]
+    if cmd == "rev-parse" then return true, self.head .. "\n" end
+    if cmd == "rev-list" then
+      local from, to = args[4]:match("^(.-)%.%.(.+)$")
+      local first, out = from and at(from) + 1 or 1, {}
+      for i = first, at(to or args[4]) do out[#out + 1] = self.commits[i].sha end
+      return true, table.concat(out, "\n") .. "\n"
+    end
+    if cmd == "show" then return true, self.commits[at(args[2]:match("^(.-):"))].toc end
+    if cmd == "log" then return true, (self.commits[at(args[4])].subject or "") .. "\n" end
+    if cmd == "merge-base" then return at(args[3]) <= at(args[4]), "" end
+    if cmd == "tag" then return true, self.published[args[3]] and (args[3] .. "\n") or "" end
+  end
+
+  local function gh(args)
+    if args[1] == "release" and args[2] == "list" then return true, (self.latest or "") .. "\n" end
+    if args[1] == "release" and args[2] == "create" then
+      local release = { id = self.nextId, tag = args[3], asset = args[4], args = args }
+      for i = 5, #args do
+        if args[i] == "--target" then release.target = args[i + 1] end
+        if args[i] == "--notes" then release.notes = args[i + 1] end
+      end
+      self.nextId = self.nextId + 1
+      self.releases[#self.releases + 1] = release
+      return true, ""
+    end
+    if args[1] == "api" and args[2] == "-X" and args[3] == "DELETE" then
+      local id = tonumber(args[4]:match("(%d+)$"))
+      for i, release in ipairs(self.releases) do
+        if release.id == id then table.remove(self.releases, i); return true, "" end
+      end
+      return false, "HTTP 404"
+    end
+    if args[1] == "api" and args[2] == "--paginate" then
+      local out = {}
+      for _, r in ipairs(self.releases) do out[#out + 1] = r.id .. " " .. r.tag .. " " .. r.target end
+      return true, table.concat(out, "\n") .. "\n"
+    end
+    local sha = args[2]:match("^repos/{owner}/{repo}/commits/(%x+)/pulls$")
+    if sha then
+      local pr = self.commits[at(sha)].pr
+      if not pr then return true, "\n" end
+      return true, pr[1] .. "\n" .. pr[2] .. "\n" .. (pr[3] or "") .. "\n"
+    end
+  end
+
+  self.env = {
+    run = function(program, args)
+      self.calls[#self.calls + 1] = program .. " " .. table.concat(args, " ")
+      if program == "git" then return git(args) end
+      if program == "gh" then return gh(args) end
+    end,
+    build = function(version)
+      self.built[#self.built + 1] = version
+      return "dist/BureaucracyForever-" .. version .. ".zip"
+    end,
+    log = function() end,
+  }
+  function self.run(mode)
+    self.calls, self.built = {}, {}
+    return Draft.run(self.env, mode or "draft")
+  end
+  function self.called(pattern)
+    for _, call in ipairs(self.calls) do
+      if call:find(pattern) then return true end
+    end
+    return false
+  end
+  return self
+end
+
+local function pr(number, title, note)
+  return { pr = { number, title, "Release note: " .. (note or "none") } }
+end
+
+describe("Draft.run", function()
+  local r
+  before_each(function()
+    r = repo({ pr(1, "feat: first", "The add-on.") })
+    r.publish("v1.0.0")
+  end)
+
+  it("creates only a draft, targeting the commit it built", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    assert.equal("created", r.run().status)
+    assert.equal(1, #r.releases)
+    local draft = r.releases[1]
+    assert.equal("v1.1.0", draft.tag)
+    assert.equal(r.head, draft.target)
+    assert.equal("dist/BureaucracyForever-1.1.0.zip", draft.asset)
+    assert.matches("- A window for awards.", draft.notes, 1, true)
+    assert.is_true(r.called("^gh release create v1.1.0 .* %-%-draft "))
+    assert.is_false(r.called("publish") or r.called("release edit") or r.called("draft=false"))
+  end)
+
+  it("leaves exactly one draft after a second run, and refreshes it", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    r.run()
+    r.add(pr(3, "fix: the window's close button", "The close button works."))
+    assert.equal("created", r.run().status)
+    assert.equal(1, #r.releases)
+    assert.equal("v1.1.0", r.releases[1].tag)
+    assert.equal(r.head, r.releases[1].target)
+    assert.matches("The close button works.", r.releases[1].notes, 1, true)
+  end)
+
+  it("renames the draft and its zip when the next version changes", function()
+    r.add(pr(2, "fix: a crash", "No more crash."))
+    r.run()
+    assert.equal("v1.0.1", r.releases[1].tag)
+    r.add(pr(3, "feat: awards window", "A window for awards."))
+    r.run()
+    assert.equal(1, #r.releases)
+    assert.equal("v1.1.0", r.releases[1].tag)
+    assert.equal("dist/BureaucracyForever-1.1.0.zip", r.releases[1].asset)
+  end)
+
+  it("leaves the draft as it is after a merge that calls for no release", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    r.run()
+    local draft = r.releases[1]
+    r.add(pr(3, "docs: tidy the readme"))
+    assert.equal("unchanged", r.run().status)
+    assert.equal(draft, r.releases[1])
+    assert.is_false(r.called("DELETE") or r.called("release create"))
+    assert.same({}, r.built)
+  end)
+
+  it("refreshes the draft when a merge changes the .toc's file list", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    r.run()
+    r.add({ pr = { 3, "refactor: split the core", "Release note: none" }, toc = TOC .. "Util.lua\n" })
+    assert.equal("created", r.run().status)
+    assert.matches("Close the game completely", r.releases[1].notes, 1, true)
+  end)
+
+  it("makes no draft when nothing since the last release calls for one", function()
+    r.add(pr(2, "docs: tidy the readme"))
+    assert.equal("none", r.run().status)
+    assert.same({}, r.releases)
+    assert.same({}, r.built)
+  end)
+
+  it("never moves a newer draft back to an older merge", function()
+    r.add(pr(2, "feat: awards window", "A window for awards."))
+    local older = r.head
+    r.add(pr(3, "fix: a crash", "No more crash."))
+    r.run()
+    local draft = r.releases[1]
+    r.head = older
+    assert.equal("newer", r.run().status)
+    assert.equal(draft, r.releases[1])
+  end)
+
+  it("clears stray drafts so only one is left", function()
+    r.add(pr(2, "fix: a crash", "No more crash."))
+    r.releases = {
+      { id = 90, tag = "v1.0.1", target = "main" },
+      { id = 91, tag = "v9.0.0", target = "main" },
+    }
+    r.nextId = 92
+    r.run()
+    assert.equal(1, #r.releases)
+    assert.equal(92, r.releases[1].id)
+  end)
+
+  it("refuses a version whose tag is already taken", function()
+    r.add(pr(2, "fix: a crash", "No more crash."))
+    r.published["v1.0.1"] = r.head
+    assert.has_error(function() r.run() end,
+      "v1.0.1 is already taken. Tags are never reused: publish a newer release instead.")
+    assert.same({}, r.releases)
+  end)
+
+  it("makes the first release 1.0.0 and counts a commit with no PR by its subject", function()
+    r = repo({ { subject = "Initial commit" }, pr(1, "feat: first", "The add-on.") })
+    r.run()
+    assert.equal("v1.0.0", r.releases[1].tag)
+    assert.matches("This is the first release", r.releases[1].notes, 1, true)
+  end)
+
+  describe("as a dry run", function()
+    it("builds the zip named with the next version and makes no release", function()
+      r.add(pr(2, "feat: awards window", "A window for awards."))
+      local result = r.run("dry-run")
+      local zip = "dist/BureaucracyForever-1.1.0.zip"
+      assert.same({ status = "dry-run", version = "1.1.0", zip = zip }, result)
+      assert.same({}, r.releases)
+      assert.is_false(r.called("DELETE") or r.called("release create"))
+    end)
+
+    it("names the zip after the commit when no release is due", function()
+      r.add(pr(2, "docs: tidy the readme"))
+      assert.equal("dev-" .. r.head:sub(1, 7), r.run("dry-run").version)
+    end)
+  end)
+end)
+
+describe("Draft.tocFiles", function()
+  it("lists the files, not the metadata or blank lines", function()
+    assert.same({ "Core.lua", "Modules\\UI.lua" },
+      Draft.tocFiles("## Interface: 16001\r\n# a comment\n\nCore.lua  \nModules\\UI.lua"))
+  end)
+end)
