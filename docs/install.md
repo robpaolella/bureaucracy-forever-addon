@@ -4,7 +4,7 @@ For guild officers. The add-on is a zip you download from GitHub and unzip into 
 
 ## Download
 
-1. Open the [Releases page](https://github.com/robpaolella/bureaucracy-forever-addon/releases/latest). The latest release is at the top. The guild site's officer area links to the same page.
+1. Open the [Releases page](https://github.com/robpaolella/bureaucracy-forever-addon/releases/latest). The latest release is at the top.
 2. Under **Assets**, download `BureaucracyForever-<version>.zip` (the version number is in the name). Don't use "Source code".
 
 ## Find your AddOns folder
