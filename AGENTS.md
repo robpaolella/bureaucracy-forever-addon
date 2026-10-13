@@ -26,7 +26,6 @@ sudo luarocks --lua-version=5.1 install busted 2.3.0-1
 - `BureaucracyForever.toc`: the game's list of the add-on's files, in load order, its version and its saved data (`BureaucracyForeverDB`).
 - `Core.lua`: the shared namespace (`ns`), the event hub (`ns.On(event, handler)`) and the `/bf` command. Every file gets `local ADDON_NAME, ns = ...`.
 - `Modules/`: one file per part, each adding its table to `ns`: `Rules` (who should get each drop), `Records` (award records), `Tracking` (hand-outs until the game confirms them), `Sync` (reserves in, awards out), `UI` (the pop-up and the officers' window).
-- `release/Release.lua`: not game code, not in the `.toc`. Works out the next version and the officers' release notes from plain data (merged PRs, old and new `.toc` file lists); `spec/release_spec.lua` tests it. The release workflow (#29) feeds it.
 - `Inbox.lua`: written by the desktop helper, read at login or `/reload`. It ships empty and stays in the `.toc`, because the game only finds a new file after a full restart.
 - `spec/`: busted tests. `spec/support/wow.lua` is the game stand-in: it loads the add-on in `.toc` order and fakes the game calls the add-on uses (events, slash commands, loot window, master loot, chat, timers, the chat log). It blocks chat lines with no click behind them, as the game does. Extend it as code needs more of the game.
 - Game calls the add-on uses are listed in `.luacheckrc`; add each new one there.
