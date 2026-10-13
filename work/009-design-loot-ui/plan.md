@@ -4,6 +4,6 @@
 - [x] Shared mock-up kit and versions A, B, C (29 states)
 - [x] Visual polish pass on the first screenshots (see log)
 - [x] Offline check of every version (network off), both widths
-- [ ] Independent critique (step 5), fixes, re-check
+- [x] Independent critique (step 5), fixes, re-check (PASS)
 - [ ] Open Design link to Robert; decisions per difference (pop-up form; Awards grouping)
 - [ ] Approval, freeze, screenshots, design PR

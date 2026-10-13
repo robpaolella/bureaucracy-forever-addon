@@ -186,7 +186,7 @@ table.list tr.void td { opacity: .55; }
 .lootframe .lf-slot .icon { width: 32px; height: 32px; }
 .lootframe .lf-slot .lf-name { font-size: 11px; line-height: 1.15; width: 112px; }
 .lootframe .lf-page { position: absolute; left: 26px; bottom: 18px; color: var(--gold); font-size: 11px; display: flex; gap: 8px; align-items: center; }
-.lootframe .lf-arrow { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: #3a0e08; border: 1px solid #a88d3b; color: var(--gold); text-align: center; line-height: 16px; font-size: 10px; }
+.lootframe .lf-arrow { display: inline-block; padding: 0; cursor: pointer; font-family: inherit; width: 18px; height: 18px; border-radius: 50%; background: #3a0e08; border: 1px solid #a88d3b; color: var(--gold); text-align: center; line-height: 16px; font-size: 10px; }
 
 /* StaticPopup-style notices */
 .notice { background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAACbSURBVHhe5cgxDQAACMAw/DvALQiYgy7ps/kWl1OSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5JTklOSU5ITMXvoW5CIHP/rWAAAAABJRU5ErkJggg==) repeat, rgba(0,0,0,.96) !important; background-clip: padding-box !important; }
@@ -210,6 +210,7 @@ table.list tr.void td { opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 /* A long list scrolls inside its window, as a game scroll frame does */
 .scroll-list { max-height: 510px; overflow-y: auto; padding-right: 6px; scrollbar-width: thin; scrollbar-color: #a88d3b #140c06; }
+.warn-btn { background: none; border: 0; padding: 0 2px; font-size: 14px; cursor: pointer; }
 </style></head>
 <body><div class="proto-bar" id="proto-bar" role="region" aria-label="Prototype controls"></div>
 <div class="viewport" id="viewport"><main class="scene" id="scene" aria-label="Game screen mock-up"></main></div>
@@ -270,7 +271,7 @@ function who(name, opts = {}) {
 function link(key, br = true) { const it = ITEMS[key]; return `<span class="q-${it.q}">${br ? "[" : ""}${esc(it.name)}${br ? "]" : ""}</span>`; }
 function icon(key, size = "") { const it = ITEMS[key]; return `<span class="icon ${size} border-${it.q}" style="background-image:url(${ICON(it.icon)})" role="img" aria-label="${esc(it.name)}"></span>`; }
 function btn(label, o = {}) {
-  const attrs = [o.goto ? `data-goto="${o.goto}"` : "", o.disabled ? "disabled" : "", o.title ? `title="${esc(o.title)}"` : ""].join(" ");
+  const attrs = [o.goto ? `data-goto="${o.goto}"` : "", o.disabled ? "disabled" : "", o.title ? `title="${esc(o.title)}"` : "", o.focus !== undefined ? `data-focus="${o.focus}"` : ""].join(" ");
   const ico = o.ico ? `<img class="ico" alt="" src="${o.ico}">` : "";
   return `<button type="button" class="btn ${o.size || ""}" ${attrs}>${ico}${label}</button>`;
 }
@@ -308,10 +309,12 @@ function minimap(o = {}) {
 
 /* ---------- The game's own loot window ---------- */
 function lootframe(keys, o = {}) {
-  const slots = keys.slice(0, 4).map((k) => `<div class="lf-slot" data-slot>${icon(k)}<span class="lf-name q-${ITEMS[k].q}">${esc(ITEMS[k].name)}</span></div>`).join("");
-  const pages = keys.length > 4 ? `<div class="lf-page"><span>Page 1 of ${Math.ceil(keys.length / 4)}</span><span class="lf-arrow">▶</span></div>` : "";
+  const page = o.page || 0, pages = Math.ceil(keys.length / 4);
+  const slots = keys.slice(page * 4, page * 4 + 4).map((k) => `<div class="lf-slot" data-slot>${icon(k)}<span class="lf-name q-${ITEMS[k].q}">${esc(ITEMS[k].name)}</span></div>`).join("");
+  const arrow = (to, ch, label) => `<button type="button" class="lf-arrow" data-page="${to}" aria-label="${label}">${ch}</button>`;
+  const pager = pages > 1 ? `<div class="lf-page">${page > 0 ? arrow(page - 1, "◀", "Previous loot page") : ""}<span>Page ${page + 1} of ${pages}</span>${page < pages - 1 ? arrow(page + 1, "▶", "Next loot page") : ""}</div>` : "";
   return `<div class="lootframe" style="left:${o.x ?? 60}px;top:${o.y ?? 210}px" aria-label="The game's loot window">
-    <div class="lf-portrait"></div><div class="lf-title">${esc(o.title || "Items")}</div><div class="lf-slots">${slots}</div>${pages}</div>`;
+    <div class="lf-portrait"></div><div class="lf-title">${esc(o.title || "Items")}</div><div class="lf-slots">${slots}</div>${pager}</div>`;
 }
 
 /* ---------- Pop-up content model ----------
@@ -347,6 +350,7 @@ function popupModel(state) {
   switch (state) {
     case "popup-typical": return corpse("typical");
     case "popup-crowded": return corpse("crowded");
+    case "popup-page2": m = corpse("crowded"); m.page = 1; return m;
     case "popup-boss": m = corpse("typical"); m.boss = "Trash"; m.bossMenu = true; m.bossNote = "These items drop from more than one boss. Pick the boss before awarding."; return m;
     case "popup-no-reserves": m = corpse("typical"); m.noReserves = true;
       m.items.forEach((e) => { e.kind = "open"; e.label = "Open roll"; e.note = "No reserves loaded"; e.action = "openroll"; delete e.winner; delete e.contenders; }); return m;
@@ -554,7 +558,7 @@ function tooltipHTML(key, lines) {
 
 /* ---------- Scene assembly and switcher ---------- */
 const GROUPS = [
-  ["Pop-up", ["popup-typical", "popup-crowded", "popup-boss", "popup-no-reserves", "popup-fight", "popup-unavailable", "popup-db"]],
+  ["Pop-up", ["popup-typical", "popup-crowded", "popup-page2", "popup-boss", "popup-no-reserves", "popup-fight", "popup-unavailable", "popup-db"]],
   ["Roll-offs", ["roll-called", "roll-tie", "roll-hidden"]],
   ["Hand-outs", ["handout-waiting", "not-confirmed", "give-else"]],
   ["Awards tab", ["awards", "awards-empty", "awards-officer"]],
@@ -563,7 +567,7 @@ const GROUPS = [
   ["Practice and notices", ["practice", "notice-update", "notice-handover", "outside-handout", "minimap"]],
 ];
 const LABELS = {
-  "popup-typical": "Typical corpse", "popup-crowded": "Crowded corpse (worst case)", "popup-boss": "Choose the boss", "popup-no-reserves": "No reserves loaded",
+  "popup-typical": "Typical corpse", "popup-crowded": "Crowded corpse (worst case)", "popup-page2": "Crowded corpse, loot window page 2", "popup-boss": "Choose the boss", "popup-no-reserves": "No reserves loaded",
   "popup-fight": "Boss fight: waiting", "popup-unavailable": "Winner can't be given the item", "popup-db": "Disenchant/bank list",
   "roll-called": "Rolls coming in", "roll-tie": "Tie", "roll-hidden": "Rolls hidden",
   "handout-waiting": "Handing out", "not-confirmed": "Not confirmed", "give-else": "Give to someone else",
@@ -574,12 +578,15 @@ const LABELS = {
 };
 const STATE_IDS = GROUPS.flatMap((g) => g[1]);
 
+/* Local view changes inside a state: which item is picked, which loot page shows. Reset on every state change. */
+let VIEW = {};
 function sceneFor(state, V) {
   let out = "";
   const pm = popupModel(state);
   if (pm) {
+    Object.assign(pm, VIEW);
     out += V.popup(pm, state);
-    out += chat(chatFor(state));
+    out += chat(chatFor(state === "popup-page2" ? "popup-crowded" : state));
     out += minimap({ badge: 0 });
     return out;
   }
@@ -639,6 +646,7 @@ function boot(V) {
     scene.style.transform = `scale(${s})`; document.getElementById("viewport").style.height = h * s + "px";
   }
   function render(push) {
+    if (push !== "view") VIEW = {};
     scene.innerHTML = `<div class="scene-caption">${esc(LABELS[state])}</div>` + sceneFor(state, V);
     sel.value = state;
     const u = new URL(location.href); u.searchParams.set("state", state); u.searchParams.set("theme", theme);
@@ -650,6 +658,12 @@ function boot(V) {
   document.getElementById("prev").addEventListener("click", () => { state = STATE_IDS[(STATE_IDS.indexOf(state) + STATE_IDS.length - 1) % STATE_IDS.length]; render(true); });
   document.getElementById("next").addEventListener("click", () => { state = STATE_IDS[(STATE_IDS.indexOf(state) + 1) % STATE_IDS.length]; render(true); });
   scene.addEventListener("click", (e) => {
+    const v = e.target.closest("[data-focus], [data-page]");
+    if (v && !v.disabled) {
+      if (v.dataset.focus !== undefined) VIEW.focus = Number(v.dataset.focus);
+      if (v.dataset.page !== undefined) { VIEW.page = Number(v.dataset.page); delete VIEW.focus; }
+      render("view"); return;
+    }
     const t = e.target.closest("[data-goto]"); if (!t || t.disabled) return;
     const g = t.dataset.goto; if (!g) return;
     if (g === "__close") { const f = t.closest(".frame"); if (f) f.style.display = "none"; return; }
@@ -789,7 +803,7 @@ VERSIONS.a = {
     }).join("");
     const head = `<div class="row" style="margin-bottom:6px">${bossControl(m)}<span class="spacer"></span><span class="hint">${m.items.length} items</span></div>`;
     const body = `${banners(m)}${head}<div class="scroll-list" tabindex="0" aria-label="Items on this corpse">${rows}</div>${statusLine(m)}`;
-    const lf = lootframe(m.loot, { title: m.testDrop ? "Test drop" : m.boss });
+    const lf = lootframe(m.loot, { page: m.page, title: m.testDrop ? "Test drop" : m.boss });
     const x = state === "practice" ? 60 : 330, y = state === "practice" ? 130 : 150;
     return (state === "practice" ? "" : lf) + frame({ id: "popup", title: popupTitle(m), x, y, w: 560, body });
   },
@@ -801,7 +815,7 @@ VERSIONS.b = {
   blurb: "Pop-up: a larger card for the current item, with the rest queued along the top. Awards tab: grouped by boss.",
   popup(m, state) {
     const f = m.focus ?? 0; const e = m.items[f];
-    const queue = m.items.map((x, i) => `<button type="button" class="q-tab" style="position:relative;background:none;border:0;padding:2px;cursor:pointer" aria-label="${esc(ITEMS[x.key].name)}" aria-current="${i === f}">
+    const queue = m.items.map((x, i) => `<button type="button" class="q-tab" data-focus="${i}" style="position:relative;background:none;border:0;padding:2px;cursor:pointer" aria-label="${esc(ITEMS[x.key].name)}" aria-current="${i === f}">
         <span style="display:block;outline:${i === f ? "2px solid var(--gold)" : "none"};outline-offset:1px">${icon(x.key, "m")}</span>
         <span class="mode ${x.kind === "hr" ? "hr" : x.kind === "sr" ? "sr" : "open"}" style="position:absolute;left:0;right:0;bottom:-10px;font-size:8px;padding:0 1px;text-align:center">${x.kind === "hr" ? "HR" : x.kind === "sr" ? "SR" : "Roll"}</span></button>`).join("");
     const list = e.action === "roll"
@@ -816,9 +830,9 @@ VERSIONS.b = {
       ${e.unavailable ? `<div class="note-bar warn" style="margin-top:4px">${esc(e.unavailable)}</div>` : ""}
       ${stagePanel(e, { boxed: true })}
       ${e.stage ? "" : `<div class="row" style="margin-top:10px">${primaryButtons(e, m, { big: true })}<span class="spacer"></span>${dbButton(e, m.dbMenu !== undefined, m)}</div>`}`;
-    const nav = `<div class="row" style="margin-top:10px">${btn("◀", { size: "tiny", title: "Previous item" })}<span class="hint">Item ${f + 1} of ${m.items.length}</span>${btn("▶", { size: "tiny", title: "Next item" })}<span class="spacer"></span>${bossControl(m)}</div>`;
+    const nav = `<div class="row" style="margin-top:10px">${btn("◀", { size: "tiny", title: "Previous item", focus: (f + m.items.length - 1) % m.items.length })}<span class="hint">Item ${f + 1} of ${m.items.length}</span>${btn("▶", { size: "tiny", title: "Next item", focus: (f + 1) % m.items.length })}<span class="spacer"></span>${bossControl(m)}</div>`;
     const body = `${banners(m)}<div class="row" style="gap:6px;margin-bottom:14px;flex-wrap:wrap">${queue}</div><div class="boxed" style="padding:4px">${card}</div>${nav}${statusLine(m)}`;
-    const lf = lootframe(m.loot, { title: m.testDrop ? "Test drop" : m.boss });
+    const lf = lootframe(m.loot, { page: m.page, title: m.testDrop ? "Test drop" : m.boss });
     const x = state === "practice" ? 60 : 330, y = state === "practice" ? 130 : 150;
     return (state === "practice" ? "" : lf) + frame({ id: "popup", title: popupTitle(m), x, y, w: 480, body });
   },
@@ -830,19 +844,21 @@ VERSIONS.c = {
   blurb: "Pop-up: small labels attached to each slot of the game's own loot window, with roll-offs and details in a small window beside it. Awards tab: one list by time.",
   popup(m, state) {
     const LX = 60, LY = 230;
-    const visible = m.items.slice(0, 4);
+    const page = m.page || 0, first = page * 4;
+    const visible = m.items.slice(first, first + 4);
     const focus = m.focus ?? (m.dbMenu !== undefined ? m.dbMenu : -1);
-    const labels = visible.map((e, i) => {
-      const top = LY + 74 + 36 * i + 1;
+    const labels = visible.map((e, j) => {
+      const i = first + j;
+      const top = LY + 74 + 36 * j + 1;
       const what = e.action === "give" ? who(e.winner) : e.action === "roll" ? `<span class="hint">${e.contenders.length} roll</span>` : `<span class="hint">anyone</span>`;
       const act = e.stage ? `<span class="${e.stage === "notconfirmed" || e.stage === "tie" ? "amber" : "gold"} small">${e.stage === "waiting" ? '<span class="spinner"></span>' : e.stage === "notconfirmed" ? "Not confirmed ▸" : e.stage === "tie" ? "Tie ▸" : "Rolling ▸"}</span>`
         : `${e.action === "give" ? btn("Give", { size: "tiny", goto: m.fight || e.unavailable ? "" : "handout-waiting", disabled: m.fight || !!e.unavailable }) : btn("Roll", { size: "tiny", ico: ASSET.dice, goto: m.fight ? "" : "roll-called", disabled: m.fight })}
            <span style="position:relative;display:inline-block">${btn("", { size: "tiny", ico: ASSET.de, goto: m.dbMenu === i ? "popup-typical" : "popup-db", title: "Disenchant/bank: Edric Moss" })}${m.dbMenu === i ? dbMenu() : ""}</span>`;
-      const warn = e.unavailable || (e.skipped && e.skipped.length) ? `<span class="amber" title="${esc(e.unavailable || e.skipped.map((s) => s[0] + ": " + s[1]).join("; "))}">⚠</span>` : "";
+      const warn = e.unavailable || (e.skipped && e.skipped.length) ? `<button type="button" class="warn-btn amber" data-focus="${i}" title="${esc(e.unavailable || e.skipped.map((s) => s[0] + ": " + s[1]).join("; "))}" aria-label="Details for ${esc(ITEMS[e.key].name)}">⚠</button>` : "";
       return `<div class="tip row" style="left:${LX + 176}px;top:${top}px;width:330px;height:34px;padding:0 6px;gap:6px;z-index:${m.dbMenu === i ? 25 : 6};${focus === i ? "box-shadow:0 0 0 1px var(--gold)" : ""}">
         ${mode(e.kind === "hr" ? "hr" : e.kind === "sr" ? "sr" : "open", e.kind === "hr" ? "HR" : e.kind === "sr" ? "SR" : "Roll")}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${what}</span>${warn}${act}</div>`;
     }).join("");
-    const more = m.items.length > 4 ? `<div class="hint" style="position:absolute;left:${LX + 182}px;top:${LY + 226}px;z-index:6">${m.items.length - 4} more on page 2 of the loot window</div>` : "";
+    const more = m.items.length > 4 ? `<div class="hint" style="position:absolute;left:${LX + 190}px;top:${LY + 226}px;z-index:6">${page === 0 ? `${m.items.length - 4} more on page 2 of the loot window: labels follow the page` : `Page 2 of the loot window: items 5 to ${m.items.length}`}</div>` : "";
     const strip = `<div class="tip" style="left:${LX}px;top:${LY - 66}px;width:506px;z-index:6">
         <div class="row">${m.practice ? mode("practice", "Practice") : ""}${bossControl(m)}<span class="spacer"></span><span class="hint" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${m.noReserves ? "Reserves: none loaded" : esc(STATUS_LINE)}</span></div></div>`;
     const bannerHTML = banners(m);
@@ -853,12 +869,12 @@ VERSIONS.c = {
     if (fe) {
       const body = `<div class="row" style="gap:8px">${icon(fe.key, "m")}<div class="col" style="gap:2px">${link(fe.key)}<div class="row" style="gap:6px">${modeTag(fe)}</div></div></div>
         ${skippedLines(fe)}${stagePanel(fe, { boxed: false })}`;
-      side = frame({ id: "detail", title: fe.stage === "waiting" || fe.stage === "notconfirmed" || fe.stage === "giveelse" ? "Hand-out" : "Roll-off", x: 620, y: 200, w: 400, body });
-    } else if (state === "popup-crowded" || state === "popup-unavailable") {
+      side = frame({ id: "detail", title: fe.stage === "waiting" || fe.stage === "notconfirmed" || fe.stage === "giveelse" ? "Hand-out" : fe.stage ? "Roll-off" : "Item details", x: 620, y: 200, w: 400, body });
+    } else if (state === "popup-crowded" || state === "popup-page2" || state === "popup-unavailable") {
       const withSkips = m.items.filter((e) => (e.skipped && e.skipped.length) || e.unavailable);
-      side = frame({ id: "detail", title: "Skipped holders", x: 620, y: 200, w: 400, body: withSkips.map((e) => `<div class="row" style="gap:6px;margin:4px 0">${icon(e.key, "s")}${link(e.key)}</div>${skippedLines(e)}${e.unavailable ? `<div class="note-bar warn">${esc(e.unavailable)}</div>` : ""}`).join("") + `<div class="hint" style="margin-top:6px">Opens when you hover ⚠ on a label.</div>` });
+      side = frame({ id: "detail", title: "Skipped holders", x: 620, y: 200, w: 400, body: withSkips.map((e) => `<div class="row" style="gap:6px;margin:4px 0">${icon(e.key, "s")}${link(e.key)}</div>${skippedLines(e)}${e.unavailable ? `<div class="note-bar warn">${esc(e.unavailable)}</div>` : ""}`).join("") + `<div class="hint" style="margin-top:6px">Hover or click ⚠ on a label to see one item.</div>` });
     }
-    return lootframe(m.loot, { x: LX, y: LY, title: m.testDrop ? "Test drop" : m.boss }) + strip + labels + more + bannerBox + side;
+    return lootframe(m.loot, { x: LX, y: LY, page, title: m.testDrop ? "Test drop" : m.boss }) + strip + labels + more + bannerBox + side;
   },
 };
 

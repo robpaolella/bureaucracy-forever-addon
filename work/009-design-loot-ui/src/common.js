@@ -55,7 +55,7 @@ function who(name, opts = {}) {
 function link(key, br = true) { const it = ITEMS[key]; return `<span class="q-${it.q}">${br ? "[" : ""}${esc(it.name)}${br ? "]" : ""}</span>`; }
 function icon(key, size = "") { const it = ITEMS[key]; return `<span class="icon ${size} border-${it.q}" style="background-image:url(${ICON(it.icon)})" role="img" aria-label="${esc(it.name)}"></span>`; }
 function btn(label, o = {}) {
-  const attrs = [o.goto ? `data-goto="${o.goto}"` : "", o.disabled ? "disabled" : "", o.title ? `title="${esc(o.title)}"` : ""].join(" ");
+  const attrs = [o.goto ? `data-goto="${o.goto}"` : "", o.disabled ? "disabled" : "", o.title ? `title="${esc(o.title)}"` : "", o.focus !== undefined ? `data-focus="${o.focus}"` : ""].join(" ");
   const ico = o.ico ? `<img class="ico" alt="" src="${o.ico}">` : "";
   return `<button type="button" class="btn ${o.size || ""}" ${attrs}>${ico}${label}</button>`;
 }
@@ -93,10 +93,12 @@ function minimap(o = {}) {
 
 /* ---------- The game's own loot window ---------- */
 function lootframe(keys, o = {}) {
-  const slots = keys.slice(0, 4).map((k) => `<div class="lf-slot" data-slot>${icon(k)}<span class="lf-name q-${ITEMS[k].q}">${esc(ITEMS[k].name)}</span></div>`).join("");
-  const pages = keys.length > 4 ? `<div class="lf-page"><span>Page 1 of ${Math.ceil(keys.length / 4)}</span><span class="lf-arrow">▶</span></div>` : "";
+  const page = o.page || 0, pages = Math.ceil(keys.length / 4);
+  const slots = keys.slice(page * 4, page * 4 + 4).map((k) => `<div class="lf-slot" data-slot>${icon(k)}<span class="lf-name q-${ITEMS[k].q}">${esc(ITEMS[k].name)}</span></div>`).join("");
+  const arrow = (to, ch, label) => `<button type="button" class="lf-arrow" data-page="${to}" aria-label="${label}">${ch}</button>`;
+  const pager = pages > 1 ? `<div class="lf-page">${page > 0 ? arrow(page - 1, "◀", "Previous loot page") : ""}<span>Page ${page + 1} of ${pages}</span>${page < pages - 1 ? arrow(page + 1, "▶", "Next loot page") : ""}</div>` : "";
   return `<div class="lootframe" style="left:${o.x ?? 60}px;top:${o.y ?? 210}px" aria-label="The game's loot window">
-    <div class="lf-portrait"></div><div class="lf-title">${esc(o.title || "Items")}</div><div class="lf-slots">${slots}</div>${pages}</div>`;
+    <div class="lf-portrait"></div><div class="lf-title">${esc(o.title || "Items")}</div><div class="lf-slots">${slots}</div>${pager}</div>`;
 }
 
 /* ---------- Pop-up content model ----------
@@ -132,6 +134,7 @@ function popupModel(state) {
   switch (state) {
     case "popup-typical": return corpse("typical");
     case "popup-crowded": return corpse("crowded");
+    case "popup-page2": m = corpse("crowded"); m.page = 1; return m;
     case "popup-boss": m = corpse("typical"); m.boss = "Trash"; m.bossMenu = true; m.bossNote = "These items drop from more than one boss. Pick the boss before awarding."; return m;
     case "popup-no-reserves": m = corpse("typical"); m.noReserves = true;
       m.items.forEach((e) => { e.kind = "open"; e.label = "Open roll"; e.note = "No reserves loaded"; e.action = "openroll"; delete e.winner; delete e.contenders; }); return m;
@@ -339,7 +342,7 @@ function tooltipHTML(key, lines) {
 
 /* ---------- Scene assembly and switcher ---------- */
 const GROUPS = [
-  ["Pop-up", ["popup-typical", "popup-crowded", "popup-boss", "popup-no-reserves", "popup-fight", "popup-unavailable", "popup-db"]],
+  ["Pop-up", ["popup-typical", "popup-crowded", "popup-page2", "popup-boss", "popup-no-reserves", "popup-fight", "popup-unavailable", "popup-db"]],
   ["Roll-offs", ["roll-called", "roll-tie", "roll-hidden"]],
   ["Hand-outs", ["handout-waiting", "not-confirmed", "give-else"]],
   ["Awards tab", ["awards", "awards-empty", "awards-officer"]],
@@ -348,7 +351,7 @@ const GROUPS = [
   ["Practice and notices", ["practice", "notice-update", "notice-handover", "outside-handout", "minimap"]],
 ];
 const LABELS = {
-  "popup-typical": "Typical corpse", "popup-crowded": "Crowded corpse (worst case)", "popup-boss": "Choose the boss", "popup-no-reserves": "No reserves loaded",
+  "popup-typical": "Typical corpse", "popup-crowded": "Crowded corpse (worst case)", "popup-page2": "Crowded corpse, loot window page 2", "popup-boss": "Choose the boss", "popup-no-reserves": "No reserves loaded",
   "popup-fight": "Boss fight: waiting", "popup-unavailable": "Winner can't be given the item", "popup-db": "Disenchant/bank list",
   "roll-called": "Rolls coming in", "roll-tie": "Tie", "roll-hidden": "Rolls hidden",
   "handout-waiting": "Handing out", "not-confirmed": "Not confirmed", "give-else": "Give to someone else",
@@ -359,12 +362,15 @@ const LABELS = {
 };
 const STATE_IDS = GROUPS.flatMap((g) => g[1]);
 
+/* Local view changes inside a state: which item is picked, which loot page shows. Reset on every state change. */
+let VIEW = {};
 function sceneFor(state, V) {
   let out = "";
   const pm = popupModel(state);
   if (pm) {
+    Object.assign(pm, VIEW);
     out += V.popup(pm, state);
-    out += chat(chatFor(state));
+    out += chat(chatFor(state === "popup-page2" ? "popup-crowded" : state));
     out += minimap({ badge: 0 });
     return out;
   }
@@ -424,6 +430,7 @@ function boot(V) {
     scene.style.transform = `scale(${s})`; document.getElementById("viewport").style.height = h * s + "px";
   }
   function render(push) {
+    if (push !== "view") VIEW = {};
     scene.innerHTML = `<div class="scene-caption">${esc(LABELS[state])}</div>` + sceneFor(state, V);
     sel.value = state;
     const u = new URL(location.href); u.searchParams.set("state", state); u.searchParams.set("theme", theme);
@@ -435,6 +442,12 @@ function boot(V) {
   document.getElementById("prev").addEventListener("click", () => { state = STATE_IDS[(STATE_IDS.indexOf(state) + STATE_IDS.length - 1) % STATE_IDS.length]; render(true); });
   document.getElementById("next").addEventListener("click", () => { state = STATE_IDS[(STATE_IDS.indexOf(state) + 1) % STATE_IDS.length]; render(true); });
   scene.addEventListener("click", (e) => {
+    const v = e.target.closest("[data-focus], [data-page]");
+    if (v && !v.disabled) {
+      if (v.dataset.focus !== undefined) VIEW.focus = Number(v.dataset.focus);
+      if (v.dataset.page !== undefined) { VIEW.page = Number(v.dataset.page); delete VIEW.focus; }
+      render("view"); return;
+    }
     const t = e.target.closest("[data-goto]"); if (!t || t.disabled) return;
     const g = t.dataset.goto; if (!g) return;
     if (g === "__close") { const f = t.closest(".frame"); if (f) f.style.display = "none"; return; }

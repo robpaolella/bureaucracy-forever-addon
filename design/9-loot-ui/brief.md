@@ -34,6 +34,7 @@ the item or hit a win limit skipped); the add-on doesn't invent rules.
 | #21 | The question after a hand-out made from the game's own loot menu | Changing the game's loot menu |
 
 ## Boundaries and visual authority
+- **Authority files:** this repo has no `PRODUCT.md` or `DESIGN.md`. This brief, confirmed by Robert on 2026-10-13 (Q11, "Yes, this looks good. Build it."), is the complete product and visual authority for this design; the product facts come from #3 and the decisions below.
 - **Visual authority: WoW's own standard window style** (Robert, #3 Q9, and this interview Q2).
   The mock-ups use the game's real interface art (Robert, Q2: "just use WoW's actual design";
   he accepts the liability). The font is a free lookalike of Friz Quadrata, because that face is
@@ -62,6 +63,7 @@ reserves on one item, 8 soft reserves on another.
 | --- | --- | --- | --- |
 | popup-typical | Loot master, boss corpse opened | 3 items: single HR, single SR, nobody (open roll) | Award buttons named for the winner; Roll call; D/B |
 | popup-crowded | Loot master, worst case | 6 items incl. two copies, 5 HR, 8 SR, skipped holders ("not in raid", "the game won't let them receive this item"), an unlisted item | Several copies resolved in turn |
+| popup-page2 | Loot master, worst case, game's loot window turned to page 2 | Items 5 and 6 | A and B: unchanged list; C: labels follow the page |
 | popup-boss | Loot master, corpse not clearly a boss | Boss shown as "Trash" with the change control open | Pick a boss before awarding |
 | popup-no-reserves | Loot master, no reserves loaded | Notice: no reserves loaded; every item an open roll | Link to Sync tab |
 | popup-fight | Loot master during a boss fight | Award buttons wait: "Chat is locked until the fight ends" | Buttons enable after the fight |

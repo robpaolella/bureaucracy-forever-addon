@@ -21,6 +21,7 @@
   "states": [
     "popup-typical",
     "popup-crowded",
+    "popup-page2",
     "popup-boss",
     "popup-no-reserves",
     "popup-fight",
