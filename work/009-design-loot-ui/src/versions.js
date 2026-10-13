@@ -23,7 +23,7 @@ VERSIONS.a = {
       </div>`;
     }).join("");
     const head = `<div class="row" style="margin-bottom:6px">${bossControl(m)}<span class="spacer"></span><span class="hint">${m.items.length} items</span></div>`;
-    const body = `${banners(m)}${head}${rows}${statusLine(m)}`;
+    const body = `${banners(m)}${head}<div class="scroll-list" tabindex="0" aria-label="Items on this corpse">${rows}</div>${statusLine(m)}`;
     const lf = lootframe(m.loot, { title: m.testDrop ? "Test drop" : m.boss });
     const x = state === "practice" ? 60 : 330, y = state === "practice" ? 130 : 150;
     return (state === "practice" ? "" : lf) + frame({ id: "popup", title: popupTitle(m), x, y, w: 560, body });
@@ -68,18 +68,18 @@ VERSIONS.c = {
     const visible = m.items.slice(0, 4);
     const focus = m.focus ?? (m.dbMenu !== undefined ? m.dbMenu : -1);
     const labels = visible.map((e, i) => {
-      const top = LY + 78 + 41 * i + 1;
+      const top = LY + 74 + 36 * i + 1;
       const what = e.action === "give" ? who(e.winner) : e.action === "roll" ? `<span class="hint">${e.contenders.length} roll</span>` : `<span class="hint">anyone</span>`;
       const act = e.stage ? `<span class="${e.stage === "notconfirmed" || e.stage === "tie" ? "amber" : "gold"} small">${e.stage === "waiting" ? '<span class="spinner"></span>' : e.stage === "notconfirmed" ? "Not confirmed ▸" : e.stage === "tie" ? "Tie ▸" : "Rolling ▸"}</span>`
         : `${e.action === "give" ? btn("Give", { size: "tiny", goto: m.fight || e.unavailable ? "" : "handout-waiting", disabled: m.fight || !!e.unavailable }) : btn("Roll", { size: "tiny", ico: ASSET.dice, goto: m.fight ? "" : "roll-called", disabled: m.fight })}
            <span style="position:relative;display:inline-block">${btn("", { size: "tiny", ico: ASSET.de, goto: m.dbMenu === i ? "popup-typical" : "popup-db", title: "Disenchant/bank: Edric Moss" })}${m.dbMenu === i ? dbMenu() : ""}</span>`;
       const warn = e.unavailable || (e.skipped && e.skipped.length) ? `<span class="amber" title="${esc(e.unavailable || e.skipped.map((s) => s[0] + ": " + s[1]).join("; "))}">⚠</span>` : "";
-      return `<div class="tip row" style="left:${LX + 176}px;top:${top}px;width:330px;height:40px;padding:0 6px;gap:6px;z-index:${m.dbMenu === i ? 25 : 6};${focus === i ? "box-shadow:0 0 0 1px var(--gold)" : ""}">
+      return `<div class="tip row" style="left:${LX + 176}px;top:${top}px;width:330px;height:34px;padding:0 6px;gap:6px;z-index:${m.dbMenu === i ? 25 : 6};${focus === i ? "box-shadow:0 0 0 1px var(--gold)" : ""}">
         ${mode(e.kind === "hr" ? "hr" : e.kind === "sr" ? "sr" : "open", e.kind === "hr" ? "HR" : e.kind === "sr" ? "SR" : "Roll")}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${what}</span>${warn}${act}</div>`;
     }).join("");
-    const more = m.items.length > 4 ? `<div class="hint" style="position:absolute;left:${LX + 182}px;top:${LY + 78 + 41 * 4 + 6}px;z-index:6">${m.items.length - 4} more on page 2 of the loot window</div>` : "";
+    const more = m.items.length > 4 ? `<div class="hint" style="position:absolute;left:${LX + 182}px;top:${LY + 226}px;z-index:6">${m.items.length - 4} more on page 2 of the loot window</div>` : "";
     const strip = `<div class="tip" style="left:${LX}px;top:${LY - 66}px;width:506px;z-index:6">
-        <div class="row">${m.practice ? mode("practice", "Practice") : ""}${bossControl(m)}<span class="spacer"></span><span class="hint" style="font-size:12px">${m.noReserves ? "Reserves: none loaded" : esc(STATUS_LINE)}</span></div></div>`;
+        <div class="row">${m.practice ? mode("practice", "Practice") : ""}${bossControl(m)}<span class="spacer"></span><span class="hint" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${m.noReserves ? "Reserves: none loaded" : esc(STATUS_LINE)}</span></div></div>`;
     const bannerHTML = banners(m);
     const bannerBox = bannerHTML ? `<div style="position:absolute;left:${LX}px;top:${LY + 270}px;width:506px;z-index:6">${bannerHTML}</div>` : "";
     /* Side window: shows details for the focused item, roll-offs and hand-out problems */

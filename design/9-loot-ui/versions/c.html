@@ -125,7 +125,7 @@ body { font-family: "Friz", Georgia, serif; font-size: 13px; }
 .hr-div { height: 1px; margin: 6px 0; background: linear-gradient(90deg, transparent, #ffd10055 15%, #ffd10055 85%, transparent); }
 
 /* Dropdown (UIDropDownMenu look) */
-.dd { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px 2px 8px; background: rgba(0,0,0,.5); border: 1px solid #555; border-radius: 2px; color: #fff; font: 12px "Friz", serif; cursor: pointer; }
+.dd { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px 2px 8px; background: rgba(0,0,0,.5); border: 1px solid #555; border-radius: 2px; color: #fff; font: 12px "Friz", serif; cursor: pointer; white-space: nowrap; }
 .dd::after { content: "▾"; color: var(--gold); }
 .menu { position: absolute; z-index: 30; }
 .menu .menu-title { color: var(--gold); font-family: "Friz", serif; font-size: 12px; margin-bottom: 3px; }
@@ -141,11 +141,11 @@ textarea.input { width: 100%; resize: none; display: block; }
 /* Tabs below a frame */
 .tabs { position: absolute; left: 6px; bottom: -48px; display: flex; gap: 0; }
 .tab {
-  min-width: 104px; height: 32px; padding: 7px 18px 0; border: 0; text-align: center; cursor: pointer;
+  min-width: 104px; height: 32px; padding: 4px 18px 0; border: 0; text-align: center; cursor: pointer;
   background: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAAAgCAYAAADaInAlAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAJnSURBVHhe7ZrRahNBFIYXavEqEJHG1cW4bmJsMEiXilAaxIbK6toKXehFF7yQQkEWLyRIkb5An8VX8BX6Cn2W6fnX7Do7EyvYSdxlzg8fOczOnDPk/EyGsA6LxWLNVUBsEifEeavVEt4DT1DM1Bjf93MovrHuEDDAIXEKAwzXh1pBpl6EG6Fot9uIbywYAKfALnHi3XdFsh9rBZl6kRzEwvNcxEZUngJsgGbABrAcNoDlsAEsJz1KRfdhF7ERsQEaBhvActgAlsMGsJz0KCED5P/YGhEboGGwASwHBhhvv0RsRGyAhrE4A3ieSA4SrSBTL9KPqRi/GiM2IjZAw2ADWA4bwHLMG2CVDLDiHDq3HJF9zrSCTL3Yex+JwZMeYiMqDdBDUjLB2fczrShTH6ZfM8MGuO0EZIBdav4PmACvhbEJ6sn023QBJwAMUPwMrDgXMACboH7kzf+wlzd/0A8uacyYcBEs3w0kfkZvI9Hr90T2JROTnUnJ6NlIbL0Iq4y3rmXyhtZKaM+l/DkYk6ELzzFdfB4/6uaxNn8HOSSUeur8eD8uCTdDrd7xJ6rlU63XVAv8Ld+7Ktp+FGLKUUFZL+8P4FTG3SyKqCc4oZ8Oz6lHxiWbAG8JlyborHVy0HwwCPwq64NrGT2ndUTnHuWgT+35LG9ZA2MSaLxMMf83yCGh1FPno+kyWj1qvkyRr8yp5tuo0lm7S+OzvcwhpDwu5QGI5bWuS2PK/tD0gqAfnFJvFibVBDgNVLABMO8ZswhWZ+CetgQVJgD4f6AAxZn/Ae5mv/qyVKHgn2AtT/x9s1gsFuvf5DhXJ+ccZMOfgq0AAAAASUVORK5CYII=) center / 100% 100% no-repeat; color: var(--gold); font: 12px "Friz", serif;
   margin-right: -10px;
 }
-.tab.active { background-image: url(data:image/png;base64,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); color: #fff; height: 34px; margin-top: -2px; padding-top: 8px; position: relative; z-index: 1; }
+.tab.active { background-image: url(data:image/png;base64,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); color: #fff; height: 34px; margin-top: -2px; padding-top: 5px; position: relative; z-index: 1; }
 
 /* Tables inside the window */
 table.list { width: 100%; border-collapse: collapse; font-family: "ArialN", sans-serif; font-size: 14px; }
@@ -181,11 +181,11 @@ table.list tr.void td { opacity: .55; }
 .lootframe .lf-title { position: absolute; left: 82px; top: 13px; color: var(--gold); font-size: 12px; }
 .lootframe .lf-portrait { position: absolute; left: 9px; top: 7px; width: 54px; height: 54px; border-radius: 50%; background: radial-gradient(circle at 45% 40%, #5a2e1a, #1a0a05); }
 .lootframe .lf-close { position: absolute; left: 162px; top: 9px; width: 18px; height: 18px; }
-.lootframe .lf-slots { position: absolute; left: 24px; top: 78px; width: 150px; }
-.lootframe .lf-slot { display: flex; gap: 6px; align-items: center; height: 41px; margin-bottom: 0; }
-.lootframe .lf-slot .icon { width: 34px; height: 34px; }
+.lootframe .lf-slots { position: absolute; left: 24px; top: 74px; width: 150px; }
+.lootframe .lf-slot { display: flex; gap: 6px; align-items: center; height: 36px; margin-bottom: 0; }
+.lootframe .lf-slot .icon { width: 32px; height: 32px; }
 .lootframe .lf-slot .lf-name { font-size: 11px; line-height: 1.15; width: 112px; }
-.lootframe .lf-page { position: absolute; left: 24px; bottom: 32px; color: var(--gold); font-size: 11px; display: flex; gap: 8px; align-items: center; }
+.lootframe .lf-page { position: absolute; left: 26px; bottom: 18px; color: var(--gold); font-size: 11px; display: flex; gap: 8px; align-items: center; }
 .lootframe .lf-arrow { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: #3a0e08; border: 1px solid #a88d3b; color: var(--gold); text-align: center; line-height: 16px; font-size: 10px; }
 
 /* StaticPopup-style notices */
@@ -208,6 +208,8 @@ table.list tr.void td { opacity: .55; }
 .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #ffd10055; border-top-color: var(--gold); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+/* A long list scrolls inside its window, as a game scroll frame does */
+.scroll-list { max-height: 510px; overflow-y: auto; padding-right: 6px; scrollbar-width: thin; scrollbar-color: #a88d3b #140c06; }
 </style></head>
 <body><div class="proto-bar" id="proto-bar" role="region" aria-label="Prototype controls"></div>
 <div class="viewport" id="viewport"><main class="scene" id="scene" aria-label="Game screen mock-up"></main></div>
@@ -786,7 +788,7 @@ VERSIONS.a = {
       </div>`;
     }).join("");
     const head = `<div class="row" style="margin-bottom:6px">${bossControl(m)}<span class="spacer"></span><span class="hint">${m.items.length} items</span></div>`;
-    const body = `${banners(m)}${head}${rows}${statusLine(m)}`;
+    const body = `${banners(m)}${head}<div class="scroll-list" tabindex="0" aria-label="Items on this corpse">${rows}</div>${statusLine(m)}`;
     const lf = lootframe(m.loot, { title: m.testDrop ? "Test drop" : m.boss });
     const x = state === "practice" ? 60 : 330, y = state === "practice" ? 130 : 150;
     return (state === "practice" ? "" : lf) + frame({ id: "popup", title: popupTitle(m), x, y, w: 560, body });
@@ -831,18 +833,18 @@ VERSIONS.c = {
     const visible = m.items.slice(0, 4);
     const focus = m.focus ?? (m.dbMenu !== undefined ? m.dbMenu : -1);
     const labels = visible.map((e, i) => {
-      const top = LY + 78 + 41 * i + 1;
+      const top = LY + 74 + 36 * i + 1;
       const what = e.action === "give" ? who(e.winner) : e.action === "roll" ? `<span class="hint">${e.contenders.length} roll</span>` : `<span class="hint">anyone</span>`;
       const act = e.stage ? `<span class="${e.stage === "notconfirmed" || e.stage === "tie" ? "amber" : "gold"} small">${e.stage === "waiting" ? '<span class="spinner"></span>' : e.stage === "notconfirmed" ? "Not confirmed ▸" : e.stage === "tie" ? "Tie ▸" : "Rolling ▸"}</span>`
         : `${e.action === "give" ? btn("Give", { size: "tiny", goto: m.fight || e.unavailable ? "" : "handout-waiting", disabled: m.fight || !!e.unavailable }) : btn("Roll", { size: "tiny", ico: ASSET.dice, goto: m.fight ? "" : "roll-called", disabled: m.fight })}
            <span style="position:relative;display:inline-block">${btn("", { size: "tiny", ico: ASSET.de, goto: m.dbMenu === i ? "popup-typical" : "popup-db", title: "Disenchant/bank: Edric Moss" })}${m.dbMenu === i ? dbMenu() : ""}</span>`;
       const warn = e.unavailable || (e.skipped && e.skipped.length) ? `<span class="amber" title="${esc(e.unavailable || e.skipped.map((s) => s[0] + ": " + s[1]).join("; "))}">⚠</span>` : "";
-      return `<div class="tip row" style="left:${LX + 176}px;top:${top}px;width:330px;height:40px;padding:0 6px;gap:6px;z-index:${m.dbMenu === i ? 25 : 6};${focus === i ? "box-shadow:0 0 0 1px var(--gold)" : ""}">
+      return `<div class="tip row" style="left:${LX + 176}px;top:${top}px;width:330px;height:34px;padding:0 6px;gap:6px;z-index:${m.dbMenu === i ? 25 : 6};${focus === i ? "box-shadow:0 0 0 1px var(--gold)" : ""}">
         ${mode(e.kind === "hr" ? "hr" : e.kind === "sr" ? "sr" : "open", e.kind === "hr" ? "HR" : e.kind === "sr" ? "SR" : "Roll")}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${what}</span>${warn}${act}</div>`;
     }).join("");
-    const more = m.items.length > 4 ? `<div class="hint" style="position:absolute;left:${LX + 182}px;top:${LY + 78 + 41 * 4 + 6}px;z-index:6">${m.items.length - 4} more on page 2 of the loot window</div>` : "";
+    const more = m.items.length > 4 ? `<div class="hint" style="position:absolute;left:${LX + 182}px;top:${LY + 226}px;z-index:6">${m.items.length - 4} more on page 2 of the loot window</div>` : "";
     const strip = `<div class="tip" style="left:${LX}px;top:${LY - 66}px;width:506px;z-index:6">
-        <div class="row">${m.practice ? mode("practice", "Practice") : ""}${bossControl(m)}<span class="spacer"></span><span class="hint" style="font-size:12px">${m.noReserves ? "Reserves: none loaded" : esc(STATUS_LINE)}</span></div></div>`;
+        <div class="row">${m.practice ? mode("practice", "Practice") : ""}${bossControl(m)}<span class="spacer"></span><span class="hint" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${m.noReserves ? "Reserves: none loaded" : esc(STATUS_LINE)}</span></div></div>`;
     const bannerHTML = banners(m);
     const bannerBox = bannerHTML ? `<div style="position:absolute;left:${LX}px;top:${LY + 270}px;width:506px;z-index:6">${bannerHTML}</div>` : "";
     /* Side window: shows details for the focused item, roll-offs and hand-out problems */

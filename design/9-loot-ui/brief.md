@@ -88,6 +88,7 @@ reserves on one item, 8 soft reserves on another.
 | notice-update | Newer version seen | Update notice with copyable download link | |
 | notice-handover | Loot master changed | Handover prompt | |
 | outside-handout | Item given from the game's own menu | How was it won? HR/SR/open roll/D/B, pre-filled | Answer posts the line |
+| minimap | Any officer, hovering the minimap button | Tooltip: loaded raid, not-confirmed count | Click opens the window; drag moves the button |
 
 Loading and error: the add-on has no network loading; errors are the refused paste, not
 confirmed hand-outs, and unavailable winners, all listed above. Keyboard: game windows close
@@ -95,7 +96,7 @@ with Escape; prototype controls are keyboard-accessible.
 
 ## Host snapshot and offline proof
 No host (exception above). Each version is a single self-contained HTML file with the game
-art and font inlined; checked offline with the network disabled at both widths.
+art and font inlined; checked offline with the network disabled at both widths (2026-10-13: headless Chrome with all network blocked; the pages made no requests, art and fonts rendered).
 Host parts used: none.
 
 ## Confirmed decisions
