@@ -43,6 +43,7 @@ Releases are zips on GitHub Releases; see Releases. The game files never change 
 - **The draft:** after each merge to main, the Release workflow (`.github/workflows/release.yml`) creates or refreshes the one draft release on the repo's Releases page, targeting the merged commit's SHA. A merge that changes nothing in the release leaves the draft, and any edits to it, as it is.
 - **Publishing:** only Robert publishes, by clicking Publish on the draft; no workflow or agent does. Publishing creates the tag `v<version>`, which is never moved or reused: a bad release is fixed by a newer one.
 - **Dry run:** the workflow also runs on every PR and by hand (Actions, Release, Run workflow): it builds the zip as a downloadable artifact and creates no release or draft.
+- **Convention:** /git/maestro/docs/git-workflow.md, Releases. This section holds this repo's whole rule set, so it applies even where that file isn't at hand.
 
 ## Watch out for
 - WoW add-ons can't make web requests. Reserves get in and awards get out only through files written on logout or `/reload` (SavedVariables), copy-paste export strings, or the desktop helper.
