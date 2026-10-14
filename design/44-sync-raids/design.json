@@ -1,6 +1,6 @@
 {
   "design_issue": 44,
-  "covers": [16],
+  "covers": [16, 51, 52, 53],
   "revision": 2,
   "replaces": "design/9-loot-ui (revision 1), Sync tab only",
   "versions": {"approved": "index.html"},

@@ -1,6 +1,6 @@
 # Design decisions: the raid question and the Sync tab (revision 2)
 
-- Design issue: #44; covered build issues: #16
+- Design issue: #44; covered build issues: #16, #51, #52, #53 (#51-#53 added 2026-10-14, below)
 - Revision: 2; replaces: the Sync tab of revision 1, `design/9-loot-ui/` (merged, 880aae7)
 - Maker: claude-bridge/claude-opus-5-5
 
@@ -50,6 +50,7 @@ Re-check (fixes 1-3 only), same checker and command form, evidence `/tmp/design-
 | herdr, 2026-10-13 | All versions | Robert's picks: 1 A, 2 B, 3 middle of the screen | Combined as version D; checked offline and at both widths | Done |
 | herdr, 2026-10-13 | D | "4. Approved." | D frozen as `index.html` | Done |
 | Pre-PR review (GPT-5.6 Terra), 2026-10-13 | `sync-gone` | Blocking: "Choose a raid now" isn't in the brief (OK only), and the question it opened still listed and pre-selected the raid that had left | Robert, "5. Keep it." (herdr, 2026-10-13). The button now opens a new state, `ask-gone`, listing only the raids still loaded, none pre-selected; Decide later and Not a guild run keep that list. Brief updated (sync-gone, ask-gone). Rebuilt from `work/44-sync-raids/`; every other approved image byte-identical; checked offline | Done |
+| Conductor, 2026-10-14 | Covers | #16 was split for size into #16 (paste, load, copy out), #51 (raid selection, change raid, not a guild run), #52 ("no raid" awards, attach and discard) and #53 (the start-of-run raid question) | `covers` now lists 16, 51, 52, 53. They are #16's split parts; the design covers the same screens as before, with no screen change | Done |
 
 No Open Design comments were left (`design.ts comments`: none open).
 
