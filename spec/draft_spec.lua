@@ -276,7 +276,8 @@ describe("Draft.run", function()
     end)
 
     it("retries the other read-only lookups too", function()
-      for _, pattern in ipairs({ "release list", "api %-%-paginate", "releases/1 %-%-jq", "matching%-refs" }) do
+      local patterns = { "release list", "api %-%-paginate", "releases/1 %-%-jq", "matching%-refs" }
+      for _, pattern in ipairs(patterns) do
         local fresh = repo({ pr(1, "feat: first", "The add-on.") })
         fresh.publish("v1.0.0")
         fresh.add(pr(2, "fix: a crash", "No more crash."))
@@ -311,9 +312,10 @@ describe("Draft.run", function()
     end)
 
     it("does not retry a call that exits 0 with nothing printed", function()
+      r.add({ subject = "fix: no pull request" })
       assert.equal("created", r.run().status)
       assert.same({}, r.waits)
-      assert.equal(1, r.count("commits/" .. string.rep("2", 40) .. "/pulls"))
+      assert.equal(1, r.count("commits/" .. string.rep("3", 40) .. "/pulls"))
     end)
 
     it("tries a failing delete once", function()
