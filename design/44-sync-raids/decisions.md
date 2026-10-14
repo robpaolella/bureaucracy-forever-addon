@@ -28,7 +28,7 @@ Robert's confirmation: "4. Approved." (herdr, 2026-10-13), in answer to looking 
 A version is removed, replaced or left out at freeze only after Robert confirms what it
 alone had can go.
 
-All-version captures were completed and inspected before `versions/` was removed: 160 images, 4 versions × 20 states × default × 390/1440, in `screenshots/all/` (inspected as contact sheets, one per version and width). Approved evidence: 40 images, 20 states × default × 390/1440, in `screenshots/approved/` ([manifest](screenshots/approved/manifest.json)), every manifest entry present and inspected. Capture limit: 390 wide is the PC game screen scaled down, not a phone layout (brief).
+All-version captures were completed and inspected before `versions/` was removed: 160 images, 4 versions × 20 states × default × 390/1440, in `screenshots/all/` (inspected as contact sheets, one per version and width). Approved evidence: 42 images, 21 states × default × 390/1440 (the 21st, `ask-gone`, was added after approval, below; it is in no rejected version, so `screenshots/all/` has 20 states), in `screenshots/approved/` ([manifest](screenshots/approved/manifest.json)), every manifest entry present and inspected. Capture limit: 390 wide is the PC game screen scaled down, not a phone layout (brief).
 Final offline proof (2026-10-13): `index.html` opened from disk in headless Chrome with all network requests sent to a dead proxy. No request left `file:`/`data:`, fonts 2/2, no broken images, and the flows (crowded → pick Onyxia's Lair → Switch; Remove Blackwing Lair; overlap → Start; ask-again → Switch; Decide later; undecided → pick) each reached the right screen and URL. The host snapshot `host.html` was removed after this proof; it is revision 1's approved `design/9-loot-ui/index.html` with nothing added. The tooling in `work/44-sync-raids/` built the versions from it.
 
 ## Independent critique
@@ -49,6 +49,7 @@ Re-check (fixes 1-3 only), same checker and command form, evidence `/tmp/design-
 | --- | --- | --- | --- | --- |
 | herdr, 2026-10-13 | All versions | Robert's picks: 1 A, 2 B, 3 middle of the screen | Combined as version D; checked offline and at both widths | Done |
 | herdr, 2026-10-13 | D | "4. Approved." | D frozen as `index.html` | Done |
+| Pre-PR review (GPT-5.6 Terra), 2026-10-13 | `sync-gone` | Blocking: "Choose a raid now" isn't in the brief (OK only), and the question it opened still listed and pre-selected the raid that had left | Robert, "5. Keep it." (herdr, 2026-10-13). The button now opens a new state, `ask-gone`, listing only the raids still loaded, none pre-selected; Decide later and Not a guild run keep that list. Brief updated (sync-gone, ask-gone). Rebuilt from `work/44-sync-raids/`; every other approved image byte-identical; checked offline | Done |
 
 No Open Design comments were left (`design.ts comments`: none open).
 

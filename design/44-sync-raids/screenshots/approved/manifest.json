@@ -121,6 +121,26 @@
       "pixelHeight": 1023
     },
     {
+      "image": "approved-ask-gone-default-390.png",
+      "version": "approved",
+      "state": "ask-gone",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-ask-gone-default-1440.png",
+      "version": "approved",
+      "state": "ask-gone",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
       "image": "approved-sync-chosen-default-390.png",
       "version": "approved",
       "state": "sync-chosen",

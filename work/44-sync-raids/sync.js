@@ -27,9 +27,10 @@ function syncModel(state) {
     case "ask-overlap": Object.assign(m, { list: ["mc", "mc2", "ony"], sel: null, by: null }); break;
     case "ask-nomatch": Object.assign(m, { sel: null, by: null, zone: "Zul'Gurub", inst: 309 }); break;
     case "ask-again": Object.assign(m, { zone: "Onyxia's Lair", inst: 249 }); break;
+    case "ask-gone": Object.assign(m, { list: ["ony"], sel: null, by: null, gone: "mc" }); break;
     case "sync-follower": m.viewer = OTHER; break;
-    case "sync-off": Object.assign(m, { sel: "off" }); break;
-    case "sync-undecided": Object.assign(m, { sel: null, by: null, noraid: 2 }); break;
+    case "sync-off": Object.assign(m, { list: PICK.list || m.list, sel: "off" }); break;
+    case "sync-undecided": Object.assign(m, { list: PICK.list || m.list, sel: null, by: null, noraid: 2 }); break;
     case "sync-crowded": Object.assign(m, { list: ["mc", "mc2", "ony", "zg", "bwl"] }); break;
     case "sync-gone": Object.assign(m, { list: ["ony"], sel: null, by: null, gone: "mc" }); break;
     case "sync-empty": Object.assign(m, { list: [], sel: null, by: null, helper: false, zone: null, inst: null }); break;
@@ -130,8 +131,9 @@ function askContent(state, m, flow) {
   if (state === "ask-again") return { title: "Bureaucracy Forever", body: `<p>You've entered <b class="white">${esc(m.zone)}</b>. Switch the raid to <b class="white">${esc(rname("ony"))}</b>?</p><p class="hint">Your 12 Molten Core awards stay with that raid and are still sent to the site.</p>`,
     buttons: `<span data-raid="ony">${btn("Switch", { goto: "sync-switched" })}</span>` + btn("Keep Molten Core", { goto: "sync-chosen" }) + btn("Not a guild run", { goto: "sync-off" }) };
   if (flow === "one") {
-    const pre = state === "ask-overlap" || state === "ask-nomatch" ? null : "mc";
-    const lead = state === "ask-overlap" ? `<p>${where} Two raid events for Molten Core are under way. Which one is this?</p>`
+    const pre = state === "ask-overlap" || state === "ask-nomatch" || state === "ask-gone" ? null : "mc";
+    const lead = state === "ask-gone" ? `<p><b class="white">${esc(rname(m.gone))}</b> has left the helper's list. If this is still a guild run, pick its raid event. If not, choose the last option.</p>`
+      : state === "ask-overlap" ? `<p>${where} Two raid events for Molten Core are under way. Which one is this?</p>`
       : state === "ask-nomatch" ? `<p>${where}</p><p class="hint">No raid event is set for Zul'Gurub (instance 309). If this is a custom raid, an officer can enter 309 as its In-game instance number on the guild site.</p>`
       : `<p>${where} If it's a guild run, pick its raid event. If not, choose the last option.</p>`;
     return { title: "Is this a guild run?", body: `${lead}${fallback}${askList(m, pre, { withOff: true })}`,
@@ -140,7 +142,8 @@ function askContent(state, m, flow) {
   if (state === "ask-guild" || state === "ask-fallback") return { title: "Is this a guild run?", body: `<p>${where} Is this a guild run?</p>${fallback}<p class="hint">If not, the add-on stays off until you leave the group: no loot pop-up, nothing recorded.</p>`,
     buttons: btn("Guild run", { goto: "ask-raid" }) + btn("Not a guild run", { goto: "sync-off" }) + btn("Decide later", { goto: "sync-undecided" }) };
   const pre = state === "ask-raid" ? "mc" : null;
-  const lead = state === "ask-overlap" ? `<p>Two raid events for Molten Core are under way. Which one is this?</p>`
+  const lead = state === "ask-gone" ? `<p><b class="white">${esc(rname(m.gone))}</b> has left the helper's list. Which raid event is this now?</p>`
+    : state === "ask-overlap" ? `<p>Two raid events for Molten Core are under way. Which one is this?</p>`
     : state === "ask-nomatch" ? `<p>No raid event is set for <b class="white">Zul'Gurub</b> (instance 309). Which one is this?</p><p class="hint">If it's a custom raid, an officer can enter 309 as its In-game instance number on the guild site.</p>`
     : `<p>Which raid event is this?</p>`;
   return { title: "Which raid event?", body: `${lead}${askList(m, pre)}`,
@@ -165,7 +168,7 @@ function syncDialog(state) {
         `<span data-raid="${to}">${btn("Switch", { goto: "sync-switched" })}</span>` + `<span data-raid="${keep}">${btn(`Keep ${k.name}`, { goto: back })}</span>`, { top: 260, label: "Switch raid" });
     }
     case "sync-gone": return notice(`<p><b class="white">${esc(rname("mc"))}</b> has left the helper's list: it was cancelled or has ended.</p><p class="hint">Its 12 awards are kept and still sent to the site. You'll be asked which raid it is when you next enter a raid instance.</p>`,
-      btn("Choose a raid now", { goto: "ask-raid" }) + btn("OK", { goto: "__close" }), { top: 260, label: "Raid left the list" });
+      btn("Choose a raid now", { goto: "ask-gone" }) + btn("OK", { goto: "__close" }), { top: 260, label: "Raid left the list" });
     case "sync-remove": {
       const id = PICK.remove || "mcp"; const n = RAIDS[id].awards;
       const keep = n ? `Its ${n} award${n === 1 ? "" : "s"} stay saved and can still be copied.` : "It has no awards.";
@@ -265,14 +268,14 @@ SYNC_V.d = Object.assign({}, SYNC_V.a, {
 
 
 const SYNC_GROUPS = [
-  ["The raid question", ["ask-guild", "ask-raid", "ask-overlap", "ask-nomatch", "ask-fallback", "ask-again"]],
+  ["The raid question", ["ask-guild", "ask-raid", "ask-overlap", "ask-nomatch", "ask-fallback", "ask-again", "ask-gone"]],
   ["Sync tab: raid chosen", ["sync-chosen", "sync-follower", "sync-crowded", "sync-switch", "sync-switched"]],
   ["Sync tab: no raid", ["sync-off", "sync-undecided", "sync-gone", "sync-noraid", "sync-discard"]],
   ["Sync tab: without the helper", ["sync-empty", "sync-pasted", "sync-remove", "sync-refused"]],
 ];
 const SYNC_LABELS = {
   "ask-guild": "Question: is this a guild run?", "ask-raid": "Question: which raid event (one matches)", "ask-overlap": "Question: two raids overlap",
-  "ask-nomatch": "Question: no raid for this instance", "ask-fallback": "Question: asked because master loot is off", "ask-again": "Question: entering a different raid",
+  "ask-nomatch": "Question: no raid for this instance", "ask-fallback": "Question: asked because master loot is off", "ask-again": "Question: entering a different raid", "ask-gone": "Question: after the chosen raid left the list",
   "sync-chosen": "Sync: raid chosen by you", "sync-follower": "Sync: another officer's view", "sync-crowded": "Sync: most raids loaded", "sync-switch": "Sync: switching raid with awards", "sync-switched": "Sync: another raid chosen",
   "sync-off": "Sync: not a guild run", "sync-undecided": "Sync: decided later", "sync-gone": "Sync: chosen raid left the list", "sync-noraid": "Sync: awards with no raid", "sync-discard": "Sync: discard awards with no raid",
   "sync-empty": "Sync: nothing loaded", "sync-pasted": "Sync: pasted raid, copy out", "sync-remove": "Sync: remove a pasted raid", "sync-refused": "Sync: paste refused",
@@ -315,6 +318,7 @@ document.addEventListener("click", (e) => {
   if (!scene) { if (e.target.closest("#prev, #next")) for (const k in PICK) delete PICK[k]; return; }
   const from = document.documentElement.dataset.state;
   const fresh = from !== "sync-switch" && from !== "sync-switched" && from !== "sync-remove";
+  if (from.startsWith("ask-")) PICK.list = syncModel(from).list;  /* Decide later keeps the raids the question listed */
   const rm = e.target.closest("[data-remove]");
   if (rm) { if (fresh) PICK.from = from === "sync-pasted" ? null : from; PICK.remove = rm.dataset.remove; return; }
   if (e.target.closest("[data-removed]")) { const b = syncModel(from); PICK.list = b.list.filter((x) => x !== PICK.remove); PICK.raid = b.sel; return; }
