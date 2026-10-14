@@ -26,7 +26,7 @@ sudo luarocks --lua-version=5.1 install busted 2.3.0-1
 - `BureaucracyForever.toc`: the game's list of the add-on's files, in load order, its version and its saved data (`BureaucracyForeverDB`).
 - `Core.lua`: the shared namespace (`ns`), the event hub (`ns.On(event, handler)`) and the `/bf` command (`/bf` toggles the window, `/bf version`, `/bf minimap`). Every file gets `local ADDON_NAME, ns = ...`.
 - `Modules/`: one file per part, each adding its table to `ns`: `Rules` (who should get each drop), `Records` (award records), `Tracking` (hand-outs until the game confirms them), `Snapshot` (the site's reserves text read and checked as data, never run), `Sync` (reserves in, awards out), `UI` (the pop-up and the officers' window).
-- `Inbox.lua`: written by the desktop helper, read at login or `/reload`. It ships empty and stays in the `.toc`, because the game only finds a new file after a full restart.
+- `Inbox.lua`: written by the desktop helper, read at login or `/reload`. It ships as a one-line placeholder comment (the game reports a zero-byte file as an error at login) and stays in the `.toc`, because the game only finds a new file after a full restart.
 - `spec/`: busted tests. `spec/support/wow.lua` is the game stand-in: it loads the add-on in `.toc` order and fakes the game calls the add-on uses (events, slash commands, loot window, master loot, chat, timers, the chat log). It blocks chat lines sent from a timer or event, to be safe: stricter than the game was seen to be (see Watch out for). Extend it as code needs more of the game.
 - Game calls the add-on uses are listed in `.luacheckrc`; add each new one there.
 - `release/`: the release tooling, not part of the add-on and not in the `.toc`. `Release.lua` works out the version and notes, `Draft.lua` creates or refreshes the draft, `build.sh` builds the zip, `main.lua` runs them for the workflow.
@@ -35,7 +35,7 @@ sudo luarocks --lua-version=5.1 install busted 2.3.0-1
 Releases are zips on GitHub Releases; see Releases. The game files never change on a merge alone: officers install a published release.
 
 ## Releases
-- **What is released:** the add-on, as `BureaucracyForever-<version>.zip`. It holds one `BureaucracyForever` folder with the `.toc` and the files it lists, including the empty `Inbox.lua`, so a new install works. `release/build.sh` builds it.
+- **What is released:** the add-on, as `BureaucracyForever-<version>.zip`. It holds one `BureaucracyForever` folder with the `.toc` and the files it lists, including the placeholder `Inbox.lua`, so a new install works. `release/build.sh` builds it.
 - **Version rule:** Semantic Versioning, worked out from the pull requests merged since the last published release: `fix` gives a patch, `feat` a minor, `!` or a `BREAKING CHANGE:` footer a major; other types alone give no release. The first release is 1.0.0.
 - **Where the version lives:** stamped into the zip's `.toc` (`## Version:`) at build time, and shown by `/bf version`. It is never edited by hand or committed: the `.toc` in git says `0.0.0-dev`.
 - **Source:** each merged pull request's title and body, looked up through the GitHub API, not commit messages. A commit with no pull request counts by its subject.
