@@ -1,0 +1,9 @@
+{
+  "design_issue": 44,
+  "covers": [16],
+  "revision": 2,
+  "replaces": "design/9-loot-ui (revision 1), Sync tab only",
+  "versions": {"approved": "index.html"},
+  "states": ["ask-guild", "ask-raid", "ask-overlap", "ask-nomatch", "ask-fallback", "ask-again", "ask-gone", "sync-chosen", "sync-follower", "sync-crowded", "sync-switch", "sync-switched", "sync-off", "sync-undecided", "sync-gone", "sync-noraid", "sync-discard", "sync-empty", "sync-pasted", "sync-remove", "sync-refused"],
+  "themes": ["default"]
+}
