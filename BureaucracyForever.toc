@@ -9,6 +9,7 @@ Core.lua
 Modules\Rules.lua
 Modules\Records.lua
 Modules\Tracking.lua
+Modules\Snapshot.lua
 Modules\Sync.lua
 Modules\UI.lua
 Inbox.lua
