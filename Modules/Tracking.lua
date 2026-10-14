@@ -103,11 +103,14 @@ function Tracking.Give(slot, index)
   return attempt, reason
 end
 
--- Attempts still waiting, and those given up on but still open to a late confirmation.
+-- Attempts still waiting, and those given up on but still open to a late confirmation. One a
+-- newer hand-out from the same slot replaced is left out: the newer one counts on its own.
 function Tracking.Pending()
   local list = {}
   for _, a in ipairs(attempts) do
-    if a.status == "pending" then list[#list + 1] = a end
+    if a.status == "pending" or (a.status == "unconfirmed" and not a.superseded) then
+      list[#list + 1] = a
+    end
   end
   return list
 end
