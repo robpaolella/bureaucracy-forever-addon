@@ -23,6 +23,10 @@ function wow.readToc()
   return metadata, files
 end
 
+-- Frame templates the game has shown it has (the officer's error log, #55). Add one only once
+-- the game confirms it.
+wow.knownTemplates = { BasicFrameTemplateWithInset = true }
+
 local frames, timers, now, hardwareEvent
 local newFrame
 
@@ -44,7 +48,7 @@ local frameMethods = {}
 local frameMeta = { __index = frameMethods }
 for _, name in ipairs({
   "SetFrameStrata", "SetMovable", "EnableMouse", "SetClampedToScreen", "RegisterForDrag",
-  "RegisterForClicks", "SetTexture", "SetAllPoints",
+  "RegisterForClicks", "SetTexture", "SetAllPoints", "SetFont", "SetTextColor",
 }) do
   frameMethods[name] = function() end
 end
@@ -93,8 +97,16 @@ function frameMethods.Hide(self)
   if self.scripts.OnHide then self.scripts.OnHide(self) end
 end
 function frameMethods.IsShown(self) return self.shown end
-function frameMethods.CreateFontString() return newFrame() end
+-- Like the game, a font name it doesn't have is an error. The game has confirmed none yet.
+local KNOWN_FONTS = {}
+function frameMethods.CreateFontString(_, _, _, font)
+  if font and not KNOWN_FONTS[font] then
+    error("CreateFontString(): Couldn't find inherited node '" .. font .. "'", 2)
+  end
+  return newFrame()
+end
 function frameMethods.CreateTexture() return newFrame() end
+function frameMethods.SetColorTexture(self, r, g, b, a) self.color = { r, g, b, a } end
 function frameMethods.StartMoving(self) self.moving = true end
 function frameMethods.StopMovingOrSizing(self) self.moving = false end
 
@@ -117,7 +129,13 @@ local function installGlobals(metadata)
   _G.strtrim = function(text) return (text:gsub("^%s+", ""):gsub("%s+$", "")) end
   _G.date = os.date
   _G.GetTime = function() return now end
-  _G.CreateFrame = function(kind, name, parent, template) return newFrame(kind, name, parent, template) end
+  _G.CreateFrame = function(kind, name, parent, template)
+    -- Like the game, a template it doesn't have is an error that stops the add-on loading.
+    if template and not wow.knownTemplates[template] then
+      error("CreateFrame(): Couldn't find inherited node '" .. template .. "'", 2)
+    end
+    return newFrame(kind, name, parent, template)
+  end
   -- The screen, the minimap and the tooltip: wow.state.screen sets the screen's size.
   _G.UIParent = newFrame("Frame", "UIParent")
   _G.UIParent.GetWidth = function() return wow.state.screen.width end
@@ -127,8 +145,6 @@ local function installGlobals(metadata)
   _G.Minimap.width, _G.Minimap.center = 140, { 1300, 800 }
   _G.UISpecialFrames = {}
   _G.GetCursorPosition = function() return wow.state.cursor[1], wow.state.cursor[2] end
-  _G.PanelTemplates_SetNumTabs = function(frame, n) frame.numTabs = n end
-  _G.PanelTemplates_SetTab = function(frame, id) frame.selectedTab = id end
   -- The tooltip records the lines the add-on gave it, and whether it is showing.
   _G.GameTooltip = newFrame("GameTooltip", "GameTooltip")
   _G.GameTooltip.lines, _G.GameTooltip.shown = {}, false

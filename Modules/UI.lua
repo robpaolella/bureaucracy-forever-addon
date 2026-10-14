@@ -12,6 +12,17 @@ local TAB_NAMES = { "Awards", "Reserves", "Sync" }
 local DEFAULT_ANGLE = math.rad(225) -- lower left of the minimap, where the design draws it
 
 UI.tabs = {}   -- tab name -> its content frame, shown while the tab is selected
+UI.tabButtons = {} -- tab name -> its button under the window
+
+-- A piece of text styled like a game font. If the client has no font by that name the text still
+-- appears, in a plain font: a missing name must never stop the add-on loading.
+local function newText(parent, fontName)
+  local ok, text = pcall(parent.CreateFontString, parent, nil, "OVERLAY", fontName)
+  if ok and text then return text end
+  text = parent:CreateFontString(nil, "OVERLAY")
+  text:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+  return text
+end
 
 local window, button, badge
 
@@ -52,13 +63,18 @@ local function saveWindowSpot()
 end
 
 function UI.Select(name)
-  for index, tabName in ipairs(TAB_NAMES) do
+  for _, tabName in ipairs(TAB_NAMES) do
     if tabName == name then
-      PanelTemplates_SetTab(window, index)
       UI.tabs[tabName]:Show()
     else
       UI.tabs[tabName]:Hide()
     end
+    local tab = UI.tabButtons[tabName]
+    local on = tabName == name
+    tab.selected = on
+    if on then tab.background:SetColorTexture(0.25, 0.2, 0.05, 1)
+    else tab.background:SetColorTexture(0.08, 0.08, 0.08, 1) end
+    if on then tab.label:SetTextColor(1, 0.82, 0) else tab.label:SetTextColor(0.6, 0.6, 0.6) end
   end
   UI.selected = name
 end
@@ -82,7 +98,7 @@ local function build()
 
   local title = window.TitleText or (window.TitleContainer and window.TitleContainer.TitleText)
   if not title then
-    title = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title = newText(window, "GameFontNormal")
     title:SetPoint("TOP", window, "TOP", 0, -5)
   end
   title:SetText("Bureaucracy Forever")
@@ -93,17 +109,21 @@ local function build()
   UI.footer:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -12, 10)
   UI.footer:SetHeight(24)
 
-  window.numTabs = #TAB_NAMES
   local previous
   for index, name in ipairs(TAB_NAMES) do
-    local tab = CreateFrame("Button", "BureaucracyForeverWindowTab" .. index, window,
-      "CharacterFrameTabButtonTemplate")
-    tab:SetID(index)
-    tab:SetText(name)
+    -- Drawn by hand, not from a template: the client's tab templates differ by version.
+    local tab = CreateFrame("Button", "BureaucracyForeverWindowTab" .. index, window)
+    tab:SetSize(90, 24)
+    tab.background = tab:CreateTexture(nil, "BACKGROUND")
+    tab.background:SetAllPoints()
+    tab.label = newText(tab, "GameFontNormal")
+    tab.label:SetPoint("CENTER")
+    tab.label:SetText(name)
+    UI.tabButtons[name] = tab
     if previous then
-      tab:SetPoint("LEFT", previous, "RIGHT", -16, 0)
+      tab:SetPoint("LEFT", previous, "RIGHT", 4, 0)
     else
-      tab:SetPoint("TOPLEFT", window, "BOTTOMLEFT", 11, 2)
+      tab:SetPoint("TOPLEFT", window, "BOTTOMLEFT", 11, 0)
     end
     tab:SetScript("OnClick", function() UI.Select(name) end)
     previous = tab
@@ -111,13 +131,12 @@ local function build()
     local content = CreateFrame("Frame", nil, window)
     content:SetPoint("TOPLEFT", window, "TOPLEFT", 12, -28)
     content:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -12, 38)
-    local placeholder = content:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    local placeholder = newText(content, "GameFontDisable")
     placeholder:SetPoint("CENTER")
     placeholder:SetText("Nothing here yet.")
     content.placeholder = placeholder
     UI.tabs[name] = content
   end
-  PanelTemplates_SetNumTabs(window, #TAB_NAMES)
   UI.Select(TAB_NAMES[1])
 
   placeWindow()
@@ -227,7 +246,7 @@ local function buildButton()
   local dot = badge:CreateTexture(nil, "BACKGROUND")
   dot:SetTexture("Interface\\COMMON\\Indicator-Red")
   dot:SetAllPoints()
-  badge.text = badge:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  badge.text = newText(badge, "GameFontHighlightSmall")
   badge.text:SetPoint("CENTER")
 
   button:SetScript("OnClick", function() UI.Toggle() end)

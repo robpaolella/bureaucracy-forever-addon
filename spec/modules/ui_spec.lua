@@ -17,10 +17,8 @@ describe("the officers' window", function()
 
   it("starts closed, titled and with three tabs", function()
     assert.is_false(ns.UI.window:IsShown())
-    assert.are.equal(3, ns.UI.window.numTabs)
-    for index, name in ipairs({ "Awards", "Reserves", "Sync" }) do
-      local tab = _G["BureaucracyForeverWindowTab" .. index]
-      assert.are.equal(name, tab:GetText())
+    for _, name in ipairs({ "Awards", "Reserves", "Sync" }) do
+      assert.are.equal(name, ns.UI.tabButtons[name].label:GetText())
       assert.is_table(ns.UI.tabs[name])
     end
     assert.is_table(ns.UI.footer)
@@ -53,19 +51,29 @@ describe("the officers' window", function()
   end)
 
   it("shows the Awards tab first, then the tab clicked, each with its placeholder", function()
+    local buttons = ns.UI.tabButtons
     assert.are.equal("Awards", ns.UI.selected)
     assert.is_true(ns.UI.tabs.Awards:IsShown())
     assert.is_false(ns.UI.tabs.Reserves:IsShown())
     assert.is_false(ns.UI.tabs.Sync:IsShown())
-    _G.BureaucracyForeverWindowTab3.scripts.OnClick()
+    assert.is_true(buttons.Awards.selected)
+    buttons.Sync.scripts.OnClick()
     assert.are.equal("Sync", ns.UI.selected)
-    assert.are.equal(3, ns.UI.window.selectedTab)
     assert.is_false(ns.UI.tabs.Awards:IsShown())
     assert.is_true(ns.UI.tabs.Sync:IsShown())
-    _G.BureaucracyForeverWindowTab2.scripts.OnClick()
+    assert.is_false(buttons.Awards.selected)
+    assert.is_true(buttons.Sync.selected)
+    buttons.Reserves.scripts.OnClick()
     assert.is_true(ns.UI.tabs.Reserves:IsShown())
     assert.is_false(ns.UI.tabs.Sync:IsShown())
     for _, content in pairs(ns.UI.tabs) do assert.is_string(content.placeholder:GetText()) end
+  end)
+
+  it("loads when the client has only the templates and fonts it has confirmed", function()
+    -- The stand-in refuses any other template or font name, as the game does.
+    assert.are.same({ BasicFrameTemplateWithInset = true }, wow.knownTemplates)
+    assert.has_error(function() _G.CreateFrame("Frame", nil, nil, "CharacterFrameTabButtonTemplate") end)
+    assert.are.equal("BasicFrameTemplateWithInset", ns.UI.window.template)
   end)
 end)
 
