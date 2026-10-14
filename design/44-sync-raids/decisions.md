@@ -11,7 +11,11 @@ them, even if no single version had all of them:
 
 | # | Decision | Options (version) | Robert's pick and why |
 | --- | --- | --- | --- |
-| 1 | <e.g. how names show> | <a: ...; b: ...> | <pick, reference/date> |
+| 1 | Sync tab layout | a: one column, raid list as a table; b: list left, details right; c: compact "Raid:" dropdown, paste behind a button | **a**, "I agree, A it is." (herdr, 2026-10-13). Shows every raid and its numbers at once, in the table style the add-on's other tabs use |
+| 2 | Question flow | a, c: two steps (guild run? then which raid); b: one step (raid list plus "No, not a guild run") | **b**, "I agree, B it is." (herdr, 2026-10-13). The matching raid is pre-selected, so usually one press of Start |
+| 3 | Question placement | a, b: centred dialog; c: small window under the minimap | **centred**, "Yes, middle of the screen." (herdr, 2026-10-13). Can't be missed; unanswered means awards held as "no raid" |
+
+Combined as **version D** (`versions/d.html`): A's Sync tab with B's one-step question, centred. It adds no behaviour that no version had, so no new critique (step 6). Checked offline with the same flows as the re-check (all land on the right screen); 40 captures (20 states × default × 390/1440) in `/tmp/design-review-nzzUB4/versions` inspected via contact sheets.
 
 Robert's exact confirmation and date/reference authorizing the
 PR. Design PR: use the linked PR on the design issue once created; the session adds

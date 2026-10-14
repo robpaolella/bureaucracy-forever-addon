@@ -257,6 +257,12 @@ SYNC_V.c = {
   },
 };
 
+/* D: Robert's picks combined (#44): A's Sync tab, B's one-step question, in the middle of the screen. */
+SYNC_V.d = Object.assign({}, SYNC_V.a, {
+  letter: "D", name: "Raid list on the tab, one-step question (your picks combined)", flow: "one", askAt: "center",
+  blurb: "Your picks combined. Sync tab: one column with the raid list as a table (a choice per row, Not a guild run as the last row), then reserves in and awards out (from A). Question: one step in the middle of the screen, the raid list with No, not a guild run as the last choice (from B).",
+});
+
 
 const SYNC_GROUPS = [
   ["The raid question", ["ask-guild", "ask-raid", "ask-overlap", "ask-nomatch", "ask-fallback", "ask-again"]],

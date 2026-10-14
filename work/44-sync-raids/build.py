@@ -29,7 +29,7 @@ base = rep(base, 'btn("Test drop", { size: "tiny", goto: "practice" })', 'btn("T
 base = rep(base, '<div class="zone">Molten Core</div>', '<div class="zone">${esc(o.zone || "Molten Core")}</div>')
 base = rep(base, 'data-goto="awards" aria-label="Bureaucracy Forever: open the window"', 'data-goto="sync-chosen" aria-label="Bureaucracy Forever: open the window"')
 
-for key in ["a", "b", "c"]:
+for key in ["a", "b", "c", "d"]:
     s = rep(base, 'boot(VERSIONS["d"]);', f'boot(Object.assign({{}}, VERSIONS.d, SYNC_V.{key}, {{ syncKey: "{key}" }}));')
     s = rep(s, "<title>Design #9, version D: loot pop-up and officers' window</title>",
             f"<title>Design #44, version {key.upper()}: the raid question and the Sync tab</title>")
