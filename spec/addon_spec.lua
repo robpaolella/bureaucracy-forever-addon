@@ -25,13 +25,6 @@ describe("the add-on", function()
     wow.fire("ADDON_LOADED", "SomeOtherAddOn")
     assert.is_nil(ns.db)
   end)
-
-  it("prints the .toc's version for /bf", function()
-    local metadata = wow.readToc()
-    wow.start()
-    wow.slash("/bf")
-    assert.are.same({ "|cff33ff99Bureaucracy:|r version " .. metadata.Version .. "." }, wow.printed)
-  end)
 end)
 
 describe("the .toc", function()

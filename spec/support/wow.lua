@@ -24,6 +24,7 @@ function wow.readToc()
 end
 
 local frames, timers, now, hardwareEvent
+local newFrame
 
 local function protected(name, fn)
   return function(...)
@@ -36,11 +37,73 @@ local function protected(name, fn)
   end
 end
 
-local function newFrame()
-  local frame = { events = {}, scripts = {} }
-  function frame:RegisterEvent(event) self.events[event] = true end
-  function frame:UnregisterEvent(event) self.events[event] = nil end
-  function frame:SetScript(name, fn) self.scripts[name] = fn end
+-- A frame, region or widget. It keeps what the add-on sets on it (shown, size, anchor, scripts,
+-- text); the other calls it makes are quiet no-ops, because the stand-in draws nothing.
+-- Fields the game's templates add (such as TitleText) are not faked: the add-on checks for them.
+local frameMethods = {}
+local frameMeta = { __index = frameMethods }
+for _, name in ipairs({
+  "SetFrameStrata", "SetMovable", "EnableMouse", "SetClampedToScreen", "RegisterForDrag",
+  "RegisterForClicks", "SetTexture", "SetAllPoints",
+}) do
+  frameMethods[name] = function() end
+end
+
+function frameMethods.RegisterEvent(self, event) self.events[event] = true end
+function frameMethods.UnregisterEvent(self, event) self.events[event] = nil end
+function frameMethods.SetScript(self, name, fn) self.scripts[name] = fn end
+function frameMethods.GetScript(self, name) return self.scripts[name] end
+function frameMethods.SetID(self, id) self.id = id end
+function frameMethods.GetID(self) return self.id end
+function frameMethods.SetText(self, text) self.text = text end
+function frameMethods.GetText(self) return self.text end
+function frameMethods.SetSize(self, w, h) self.width, self.height = w, h end
+function frameMethods.SetWidth(self, w) self.width = w end
+function frameMethods.SetHeight(self, h) self.height = h end
+function frameMethods.GetWidth(self) return self.width or 0 end
+function frameMethods.GetHeight(self) return self.height or 0 end
+function frameMethods.GetEffectiveScale() return 1 end
+function frameMethods.GetFrameLevel(self) return self.level or 1 end
+function frameMethods.SetFrameLevel(self, level) self.level = level end
+function frameMethods.ClearAllPoints(self) self.points = {} end
+function frameMethods.SetPoint(self, point, relativeTo, relativePoint, x, y)
+  if type(relativeTo) == "number" then
+    relativeTo, relativePoint, x, y = nil, nil, relativeTo, relativePoint
+  end
+  if type(relativePoint) == "number" then x, y, relativePoint = relativePoint, x, nil end
+  self.points[#self.points + 1] =
+    { point = point, relativeTo = relativeTo, relativePoint = relativePoint, x = x or 0, y = y or 0 }
+  -- A frame centred on the screen or a widget keeps a centre the tests can read and move.
+  if point == "CENTER" and #self.points == 1 and relativeTo and relativeTo.GetCenter then
+    local cx, cy = relativeTo:GetCenter()
+    self.center = { cx + (x or 0), cy + (y or 0) }
+  end
+end
+function frameMethods.GetCenter(self)
+  if self.center then return self.center[1], self.center[2] end
+end
+function frameMethods.Show(self)
+  if self.shown then return end
+  self.shown = true
+  if self.scripts.OnShow then self.scripts.OnShow(self) end
+end
+function frameMethods.Hide(self)
+  if not self.shown then return end
+  self.shown = false
+  if self.scripts.OnHide then self.scripts.OnHide(self) end
+end
+function frameMethods.IsShown(self) return self.shown end
+function frameMethods.CreateFontString() return newFrame() end
+function frameMethods.CreateTexture() return newFrame() end
+function frameMethods.StartMoving(self) self.moving = true end
+function frameMethods.StopMovingOrSizing(self) self.moving = false end
+
+newFrame = function(kind, name, parent, template)
+  local frame = setmetatable({
+    events = {}, scripts = {}, points = {}, shown = true, kind = kind, name = name, parent = parent,
+    template = template,
+  }, frameMeta)
+  if name then _G[name] = frame end
   frames[#frames + 1] = frame
   return frame
 end
@@ -54,7 +117,23 @@ local function installGlobals(metadata)
   _G.strtrim = function(text) return (text:gsub("^%s+", ""):gsub("%s+$", "")) end
   _G.date = os.date
   _G.GetTime = function() return now end
-  _G.CreateFrame = function() return newFrame() end
+  _G.CreateFrame = function(kind, name, parent, template) return newFrame(kind, name, parent, template) end
+  -- The screen, the minimap and the tooltip: wow.state.screen sets the screen's size.
+  _G.UIParent = newFrame("Frame", "UIParent")
+  _G.UIParent.GetWidth = function() return wow.state.screen.width end
+  _G.UIParent.GetHeight = function() return wow.state.screen.height end
+  _G.UIParent.center = { wow.state.screen.width / 2, wow.state.screen.height / 2 }
+  _G.Minimap = newFrame("Frame", "Minimap")
+  _G.Minimap.width, _G.Minimap.center = 140, { 1300, 800 }
+  _G.UISpecialFrames = {}
+  _G.GetCursorPosition = function() return wow.state.cursor[1], wow.state.cursor[2] end
+  _G.PanelTemplates_SetNumTabs = function(frame, n) frame.numTabs = n end
+  _G.PanelTemplates_SetTab = function(frame, id) frame.selectedTab = id end
+  -- The tooltip records the lines the add-on gave it, and whether it is showing.
+  _G.GameTooltip = newFrame("GameTooltip", "GameTooltip")
+  _G.GameTooltip.lines, _G.GameTooltip.shown = {}, false
+  _G.GameTooltip.SetOwner = function(self, owner) self.owner, self.lines = owner, {} end
+  _G.GameTooltip.AddLine = function(self, text) self.lines[#self.lines + 1] = text end
   _G.SlashCmdList = {}
   _G.C_AddOns = {
     GetAddOnMetadata = function(name, key)
@@ -116,7 +195,8 @@ function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
-  wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false }
+  wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false,
+    screen = { width = 1920, height = 1080 }, cursor = { 0, 0 } }
   local metadata, files = wow.readToc()
   wow.addonName = TOC:gsub("%.toc$", "")
   installGlobals(metadata)

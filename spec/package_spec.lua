@@ -44,7 +44,7 @@ describe("the release zip", function()
     local _, ok = shell("cd " .. dir .. " && unzip -q " .. zip)
     assert.is_true(ok)
     local root = shell("pwd"):gsub("%s+$", "")
-    local script = [[local wow = require("spec.support.wow"); wow.start(); wow.slash("/bf");]]
+    local script = [[local wow = require("spec.support.wow"); wow.start(); wow.slash("/bf version");]]
       .. [[ io.write(wow.printed[1], "\n")]]
     local out = shell("cd " .. dir .. "/BureaucracyForever && LUA_PATH='" .. root .. "/?.lua;;' lua5.1 -e '"
       .. script .. "'")
