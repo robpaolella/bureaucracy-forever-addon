@@ -8,6 +8,6 @@
     "b": "versions/b.html",
     "c": "versions/c.html"
   },
-  "states": ["ask-guild", "ask-raid", "ask-overlap", "ask-nomatch", "ask-fallback", "ask-again", "sync-chosen", "sync-follower", "sync-crowded", "sync-switch", "sync-off", "sync-undecided", "sync-gone", "sync-noraid", "sync-discard", "sync-empty", "sync-pasted", "sync-remove", "sync-refused"],
+  "states": ["ask-guild", "ask-raid", "ask-overlap", "ask-nomatch", "ask-fallback", "ask-again", "sync-chosen", "sync-follower", "sync-crowded", "sync-switch", "sync-switched", "sync-off", "sync-undecided", "sync-gone", "sync-noraid", "sync-discard", "sync-empty", "sync-pasted", "sync-remove", "sync-refused"],
   "themes": ["default"]
 }

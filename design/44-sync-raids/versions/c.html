@@ -236,6 +236,7 @@ tr.pickrow:focus-visible, .mi[data-goto]:focus-visible { outline:2px solid #fff;
 .tip.menu .mi .chk.on::after { content:""; position:absolute; left:3px; top:0; width:4px; height:8px; border:solid var(--gold); border-width:0 2px 2px 0; transform:rotate(45deg); }
 .tip.menu .mi .white { max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
 .notice { background-clip: border-box !important; }
+.side-row { display:flex; align-items:center; gap:4px; } .side-row .side-item { flex:1; min-width:0; }
 </style></head>
 <body><div class="proto-bar" id="proto-bar" role="region" aria-label="Prototype controls"></div>
 <div class="viewport" id="viewport"><main class="scene" id="scene" aria-label="Game screen mock-up"></main></div>
@@ -595,8 +596,16 @@ const RAIDS = {
 };
 const rname = (id) => `${RAIDS[id].name}, ${RAIDS[id].day}`;
 
+/* Prototype: what the officer last picked, so the next screen shows it. raid: picked; keep: the raid it replaces;
+   remove: marked for removal; from: the screen picked on; list: the raids loaded there.
+   Reset by the switcher; captures load fresh, so they show the defaults. */
+const PICK = {};
 /* Per state: which raids are loaded, which is selected, by whom, where the officer is */
 function syncModel(state) {
+  if (PICK.from && (state === "sync-switch" || state === "sync-remove")) {
+    const b = syncModel(PICK.from);
+    return state === "sync-switch" ? Object.assign(b, { sel: PICK.keep }) : b;
+  }
   const m = { list: ["mc", "ony"], sel: "mc", by: ME, at: "19:31", zone: "Molten Core", inst: 409, helper: true, viewer: ME, noraid: 0 };
   switch (state) {
     case "ask-guild": case "ask-raid": case "ask-fallback": Object.assign(m, { sel: null, by: null }); break;
@@ -613,6 +622,12 @@ function syncModel(state) {
       RAIDS.mcp = Object.assign({}, RAIDS.mc, { src: "pasted", pasted: "19:42" });
       Object.assign(m, { list: ["mcp"], sel: "mcp", helper: false, pastedSel: true }); break;
     case "sync-noraid": case "sync-discard": Object.assign(m, { noraid: 3 }); break;
+    case "sync-switched": {
+      const id = PICK.raid || "ony";
+      if (PICK.from) Object.assign(m, syncModel(PICK.from));
+      Object.assign(m, { list: PICK.list || m.list, sel: id, by: ME, viewer: ME, gone: null, at: id === "mc" ? "19:31" : "20:14" });
+      break;
+    }
   }
   return m;
 }
@@ -688,7 +703,7 @@ function askList(m, pre, o = {}) {
   const rows = m.list.map((id) => {
     const r = RAIDS[id]; const on = id === pre;
     const match = r.inst && r.inst === m.inst && (r.live || r.when.startsWith("Starts"));
-    return `<label class="pick ${on ? "on" : ""}" tabindex="0">${radio(on, `<span class="col" style="gap:0;text-align:left"><span class="white">${esc(rname(id))}${match ? ` <span class="mode ok">Matches</span>` : ""}</span><span class="hint" style="font-size:12px">${raidFacts(id, { short: true })}</span></span>`)}</label>`;
+    return `<label class="pick ${on ? "on" : ""}" tabindex="0" data-raid="${id}">${radio(on, `<span class="col" style="gap:0;text-align:left"><span class="white">${esc(rname(id))}${match ? ` <span class="mode ok">Matches</span>` : ""}</span><span class="hint" style="font-size:12px">${raidFacts(id, { short: true })}</span></span>`)}</label>`;
   }).join("");
   const off = o.withOff ? `<div class="hr-div"></div><label class="pick" tabindex="0" data-off="1">${radio(false, `<span class="col" style="gap:0;text-align:left"><span class="white">No, not a guild run</span><span class="hint" style="font-size:12px">The add-on stays off until you leave the group</span></span>`)}</label>` : "";
   return `<div class="pick-list" role="radiogroup" aria-label="Raid events">${rows}${off}</div>`;
@@ -698,23 +713,23 @@ function askContent(state, m, flow) {
   const where = `You've entered <b class="white">${esc(m.zone)}</b> with a raid group.`;
   const fallback = state === "ask-fallback" ? `<div class="note-bar warn" style="margin:6px 0;text-align:left">You're asked because master loot is off and you lead the raid. Turn master loot on to hand out items with the pop-up.</div>` : "";
   if (state === "ask-again") return { title: "Bureaucracy Forever", body: `<p>You've entered <b class="white">${esc(m.zone)}</b>. Switch the raid to <b class="white">${esc(rname("ony"))}</b>?</p><p class="hint">Your 12 Molten Core awards stay with that raid and are still sent to the site.</p>`,
-    buttons: btn("Switch", { goto: "sync-chosen" }) + btn("Keep Molten Core", { goto: "sync-chosen" }) + btn("Not a guild run", { goto: "sync-off" }) };
+    buttons: `<span data-raid="ony">${btn("Switch", { goto: "sync-switched" })}</span>` + btn("Keep Molten Core", { goto: "sync-chosen" }) + btn("Not a guild run", { goto: "sync-off" }) };
   if (flow === "one") {
     const pre = state === "ask-overlap" || state === "ask-nomatch" ? null : "mc";
     const lead = state === "ask-overlap" ? `<p>${where} Two raid events for Molten Core are under way. Which one is this?</p>`
       : state === "ask-nomatch" ? `<p>${where}</p><p class="hint">No raid event is set for Zul'Gurub (instance 309). If this is a custom raid, an officer can enter 309 as its In-game instance number on the guild site.</p>`
       : `<p>${where} If it's a guild run, pick its raid event. If not, choose the last option.</p>`;
     return { title: "Is this a guild run?", body: `${lead}${fallback}${askList(m, pre, { withOff: true })}`,
-      buttons: btn("Start", { disabled: !pre, goto: "sync-chosen" }) + btn("Later", { goto: "sync-undecided" }) };
+      buttons: btn("Start", { disabled: !pre, goto: "sync-chosen" }) + btn("Decide later", { goto: "sync-undecided" }) };
   }
   if (state === "ask-guild" || state === "ask-fallback") return { title: "Is this a guild run?", body: `<p>${where} Is this a guild run?</p>${fallback}<p class="hint">If not, the add-on stays off until you leave the group: no loot pop-up, nothing recorded.</p>`,
-    buttons: btn("Guild run", { goto: "ask-raid" }) + btn("Not a guild run", { goto: "sync-off" }) + btn("Later", { goto: "sync-undecided" }) };
+    buttons: btn("Guild run", { goto: "ask-raid" }) + btn("Not a guild run", { goto: "sync-off" }) + btn("Decide later", { goto: "sync-undecided" }) };
   const pre = state === "ask-raid" ? "mc" : null;
   const lead = state === "ask-overlap" ? `<p>Two raid events for Molten Core are under way. Which one is this?</p>`
     : state === "ask-nomatch" ? `<p>No raid event is set for <b class="white">Zul'Gurub</b> (instance 309). Which one is this?</p><p class="hint">If it's a custom raid, an officer can enter 309 as its In-game instance number on the guild site.</p>`
     : `<p>Which raid event is this?</p>`;
   return { title: "Which raid event?", body: `${lead}${askList(m, pre)}`,
-    buttons: btn("Start", { disabled: !pre, goto: "sync-chosen" }) + btn("Back", { goto: "ask-guild" }) + btn("Later", { goto: "sync-undecided" }) };
+    buttons: btn("Start", { disabled: !pre, goto: "sync-chosen" }) + btn("Back", { goto: "ask-guild" }) + btn("Decide later", { goto: "sync-undecided" }) };
 }
 function askDialog(state, m, V) {
   const c = askContent(state, m, V.flow);
@@ -728,12 +743,20 @@ function askDialog(state, m, V) {
 /* Confirmation dialogs (same in every version) */
 function syncDialog(state) {
   switch (state) {
-    case "sync-switch": return notice(`<p>Switch the raid to <b class="white">${esc(rname("ony"))}</b>?</p><p class="hint">You have 12 awards for Molten Core. They stay with that raid and are still sent to the site. Every officer in the group switches too.</p>`,
-      btn("Switch", { goto: "sync-chosen" }) + btn("Keep Molten Core", { goto: "sync-chosen" }), { top: 260, label: "Switch raid" });
+    case "sync-switch": {
+      const to = PICK.raid || "ony"; const keep = PICK.keep || "mc"; const k = RAIDS[keep];
+      const back = PICK.from && PICK.from !== "sync-switched" ? PICK.from : "sync-switched";
+      return notice(`<p>Switch the raid to <b class="white">${esc(rname(to))}</b>?</p><p class="hint">You have ${k.awards} awards for ${esc(k.name)}. They stay with that raid and are still sent to the site. Every officer in the group switches too.</p>`,
+        `<span data-raid="${to}">${btn("Switch", { goto: "sync-switched" })}</span>` + `<span data-raid="${keep}">${btn(`Keep ${k.name}`, { goto: back })}</span>`, { top: 260, label: "Switch raid" });
+    }
     case "sync-gone": return notice(`<p><b class="white">${esc(rname("mc"))}</b> has left the helper's list: it was cancelled or has ended.</p><p class="hint">Its 12 awards are kept and still sent to the site. You'll be asked which raid it is when you next enter a raid instance.</p>`,
       btn("Choose a raid now", { goto: "ask-raid" }) + btn("OK", { goto: "__close" }), { top: 260, label: "Raid left the list" });
-    case "sync-remove": return notice(`<p>Remove <b class="white">${esc(rname("mc"))}</b>?</p><p class="hint">Its 12 awards stay saved and can still be copied.</p>`,
-      btn("Remove", { goto: "sync-empty" }) + btn("Cancel", { goto: "sync-pasted" }), { top: 260, label: "Remove raid" });
+    case "sync-remove": {
+      const id = PICK.remove || "mcp"; const n = RAIDS[id].awards;
+      const keep = n ? `Its ${n} award${n === 1 ? "" : "s"} stay saved and can still be copied.` : "It has no awards.";
+      return notice(`<p>Remove <b class="white">${esc(rname(id))}</b>?</p><p class="hint">${keep}</p>`,
+        (PICK.from ? `<span data-removed="1">${btn("Remove", { goto: "sync-switched" })}</span>` : btn("Remove", { goto: "sync-empty" })) + btn("Cancel", { goto: PICK.from || "sync-pasted" }), { top: 260, label: "Remove raid" });
+    }
     case "sync-discard": return notice(`<p>Discard <b class="white">3 awards</b> that aren't linked to a raid?</p><p class="hint">They were never sent to the site. This can't be undone.</p>`,
       btn("Discard", { goto: "sync-chosen" }) + btn("Cancel", { goto: "sync-noraid" }), { top: 260, label: "Discard awards" });
   }
@@ -749,10 +772,10 @@ SYNC_V.a = {
   body(m, state) {
     const rows = m.list.map((id) => {
       const r = RAIDS[id]; const on = id === m.sel;
-      const go = on ? "" : RAIDS[m.sel] && RAIDS[m.sel].awards ? "sync-switch" : "sync-chosen";
-      return `<tr class="${on ? "hl-sel" : ""} pickrow" ${go ? `data-goto="${go}" tabindex="0"` : ""}><td style="width:26px">${radio(on, "")}</td><td><span class="white">${esc(r.name)}</span> <span class="grey small">${esc(r.day)}</span></td><td style="white-space:nowrap">${esc(r.when)}</td>
+      const go = on ? "" : RAIDS[m.sel] && RAIDS[m.sel].awards ? "sync-switch" : "sync-switched";
+      return `<tr data-raid="${id}" class="${on ? "hl-sel" : ""} pickrow" ${go ? `data-goto="${go}" tabindex="0"` : ""}><td style="width:26px">${radio(on, "")}</td><td><span class="white">${esc(r.name)}</span> <span class="grey small">${esc(r.day)}</span></td><td style="white-space:nowrap">${esc(r.when)}</td>
         <td>${r.inst ? r.inst : '<span class="amber">None</span>'}</td><td>${r.players} · ${r.reserves}</td><td>${r.awards || '<span class="grey">-</span>'}</td>
-        <td style="text-align:right">${r.src === "pasted" ? `<span class="grey small">Pasted ${r.pasted}</span> ${btn("Remove", { size: "tiny", goto: "sync-remove" })}` : ""}</td></tr>`;
+        <td style="text-align:right">${r.src === "pasted" ? `<span class="grey small">Pasted ${r.pasted}</span> <span data-remove="${id}">${btn("Remove", { size: "tiny", goto: "sync-remove" })}</span>` : ""}</td></tr>`;
     }).join("");
     const off = m.list.length ? `<tr class="${m.sel === "off" ? "hl-sel" : ""} pickrow" data-goto="sync-off" tabindex="0"><td>${radio(m.sel === "off", "")}</td><td colspan="6"><span class="white">Not a guild run</span> <span class="hint">· the add-on stays off until you leave the group</span></td></tr>` : "";
     const table = m.list.length ? `<table class="list" style="margin-top:6px"><thead><tr><th></th><th>Raid event</th><th>When</th><th>Instance</th><th>Players · reserves</th><th>Awards</th><th></th></tr></thead><tbody>${rows}${off}</tbody></table>
@@ -771,8 +794,9 @@ SYNC_V.b = {
     const pasteMode = !m.list.length || state === "sync-refused";
     const item = (id) => {
       const r = RAIDS[id]; const on = id === m.sel;
-      const go = on ? "" : RAIDS[m.sel] && RAIDS[m.sel].awards ? "sync-switch" : "sync-chosen";
-      return `<button type="button" class="side-item ${on ? "on" : ""}" aria-pressed="${on}" ${go ? `data-goto="${go}"` : ""}><span class="white">${esc(r.name)}</span>${on ? ` <span class="mode ok">${m.pastedSel ? "Pasted" : "In use"}</span>` : ""}<span class="hint" style="display:block;font-size:12px">${esc(r.day)} · ${esc(r.when)}${r.inst ? "" : ' · <span class="amber">no instance number</span>'}</span></button>`;
+      const go = on ? "" : RAIDS[m.sel] && RAIDS[m.sel].awards ? "sync-switch" : "sync-switched";
+      const rm = r.src === "pasted" && !on ? `<span data-remove="${id}">${btn("Remove", { size: "tiny", goto: "sync-remove" })}</span>` : "";
+      return `<div class="side-row"><button type="button" class="side-item ${on ? "on" : ""}" aria-pressed="${on}" data-raid="${id}" ${go ? `data-goto="${go}"` : ""}><span class="white">${esc(r.name)}</span>${on ? ` <span class="mode ok">${m.pastedSel ? "Pasted" : "In use"}</span>` : ""}<span class="hint" style="display:block;font-size:12px">${esc(r.day)} · ${esc(r.when)}${r.inst ? "" : ' · <span class="amber">no instance number</span>'}${r.src === "pasted" ? ` · pasted ${r.pasted}` : ""}</span></button>${rm}</div>`;
     };
     const left = `<div class="side-list"><div class="gold small" style="margin:0 0 4px 4px">Raid events</div>${m.list.map(item).join("") || '<div class="hint" style="padding:6px">None loaded.</div>'}
       <div class="hr-div"></div>
@@ -791,7 +815,7 @@ SYNC_V.b = {
         <div class="row hint" style="gap:18px;margin:4px 0 8px"><span><b class="white">${r.players}</b> players</span><span><b class="white">${r.reserves}</b> reserves</span><span><b class="white">${r.awards}</b> awards</span></div>
         ${noraidBlock(m)}
         <div class="hr-div" style="margin:8px 0 6px"></div>${awardsOut(Object.assign({}, m, { list: [] }), state)}
-        ${r.src === "pasted" ? `<div class="row" style="margin-top:10px"><span class="hint">Pasted ${r.pasted}.</span>${btn("Remove", { size: "tiny", goto: "sync-remove" })}</div>` : ""}
+        ${r.src === "pasted" ? `<div class="row" style="margin-top:10px"><span class="hint">Pasted ${r.pasted}.</span><span data-remove="${m.sel}">${btn("Remove", { size: "tiny", goto: "sync-remove" })}</span></div>` : ""}
         <div class="hint" style="margin-top:10px">Choosing another raid on the left changes it for every officer in the group.</div>`;
     }
     return `<div class="split"><div>${left}</div><div class="split-r">${right}</div></div>`;
@@ -805,8 +829,8 @@ SYNC_V.c = {
     const label = m.sel === "off" ? "Not a guild run" : m.sel ? rname(m.sel) : "Choose the raid";
     const open = state === "sync-crowded";
     const menu = open ? `<div class="tip menu" style="left:58px;top:34px;width:430px" role="listbox"><div class="menu-title">Raid events</div>
-      ${m.list.map((id) => `<div class="mi ${id === m.sel ? "sel" : ""}" role="option" aria-selected="${id === m.sel}" ${id === m.sel ? "" : 'data-goto="sync-switch" tabindex="0"'}><span class="chk ${id === m.sel ? "on" : ""}" ${id === m.sel ? 'aria-label="Selected"' : ""}></span><span class="white">${esc(rname(id))}</span><span class="spacer"></span><span class="hint" style="font-size:12px">${esc(RAIDS[id].when)}${RAIDS[id].inst ? "" : " · no instance number"}${RAIDS[id].src === "pasted" ? " · pasted" : ""}</span></div>`).join("")}
-      <div class="hr-div"></div><div class="mi" data-goto="sync-off" tabindex="0"><span class="chk"></span>Not a guild run</div><div class="mi"><span class="chk"></span><span class="grey">Remove a pasted raid…</span></div></div>` : "";
+      ${m.list.map((id) => `<div class="mi ${id === m.sel ? "sel" : ""}" role="option" aria-selected="${id === m.sel}" data-raid="${id}" ${id === m.sel ? "" : `data-goto="${RAIDS[m.sel] && RAIDS[m.sel].awards ? "sync-switch" : "sync-switched"}" tabindex="0"`}><span class="chk ${id === m.sel ? "on" : ""}" ${id === m.sel ? 'aria-label="Selected"' : ""}></span><span class="white">${esc(rname(id))}</span><span class="spacer"></span><span class="hint" style="font-size:12px">${esc(RAIDS[id].when)}${RAIDS[id].inst ? "" : " · no instance number"}${RAIDS[id].src === "pasted" ? " · pasted" : ""}</span></div>`).join("")}
+      <div class="hr-div"></div><div class="mi" data-goto="sync-off" tabindex="0"><span class="chk"></span>Not a guild run</div>${m.list.filter((id) => RAIDS[id].src === "pasted").map((id) => `<div class="mi" role="option" aria-selected="false" data-remove="${id}" data-goto="sync-remove" tabindex="0"><span class="chk"></span>Remove ${esc(RAIDS[id].name)} (pasted)…</div>`).join("")}</div>` : "";
     const head = m.list.length ? `<div class="row" style="position:relative"><span class="gold">Raid:</span><button type="button" class="dd" style="font-size:14px;padding:4px 8px" aria-haspopup="listbox" aria-expanded="${open}" data-goto="${open ? "sync-chosen" : "sync-crowded"}">${esc(label)}</button>${menu}<span class="spacer"></span>${whereLine(m)}</div>` : "";
     const facts = m.sel && m.sel !== "off" ? `<div class="hint" style="margin:6px 0 2px">${raidFacts(m.sel)} · ${RAIDS[m.sel].awards} awards</div><div class="hint">${chosenLine(m)}${m.list.length > 1 ? " Changing it changes it for every officer in the group." : ""}</div>` : "";
     const bar = m.sel && m.sel !== "off" ? "" : `<div style="margin-top:6px">${statusBar(m)}</div>`;
@@ -814,21 +838,21 @@ SYNC_V.c = {
     return `${head}${facts}${bar}<div style="height:8px"></div>${noraidBlock(m)}${helperLine(m)}<div class="hr-div" style="margin:10px 0 6px"></div>
       <div class="cols2"><div>${awardsOut(Object.assign({}, m, { list: m.list.length > 1 ? m.list : [] }), state)}</div>
       <div>${pasteOpen ? pasteBox(m, state) : `<div class="gold" style="margin-bottom:4px">Reserves in</div><div class="hint" style="margin-bottom:6px">The helper brings raid events in. Without it, paste a raid's reserves.</div>${btn("Paste reserves…", { goto: "sync-empty", title: "Opens the paste box (prototype: shown as the empty state)" })}`}
-      ${m.pastedSel ? `<div class="row" style="margin-top:8px"><span class="hint">Pasted 19:42.</span>${btn("Remove", { size: "tiny", goto: "sync-remove" })}</div>` : ""}</div></div>`;
+      ${m.pastedSel ? `<div class="row" style="margin-top:8px"><span class="hint">Pasted 19:42.</span><span data-remove="${m.sel}">${btn("Remove", { size: "tiny", goto: "sync-remove" })}</span></div>` : ""}</div></div>`;
   },
 };
 
 
 const SYNC_GROUPS = [
   ["The raid question", ["ask-guild", "ask-raid", "ask-overlap", "ask-nomatch", "ask-fallback", "ask-again"]],
-  ["Sync tab: raid chosen", ["sync-chosen", "sync-follower", "sync-crowded", "sync-switch"]],
+  ["Sync tab: raid chosen", ["sync-chosen", "sync-follower", "sync-crowded", "sync-switch", "sync-switched"]],
   ["Sync tab: no raid", ["sync-off", "sync-undecided", "sync-gone", "sync-noraid", "sync-discard"]],
   ["Sync tab: without the helper", ["sync-empty", "sync-pasted", "sync-remove", "sync-refused"]],
 ];
 const SYNC_LABELS = {
   "ask-guild": "Question: is this a guild run?", "ask-raid": "Question: which raid event (one matches)", "ask-overlap": "Question: two raids overlap",
   "ask-nomatch": "Question: no raid for this instance", "ask-fallback": "Question: asked because master loot is off", "ask-again": "Question: entering a different raid",
-  "sync-chosen": "Sync: raid chosen by you", "sync-follower": "Sync: another officer's view", "sync-crowded": "Sync: most raids loaded", "sync-switch": "Sync: switching raid with awards",
+  "sync-chosen": "Sync: raid chosen by you", "sync-follower": "Sync: another officer's view", "sync-crowded": "Sync: most raids loaded", "sync-switch": "Sync: switching raid with awards", "sync-switched": "Sync: another raid chosen",
   "sync-off": "Sync: not a guild run", "sync-undecided": "Sync: decided later", "sync-gone": "Sync: chosen raid left the list", "sync-noraid": "Sync: awards with no raid", "sync-discard": "Sync: discard awards with no raid",
   "sync-empty": "Sync: nothing loaded", "sync-pasted": "Sync: pasted raid, copy out", "sync-remove": "Sync: remove a pasted raid", "sync-refused": "Sync: paste refused",
 };
@@ -857,12 +881,29 @@ document.addEventListener("click", (e) => {
   list.querySelectorAll(".pick").forEach((x) => { x.classList.remove("on"); const rb = x.querySelector(".rb"); rb.classList.remove("on"); rb.setAttribute("aria-checked", "false"); });
   p.classList.add("on"); const rb = p.querySelector(".rb"); rb.classList.add("on"); rb.setAttribute("aria-checked", "true");
   const start = [...box.querySelectorAll(".btn")].find((b) => b.textContent === "Start");
-  if (start) { start.disabled = false; start.dataset.goto = p.dataset.off ? "sync-off" : "sync-chosen"; }
+  if (start) { start.disabled = false; start.dataset.goto = p.dataset.off ? "sync-off" : "sync-switched"; }
 });
 document.addEventListener("keydown", (e) => {
   const t = e.target; if ((e.key !== "Enter" && e.key !== " ") || !(t.matches(".pick, .pickrow, .mi[data-goto]"))) return;
   e.preventDefault(); t.click();
 });
+
+/* Prototype: remember which raid a control picks or removes, and where from (capture phase, before the state changes). */
+document.addEventListener("click", (e) => {
+  const scene = e.target.closest("#scene");
+  if (!scene) { if (e.target.closest("#prev, #next")) for (const k in PICK) delete PICK[k]; return; }
+  const from = document.documentElement.dataset.state;
+  const fresh = from !== "sync-switch" && from !== "sync-switched" && from !== "sync-remove";
+  const rm = e.target.closest("[data-remove]");
+  if (rm) { if (fresh) PICK.from = from === "sync-pasted" ? null : from; PICK.remove = rm.dataset.remove; return; }
+  if (e.target.closest("[data-removed]")) { const b = syncModel(from); PICK.list = b.list.filter((x) => x !== PICK.remove); PICK.raid = b.sel; return; }
+  const pk = e.target.closest("[data-raid]");
+  if (!pk) return;
+  if (from !== "sync-switch") { const b = syncModel(from); PICK.list = b.list; PICK.keep = b.sel; }
+  if (fresh) PICK.from = from;
+  PICK.raid = pk.dataset.raid;
+}, true);
+document.addEventListener("change", (e) => { if (e.target.id === "state-select") for (const k in PICK) delete PICK[k]; }, true);
 
 const GROUPS = SYNC_GROUPS;
 const LABELS = SYNC_LABELS;

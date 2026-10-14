@@ -37,7 +37,11 @@ Verdict: FIXES.
 1. Use the brief's "Decide later" wording on the question's put-off button; all versions say "Later".
 2. Crowded state (B and C): show a usable Remove for the pasted raid. B lists Blackwing Lair (pasted) with no Remove; C's menu row "Remove a pasted raid…" is greyed and inert.
 3. Raid switching in the prototypes jumps to a fixed state and never shows the newly chosen raid as selected; keep the choice in local state after Switch, or add a "different raid selected" state.
-Fixes: not yet applied. Re-check: pending (fixes 1-3 only).
+Fixes applied in one batch, 2026-10-13 (`work/44-sync-raids/sync.js`, `sync.css`, rebuilt versions):
+1. Every version's question says **Decide later**.
+2. B: a Remove button beside the pasted Blackwing Lair in the raid list. C: the open menu's row is now "Remove Blackwing Lair (pasted)…", enabled and keyboard-reachable, leading to the remove dialog, which names the raid being removed.
+3. New state `sync-switched` (the picked raid selected; Onyxia's Lair by default). The prototype remembers the raid picked or marked for removal, so Switch, Start, picks and Remove all land on a screen showing the outcome. Checked offline in all three versions: crowded → Onyxia's Lair → Switch; crowded → Remove Blackwing Lair; overlap → second team → Start; ask-again → Switch; undecided → pick.
+Re-check (fixes 1-3 only), same checker and command form, evidence `/tmp/design-review-16M24L/versions` (120 captures, 3 versions × 20 states × default × 390/1440): **PASS** on all three (exit 0, tree unchanged). Full text: `work/44-sync-raids/critique-1-recheck.md`.
 
 ## Comments and changes
 | ID / source | Version / element | Original note | Agreed change and verification | Resolved |

@@ -23,3 +23,4 @@ tr.pickrow:focus-visible, .mi[data-goto]:focus-visible { outline:2px solid #fff;
 .tip.menu .mi .chk.on::after { content:""; position:absolute; left:3px; top:0; width:4px; height:8px; border:solid var(--gold); border-width:0 2px 2px 0; transform:rotate(45deg); }
 .tip.menu .mi .white { max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
 .notice { background-clip: border-box !important; }
+.side-row { display:flex; align-items:center; gap:4px; } .side-row .side-item { flex:1; min-width:0; }
