@@ -1,0 +1,54 @@
+{
+  "design_issue": 9,
+  "covers": [
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    20,
+    21
+  ],
+  "revision": 1,
+  "versions": {
+    "approved": "index.html"
+  },
+  "states": [
+    "popup-typical",
+    "popup-crowded",
+    "popup-page2",
+    "popup-boss",
+    "popup-no-reserves",
+    "popup-fight",
+    "popup-unavailable",
+    "popup-db",
+    "roll-called",
+    "roll-tie",
+    "roll-hidden",
+    "handout-waiting",
+    "not-confirmed",
+    "give-else",
+    "awards",
+    "awards-empty",
+    "awards-officer",
+    "reserves",
+    "reserves-empty",
+    "tooltip",
+    "sync-empty",
+    "sync-loaded",
+    "sync-refused",
+    "sync-switch",
+    "sync-noraid",
+    "practice",
+    "notice-update",
+    "notice-handover",
+    "outside-handout",
+    "minimap"
+  ],
+  "themes": [
+    "default"
+  ]
+}

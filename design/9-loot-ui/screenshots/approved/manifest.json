@@ -1,0 +1,604 @@
+{
+  "images": [
+    {
+      "image": "approved-popup-typical-default-390.png",
+      "version": "approved",
+      "state": "popup-typical",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-typical-default-1440.png",
+      "version": "approved",
+      "state": "popup-typical",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-popup-crowded-default-390.png",
+      "version": "approved",
+      "state": "popup-crowded",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-crowded-default-1440.png",
+      "version": "approved",
+      "state": "popup-crowded",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-popup-page2-default-390.png",
+      "version": "approved",
+      "state": "popup-page2",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-page2-default-1440.png",
+      "version": "approved",
+      "state": "popup-page2",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-popup-boss-default-390.png",
+      "version": "approved",
+      "state": "popup-boss",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-boss-default-1440.png",
+      "version": "approved",
+      "state": "popup-boss",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-popup-no-reserves-default-390.png",
+      "version": "approved",
+      "state": "popup-no-reserves",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-no-reserves-default-1440.png",
+      "version": "approved",
+      "state": "popup-no-reserves",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-popup-fight-default-390.png",
+      "version": "approved",
+      "state": "popup-fight",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-fight-default-1440.png",
+      "version": "approved",
+      "state": "popup-fight",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-popup-unavailable-default-390.png",
+      "version": "approved",
+      "state": "popup-unavailable",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-unavailable-default-1440.png",
+      "version": "approved",
+      "state": "popup-unavailable",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-popup-db-default-390.png",
+      "version": "approved",
+      "state": "popup-db",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-popup-db-default-1440.png",
+      "version": "approved",
+      "state": "popup-db",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-roll-called-default-390.png",
+      "version": "approved",
+      "state": "roll-called",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1122
+    },
+    {
+      "image": "approved-roll-called-default-1440.png",
+      "version": "approved",
+      "state": "roll-called",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-roll-tie-default-390.png",
+      "version": "approved",
+      "state": "roll-tie",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1103
+    },
+    {
+      "image": "approved-roll-tie-default-1440.png",
+      "version": "approved",
+      "state": "roll-tie",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-roll-hidden-default-390.png",
+      "version": "approved",
+      "state": "roll-hidden",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-roll-hidden-default-1440.png",
+      "version": "approved",
+      "state": "roll-hidden",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-handout-waiting-default-390.png",
+      "version": "approved",
+      "state": "handout-waiting",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-handout-waiting-default-1440.png",
+      "version": "approved",
+      "state": "handout-waiting",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-not-confirmed-default-390.png",
+      "version": "approved",
+      "state": "not-confirmed",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-not-confirmed-default-1440.png",
+      "version": "approved",
+      "state": "not-confirmed",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-give-else-default-390.png",
+      "version": "approved",
+      "state": "give-else",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-give-else-default-1440.png",
+      "version": "approved",
+      "state": "give-else",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-awards-default-390.png",
+      "version": "approved",
+      "state": "awards",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1080
+    },
+    {
+      "image": "approved-awards-default-1440.png",
+      "version": "approved",
+      "state": "awards",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-awards-empty-default-390.png",
+      "version": "approved",
+      "state": "awards-empty",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 888
+    },
+    {
+      "image": "approved-awards-empty-default-1440.png",
+      "version": "approved",
+      "state": "awards-empty",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-awards-officer-default-390.png",
+      "version": "approved",
+      "state": "awards-officer",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1117
+    },
+    {
+      "image": "approved-awards-officer-default-1440.png",
+      "version": "approved",
+      "state": "awards-officer",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-reserves-default-390.png",
+      "version": "approved",
+      "state": "reserves",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 922
+    },
+    {
+      "image": "approved-reserves-default-1440.png",
+      "version": "approved",
+      "state": "reserves",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-reserves-empty-default-390.png",
+      "version": "approved",
+      "state": "reserves-empty",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 888
+    },
+    {
+      "image": "approved-reserves-empty-default-1440.png",
+      "version": "approved",
+      "state": "reserves-empty",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-tooltip-default-390.png",
+      "version": "approved",
+      "state": "tooltip",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-tooltip-default-1440.png",
+      "version": "approved",
+      "state": "tooltip",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-sync-empty-default-390.png",
+      "version": "approved",
+      "state": "sync-empty",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 888
+    },
+    {
+      "image": "approved-sync-empty-default-1440.png",
+      "version": "approved",
+      "state": "sync-empty",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-sync-loaded-default-390.png",
+      "version": "approved",
+      "state": "sync-loaded",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 888
+    },
+    {
+      "image": "approved-sync-loaded-default-1440.png",
+      "version": "approved",
+      "state": "sync-loaded",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-sync-refused-default-390.png",
+      "version": "approved",
+      "state": "sync-refused",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 890
+    },
+    {
+      "image": "approved-sync-refused-default-1440.png",
+      "version": "approved",
+      "state": "sync-refused",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-sync-switch-default-390.png",
+      "version": "approved",
+      "state": "sync-switch",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 888
+    },
+    {
+      "image": "approved-sync-switch-default-1440.png",
+      "version": "approved",
+      "state": "sync-switch",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-sync-noraid-default-390.png",
+      "version": "approved",
+      "state": "sync-noraid",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 888
+    },
+    {
+      "image": "approved-sync-noraid-default-1440.png",
+      "version": "approved",
+      "state": "sync-noraid",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-practice-default-390.png",
+      "version": "approved",
+      "state": "practice",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-practice-default-1440.png",
+      "version": "approved",
+      "state": "practice",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-notice-update-default-390.png",
+      "version": "approved",
+      "state": "notice-update",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-notice-update-default-1440.png",
+      "version": "approved",
+      "state": "notice-update",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-notice-handover-default-390.png",
+      "version": "approved",
+      "state": "notice-handover",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-notice-handover-default-1440.png",
+      "version": "approved",
+      "state": "notice-handover",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-outside-handout-default-390.png",
+      "version": "approved",
+      "state": "outside-handout",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-outside-handout-default-1440.png",
+      "version": "approved",
+      "state": "outside-handout",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    },
+    {
+      "image": "approved-minimap-default-390.png",
+      "version": "approved",
+      "state": "minimap",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1061
+    },
+    {
+      "image": "approved-minimap-default-1440.png",
+      "version": "approved",
+      "state": "minimap",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 972
+    }
+  ]
+}
