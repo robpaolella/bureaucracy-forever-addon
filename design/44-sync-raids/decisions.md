@@ -1,8 +1,8 @@
-# Design decisions: <feature>
+# Design decisions: the raid question and the Sync tab (revision 2)
 
-- Design issue: #<number>; covered build issues: <numbers or unsplit plan>
-- Revision: 1; replaces: none (or merged folder/revision)
-- Maker: <provider/model and thinking level>
+- Design issue: #44; covered build issues: #16
+- Revision: 2; replaces: the Sync tab of revision 1, `design/9-loot-ui/` (merged, 880aae7)
+- Maker: claude-bridge/claude-opus-5-5
 
 ## Choice and approval
 Chosen version and why. When versions differed on more than one independent decision,
@@ -31,8 +31,13 @@ state × theme × width evidence: [manifest](screenshots/approved/manifest.json)
 Record actual counts, inspected image paths, offline proof and any capture limitations.
 
 ## Independent critique
-Maker and other-company reviewer, exact launch command, evidence path, verdict and date.
-Numbered findings, fixes and the single fixes-only re-check. Retain the final verdict.
+Round 1, 2026-10-13. Maker claude-bridge/claude-opus-5-5; checker routed by `node /git/maestro/routing/route.ts role checker --maker claude-bridge/claude-opus-5-5`: OpenAI GPT-5.6 Terra, thinking medium (the reviewer's text calls itself "GPT-5.2"; the launch used `--model openai/gpt-5.6-terra`).
+Command: `node /git/maestro/scripts/read-only-run.ts "$PWD" review /git/maestro/skills/design-feature/reviewer-prompt.md "Design: …/design/44-sync-raids. Images and manifest: /tmp/design-review-vQF3jp/versions. Maker: claude-bridge/claude-opus-5-5. …" -- --model openai/gpt-5.6-terra --thinking medium` (exit 0, tree unchanged). Evidence: 114 captures, 3 versions × 19 states × default × 390/1440, commit c5fabbe. Full text: `work/44-sync-raids/critique-1.md`.
+Verdict: FIXES.
+1. Use the brief's "Decide later" wording on the question's put-off button; all versions say "Later".
+2. Crowded state (B and C): show a usable Remove for the pasted raid. B lists Blackwing Lair (pasted) with no Remove; C's menu row "Remove a pasted raid…" is greyed and inert.
+3. Raid switching in the prototypes jumps to a fixed state and never shows the newly chosen raid as selected; keep the choice in local state after Switch, or add a "different raid selected" state.
+Fixes: not yet applied. Re-check: pending (fixes 1-3 only).
 
 ## Comments and changes
 | ID / source | Version / element | Original note | Agreed change and verification | Resolved |
