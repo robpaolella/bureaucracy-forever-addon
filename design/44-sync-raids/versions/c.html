@@ -232,8 +232,10 @@ tr.pickrow { cursor:pointer; } tr.pickrow:hover td { background: rgba(255,255,25
 tr.pickrow:focus-visible, .mi[data-goto]:focus-visible { outline:2px solid #fff; outline-offset:-2px; }
 .mi[data-goto] { cursor:pointer; }
 .tip.menu { background: rgba(9,9,24,.99); z-index: 40; }
-.tip.menu .mi .chk { font-family: system-ui, sans-serif; }
+.tip.menu .mi .chk { flex:none; position:relative; height:12px; }
+.tip.menu .mi .chk.on::after { content:""; position:absolute; left:3px; top:0; width:4px; height:8px; border:solid var(--gold); border-width:0 2px 2px 0; transform:rotate(45deg); }
 .tip.menu .mi .white { max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
+.notice { background-clip: border-box !important; }
 </style></head>
 <body><div class="proto-bar" id="proto-bar" role="region" aria-label="Prototype controls"></div>
 <div class="viewport" id="viewport"><main class="scene" id="scene" aria-label="Game screen mock-up"></main></div>
@@ -803,7 +805,7 @@ SYNC_V.c = {
     const label = m.sel === "off" ? "Not a guild run" : m.sel ? rname(m.sel) : "Choose the raid";
     const open = state === "sync-crowded";
     const menu = open ? `<div class="tip menu" style="left:58px;top:34px;width:430px" role="listbox"><div class="menu-title">Raid events</div>
-      ${m.list.map((id) => `<div class="mi ${id === m.sel ? "sel" : ""}" ${id === m.sel ? "" : 'data-goto="sync-switch" tabindex="0"'}><span class="chk">${id === m.sel ? "✓" : ""}</span><span class="white">${esc(rname(id))}</span><span class="spacer"></span><span class="hint" style="font-size:12px">${esc(RAIDS[id].when)}${RAIDS[id].inst ? "" : " · no instance number"}${RAIDS[id].src === "pasted" ? " · pasted" : ""}</span></div>`).join("")}
+      ${m.list.map((id) => `<div class="mi ${id === m.sel ? "sel" : ""}" role="option" aria-selected="${id === m.sel}" ${id === m.sel ? "" : 'data-goto="sync-switch" tabindex="0"'}><span class="chk ${id === m.sel ? "on" : ""}" ${id === m.sel ? 'aria-label="Selected"' : ""}></span><span class="white">${esc(rname(id))}</span><span class="spacer"></span><span class="hint" style="font-size:12px">${esc(RAIDS[id].when)}${RAIDS[id].inst ? "" : " · no instance number"}${RAIDS[id].src === "pasted" ? " · pasted" : ""}</span></div>`).join("")}
       <div class="hr-div"></div><div class="mi" data-goto="sync-off" tabindex="0"><span class="chk"></span>Not a guild run</div><div class="mi"><span class="chk"></span><span class="grey">Remove a pasted raid…</span></div></div>` : "";
     const head = m.list.length ? `<div class="row" style="position:relative"><span class="gold">Raid:</span><button type="button" class="dd" style="font-size:14px;padding:4px 8px" aria-haspopup="listbox" aria-expanded="${open}" data-goto="${open ? "sync-chosen" : "sync-crowded"}">${esc(label)}</button>${menu}<span class="spacer"></span>${whereLine(m)}</div>` : "";
     const facts = m.sel && m.sel !== "off" ? `<div class="hint" style="margin:6px 0 2px">${raidFacts(m.sel)} · ${RAIDS[m.sel].awards} awards</div><div class="hint">${chosenLine(m)}${m.list.length > 1 ? " Changing it changes it for every officer in the group." : ""}</div>` : "";

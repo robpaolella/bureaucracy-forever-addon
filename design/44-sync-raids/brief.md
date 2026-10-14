@@ -64,7 +64,7 @@ Not applicable: loading (nothing loads over a network; the inbox is read at logi
 Keyboard: game windows close with Escape; prototype controls are keyboard-accessible.
 
 ## Host snapshot and offline proof
-No web host (revision 1's exception: a game add-on). The host is revision 1's approved `design/9-loot-ui/index.html` (merge commit 880aae7), a self-contained file with the game art and fonts inlined. Versions copy it and replace its Sync tab. Host parts used, in `index.html`: `windowFrame()` (window, tabs, footer), `syncBody()` (revision 1's Sync tab), `notice()` (dialogs), `chat()`/`sysLine()` (chat box), the `GROUPS`/`LABELS` switcher lists, CSS classes `.note-bar`, `table.list`, `.input`, `.tab`, `.btn`. Offline proof: recorded below once the versions exist.
+No web host (revision 1's exception: a game add-on). The host is revision 1's approved `design/9-loot-ui/index.html` (merge commit 880aae7), a self-contained file with the game art and fonts inlined. Versions copy it and replace its Sync tab. Host parts used, in `index.html`: `windowFrame()` (window, tabs, footer), `syncBody()` (revision 1's Sync tab), `notice()` (dialogs), `chat()`/`sysLine()` (chat box), the `GROUPS`/`LABELS` switcher lists, CSS classes `.note-bar`, `table.list`, `.input`, `.tab`, `.btn`. Offline proof (2026-10-13): each of `versions/a.html`, `b.html`, `c.html` opened from disk in headless Chrome with every network request sent to a dead proxy; the only requests were the file itself and its inlined `data:` art and fonts (2/2 fonts loaded, no broken images), and the state switcher and in-game buttons changed state and URL offline.
 
 ## Confirmed decisions
 Interview on #44, 2026-10-14:
