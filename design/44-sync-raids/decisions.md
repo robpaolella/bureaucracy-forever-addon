@@ -5,9 +5,7 @@
 - Maker: claude-bridge/claude-opus-5-5
 
 ## Choice and approval
-Chosen version and why. When versions differed on more than one independent decision,
-Robert's pick for each, asked as its own numbered question; the chosen version combines
-them, even if no single version had all of them:
+Chosen: **version D**, now `index.html`. It combines Robert's three picks below: A's Sync tab, plus B's one-step question in the middle of the screen.
 
 | # | Decision | Options (version) | Robert's pick and why |
 | --- | --- | --- | --- |
@@ -17,22 +15,21 @@ them, even if no single version had all of them:
 
 Combined as **version D** (`versions/d.html`): A's Sync tab with B's one-step question, centred. It adds no behaviour that no version had, so no new critique (step 6). Checked offline with the same flows as the re-check (all land on the right screen); 40 captures (20 states × default × 390/1440) in `/tmp/design-review-nzzUB4/versions` inspected via contact sheets.
 
-Robert's exact confirmation and date/reference authorizing the
-PR. Design PR: use the linked PR on the design issue once created; the session adds
-that link there after opening it. Only Robert merging that PR approves it for building;
-chat approval, a critique PASS and a closed/unmerged PR do not.
+Robert's confirmation: "4. Approved." (herdr, 2026-10-13), in answer to looking through D and dropping A, B and C with what only they had. Design PR: linked on #44 under `## Design PR`. Only Robert merging that PR approves the design for building; chat approval, a critique PASS and a closed or unmerged PR do not.
 
 ## Alternatives
 | Version | What differs / why rejected or chosen | Only this version had (lost) | Robert's OK to drop | Evidence |
 | --- | --- | --- | --- | --- |
-| a | <reason> | <features no kept version has, or none> | <his words, date/reference> | [All-version manifest](screenshots/all/manifest.json) and named images |
+| a | Its Sync tab was chosen (decision 1) and kept in D; its two-step question was not (decision 2) | The two-step question shown in the middle of the screen ("Is this a guild run?" then "Which raid event?") | "4. Approved." (2026-10-13), asked with the list of what goes | [manifest](screenshots/all/manifest.json), `screenshots/all/a-*.png` |
+| b | Its one-step, centred question was chosen (decisions 2, 3) and kept in D; its layout was not (decision 1) | Raid list on the left with the chosen raid's details on the right | "4. Approved." (2026-10-13) | [manifest](screenshots/all/manifest.json), `screenshots/all/b-*.png` |
+| c | Not chosen on any decision | Compact "Raid:" dropdown with paste behind a button; the question in a small window under the minimap; the two-step question there | "4. Approved." (2026-10-13) | [manifest](screenshots/all/manifest.json), `screenshots/all/c-*.png` |
+| d | Chosen: Robert's picks combined | - | - | [manifest](screenshots/approved/manifest.json) |
 
 A version is removed, replaced or left out at freeze only after Robert confirms what it
 alone had can go.
 
-All-version captures were completed and inspected before pruning versions/. Approved
-state × theme × width evidence: [manifest](screenshots/approved/manifest.json).
-Record actual counts, inspected image paths, offline proof and any capture limitations.
+All-version captures were completed and inspected before `versions/` was removed: 160 images, 4 versions × 20 states × default × 390/1440, in `screenshots/all/` (inspected as contact sheets, one per version and width). Approved evidence: 40 images, 20 states × default × 390/1440, in `screenshots/approved/` ([manifest](screenshots/approved/manifest.json)), every manifest entry present and inspected. Capture limit: 390 wide is the PC game screen scaled down, not a phone layout (brief).
+Final offline proof (2026-10-13): `index.html` opened from disk in headless Chrome with all network requests sent to a dead proxy. No request left `file:`/`data:`, fonts 2/2, no broken images, and the flows (crowded → pick Onyxia's Lair → Switch; Remove Blackwing Lair; overlap → Start; ask-again → Switch; Decide later; undecided → pick) each reached the right screen and URL. The host snapshot `host.html` was removed after this proof; it is revision 1's approved `design/9-loot-ui/index.html` with nothing added. The tooling in `work/44-sync-raids/` built the versions from it.
 
 ## Independent critique
 Round 1, 2026-10-13. Maker claude-bridge/claude-opus-5-5; checker routed by `node /git/maestro/routing/route.ts role checker --maker claude-bridge/claude-opus-5-5`: OpenAI GPT-5.6 Terra, thinking medium (the reviewer's text calls itself "GPT-5.2"; the launch used `--model openai/gpt-5.6-terra`).
@@ -50,15 +47,16 @@ Re-check (fixes 1-3 only), same checker and command form, evidence `/tmp/design-
 ## Comments and changes
 | ID / source | Version / element | Original note | Agreed change and verification | Resolved |
 | --- | --- | --- | --- | --- |
-| <Open Design ID or herdr reference> | <target> | <note> | <result> | <date/status> |
+| herdr, 2026-10-13 | All versions | Robert's picks: 1 A, 2 B, 3 middle of the screen | Combined as version D; checked offline and at both widths | Done |
+| herdr, 2026-10-13 | D | "4. Approved." | D frozen as `index.html` | Done |
+
+No Open Design comments were left (`design.ts comments`: none open).
 
 ## Experiment
-None, or Robert's permission, question, branch/preview, chosen behaviour, rejected
-attempts, static-version updates and unmerged/closed experiment PR. Code reuse: forbidden
-unless specific parts are explicitly authorized here. Keep the branch as a primary source.
+None.
 
 ## Open items
-None affecting the approved scope. Preserve any deferred, out-of-scope questions explicitly.
+None affecting the approved scope. Outside it: the data format for the raid question, "not a guild run" and the shared selection is agreed in the site repo, robpaolella/bureaucracy-forever#307 (open). It blocks building #16, not this design.
 
 ## Build handoff
 Merged folder/revision is the feature authority; DESIGN.md/live site govern site-wide

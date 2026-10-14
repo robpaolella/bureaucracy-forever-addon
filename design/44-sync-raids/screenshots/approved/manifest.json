@@ -1,0 +1,404 @@
+{
+  "images": [
+    {
+      "image": "approved-ask-guild-default-390.png",
+      "version": "approved",
+      "state": "ask-guild",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-ask-guild-default-1440.png",
+      "version": "approved",
+      "state": "ask-guild",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-ask-raid-default-390.png",
+      "version": "approved",
+      "state": "ask-raid",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-ask-raid-default-1440.png",
+      "version": "approved",
+      "state": "ask-raid",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-ask-overlap-default-390.png",
+      "version": "approved",
+      "state": "ask-overlap",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-ask-overlap-default-1440.png",
+      "version": "approved",
+      "state": "ask-overlap",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-ask-nomatch-default-390.png",
+      "version": "approved",
+      "state": "ask-nomatch",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-ask-nomatch-default-1440.png",
+      "version": "approved",
+      "state": "ask-nomatch",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-ask-fallback-default-390.png",
+      "version": "approved",
+      "state": "ask-fallback",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-ask-fallback-default-1440.png",
+      "version": "approved",
+      "state": "ask-fallback",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-ask-again-default-390.png",
+      "version": "approved",
+      "state": "ask-again",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1113
+    },
+    {
+      "image": "approved-ask-again-default-1440.png",
+      "version": "approved",
+      "state": "ask-again",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-chosen-default-390.png",
+      "version": "approved",
+      "state": "sync-chosen",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-chosen-default-1440.png",
+      "version": "approved",
+      "state": "sync-chosen",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-follower-default-390.png",
+      "version": "approved",
+      "state": "sync-follower",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-follower-default-1440.png",
+      "version": "approved",
+      "state": "sync-follower",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-crowded-default-390.png",
+      "version": "approved",
+      "state": "sync-crowded",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1083
+    },
+    {
+      "image": "approved-sync-crowded-default-1440.png",
+      "version": "approved",
+      "state": "sync-crowded",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-switch-default-390.png",
+      "version": "approved",
+      "state": "sync-switch",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-switch-default-1440.png",
+      "version": "approved",
+      "state": "sync-switch",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-switched-default-390.png",
+      "version": "approved",
+      "state": "sync-switched",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-switched-default-1440.png",
+      "version": "approved",
+      "state": "sync-switched",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-off-default-390.png",
+      "version": "approved",
+      "state": "sync-off",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-off-default-1440.png",
+      "version": "approved",
+      "state": "sync-off",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-undecided-default-390.png",
+      "version": "approved",
+      "state": "sync-undecided",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 979
+    },
+    {
+      "image": "approved-sync-undecided-default-1440.png",
+      "version": "approved",
+      "state": "sync-undecided",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-gone-default-390.png",
+      "version": "approved",
+      "state": "sync-gone",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-gone-default-1440.png",
+      "version": "approved",
+      "state": "sync-gone",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-noraid-default-390.png",
+      "version": "approved",
+      "state": "sync-noraid",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1025
+    },
+    {
+      "image": "approved-sync-noraid-default-1440.png",
+      "version": "approved",
+      "state": "sync-noraid",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-discard-default-390.png",
+      "version": "approved",
+      "state": "sync-discard",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1025
+    },
+    {
+      "image": "approved-sync-discard-default-1440.png",
+      "version": "approved",
+      "state": "sync-discard",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-empty-default-390.png",
+      "version": "approved",
+      "state": "sync-empty",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-empty-default-1440.png",
+      "version": "approved",
+      "state": "sync-empty",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-pasted-default-390.png",
+      "version": "approved",
+      "state": "sync-pasted",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1004
+    },
+    {
+      "image": "approved-sync-pasted-default-1440.png",
+      "version": "approved",
+      "state": "sync-pasted",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-remove-default-390.png",
+      "version": "approved",
+      "state": "sync-remove",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 940
+    },
+    {
+      "image": "approved-sync-remove-default-1440.png",
+      "version": "approved",
+      "state": "sync-remove",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    },
+    {
+      "image": "approved-sync-refused-default-390.png",
+      "version": "approved",
+      "state": "sync-refused",
+      "theme": "default",
+      "width": 390,
+      "height": 844,
+      "pixelWidth": 390,
+      "pixelHeight": 1024
+    },
+    {
+      "image": "approved-sync-refused-default-1440.png",
+      "version": "approved",
+      "state": "sync-refused",
+      "theme": "default",
+      "width": 1440,
+      "height": 900,
+      "pixelWidth": 1440,
+      "pixelHeight": 1023
+    }
+  ]
+}

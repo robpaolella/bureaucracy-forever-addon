@@ -65,7 +65,7 @@ Not applicable: loading (nothing loads over a network; the inbox is read at logi
 Keyboard: game windows close with Escape; prototype controls are keyboard-accessible.
 
 ## Host snapshot and offline proof
-No web host (revision 1's exception: a game add-on). The host is revision 1's approved `design/9-loot-ui/index.html` (merge commit 880aae7), a self-contained file with the game art and fonts inlined. Versions copy it and replace its Sync tab. Host parts used, in `index.html`: `windowFrame()` (window, tabs, footer), `syncBody()` (revision 1's Sync tab), `notice()` (dialogs), `chat()`/`sysLine()` (chat box), the `GROUPS`/`LABELS` switcher lists, CSS classes `.note-bar`, `table.list`, `.input`, `.tab`, `.btn`. Offline proof (2026-10-13): each of `versions/a.html`, `b.html`, `c.html` opened from disk in headless Chrome with every network request sent to a dead proxy; the only requests were the file itself and its inlined `data:` art and fonts (2/2 fonts loaded, no broken images), and the state switcher and in-game buttons changed state and URL offline.
+No web host (revision 1's exception: a game add-on). The host is revision 1's approved `design/9-loot-ui/index.html` (merge commit 880aae7), a self-contained file with the game art and fonts inlined. Versions copy it and replace its Sync tab. Host parts used, in `index.html`: `windowFrame()` (window, tabs, footer), `syncBody()` (revision 1's Sync tab), `notice()` (dialogs), `chat()`/`sysLine()` (chat box), the `GROUPS`/`LABELS` switcher lists, CSS classes `.note-bar`, `table.list`, `.input`, `.tab`, `.btn`. Offline proof (2026-10-13): each of `versions/a.html`, `b.html`, `c.html` opened from disk in headless Chrome with every network request sent to a dead proxy; the only requests were the file itself and its inlined `data:` art and fonts (2/2 fonts loaded, no broken images), and the state switcher and in-game buttons changed state and URL offline. `host.html` was removed at approval; the host is revision 1's `design/9-loot-ui/index.html`, and the final offline proof of `index.html` is in decisions.md.
 
 ## Confirmed decisions
 Interview on #44, 2026-10-14:
@@ -86,4 +86,4 @@ Interview on #44, 2026-10-14:
 None.
 
 ## Open decisions
-- Layout choices the versions differ on (asked one by one after the critique).
+None. The layout choices were decided on 2026-10-13 (decisions.md, Choice and approval): A's Sync tab, B's one-step question, in the middle of the screen, combined as the approved `index.html`.
