@@ -290,7 +290,9 @@ end
 -- `user` and `roll` are absent when none, and a DISENCHANT_BANK award has no `char` (spec 3.4, 4).
 local awardFields = record({
   { "key", str }, { "boss", str }, { "item", integer }, { "char", str, true },
-  { "user", str, true }, { "method", str }, { "roll", integer, true }, { "voided", boolean },
+  { "user", str, true },
+  { "method", oneOf("HR", "SR", "MAIN_SPEC", "OFF_SPEC", "OPEN_ROLL", "DISENCHANT_BANK") },
+  { "roll", function(v) return integer(v) and v >= 1 and v <= 100 end, true }, { "voided", boolean },
 })
 local function award(v, where)
   local out = awardFields(v, where)
