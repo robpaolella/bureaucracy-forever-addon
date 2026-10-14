@@ -29,4 +29,4 @@ For guild officers. The add-on is a zip you download from GitHub and unzip into 
 
 ## Check your version
 
-In the game, type `/bf`. Chat shows `version <version>.`, for example `version 1.2.0.` Compare it with the latest release on the Releases page.
+In the game, type `/bf version`. Chat shows `version <version>.`, for example `version 1.2.0.` Compare it with the latest release on the Releases page.

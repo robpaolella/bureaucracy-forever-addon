@@ -36,6 +36,16 @@ ns.On("ADDON_LOADED", function(name)
 end)
 
 SLASH_BUREAUCRACYFOREVER1 = "/bf"
-SlashCmdList.BUREAUCRACYFOREVER = function()
-  ns.Print("version " .. tostring(ns.version) .. ".")
+SlashCmdList.BUREAUCRACYFOREVER = function(input)
+  local command = strtrim(input or ""):lower()
+  if command == "" then
+    ns.UI.Toggle()
+  elseif command == "version" then
+    ns.Print("version " .. tostring(ns.version) .. ".")
+  elseif command == "minimap" then
+    ns.UI.ShowMinimapButton(not ns.UI.button:IsShown())
+  else
+    ns.Print("type /bf to open or close the window, /bf version for the version,"
+      .. " /bf minimap to show or hide the minimap button.")
+  end
 end
