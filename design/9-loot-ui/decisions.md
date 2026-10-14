@@ -1,6 +1,6 @@
 # Design decisions: the loot pop-up and the officers' window
 
-- Design issue: #9; covered build issues: #10, #11, #12, #13, #14, #15, #16, #17, #20, #21
+- Design issue: #9; covered build issues: #10, #11, #12, #13, #14, #15, #16, #17, #20, #21, #37 (added 2026-10-14, below)
 - Revision: 1; replaces: none (or merged folder/revision)
 - Maker: claude-bridge/claude-opus-5-5 (two design sessions, both Opus 5.5)
 
@@ -49,6 +49,7 @@ All-version captures were completed and inspected before pruning `versions/`: 24
 | --- | --- | --- | --- | --- |
 | herdr, 2026-10-13 | All | Robert picked A's pop-up (Q12) and B's Awards grouping (Q13) | Combined as version D; checked at both widths | Done |
 | Maker, 2026-10-13 | All, practice state | The practice view never drew the officers' window with its "[Practice]" title | Fixed in all versions; window placed clear of the minimap | Done |
+| Robert, 2026-10-14 | Window frame, tabs, minimap button | Add #37 (officers' window: frame, tabs, `/bf`, minimap button) to this revision's covers. Robert: "Okay, whatever you suggest." to the conductor's recommendation that "the design revision for #16 (design issue #44 …) also adds #37 to the `covers` list of `design/9-loot-ui`" ([#37 comment](https://github.com/robpaolella/bureaucracy-forever-addon/issues/37#issuecomment-6160798102); instruction on #44: [comment](https://github.com/robpaolella/bureaucracy-forever-addon/issues/44#issuecomment-6160816650)) | `covers` now lists 37. No drawing changed: the record already shows the frame and tabs (`awards-empty`, `reserves-empty`, `sync-empty`; the Sync tab's content is now revision 2, `design/44-sync-raids/`) and the button (`minimap`). Footer split, per Robert: #37 draws it empty, #14 adds the loot master line, #17 the Practice mode and Test drop controls | Done |
 
 No Open Design comments were left (checked 2026-10-13 after each sync).
 
