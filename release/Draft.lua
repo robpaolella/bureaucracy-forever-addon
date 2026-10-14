@@ -2,15 +2,42 @@
 -- creates or refreshes the one draft release for it. It never publishes: Robert does. A dry run
 -- only builds the zip. Every git and GitHub call goes through `env`, so tests can stub them;
 -- release/main.lua passes the real ones. Like Release.lua, it is not in the .toc.
--- env.run(program, args) -> ok, output; env.build(version) -> zip path; env.log(text).
+-- env.run(program, args) -> ok, output; env.wait(seconds); env.build(version) -> zip path;
+-- env.log(text).
 local Release = dofile("release/Release.lua")
 
 local Draft = {}
 Draft.TOC = "BureaucracyForever.toc"
 
+-- Seconds to wait before the second and third try of a read-only GitHub lookup.
+local RETRY_WAITS = { 2, 5 }
+
+-- A read-only GitHub lookup fails for a moment when GitHub does: try it up to three times, and
+-- only on a failed exit (a call that exits 0 is never repeated, empty output included).
+-- Never use it for a call that changes something: a repeat could delete twice or create twice.
+local function runRead(env, program, args)
+  local ok, out = env.run(program, args)
+  for _, seconds in ipairs(RETRY_WAITS) do
+    if ok then break end
+    env.wait(seconds)
+    ok, out = env.run(program, args)
+  end
+  return ok, out
+end
+
 local function call(env, program, ...)
   local args = { ... }
   local ok, out = env.run(program, args)
+  if not ok then
+    error(program .. " " .. table.concat(args, " ") .. " failed: " .. tostring(out), 0)
+  end
+  return out or ""
+end
+
+-- `call` for a read-only GitHub lookup: retried.
+local function callRead(env, program, ...)
+  local args = { ... }
+  local ok, out = runRead(env, program, args)
   if not ok then
     error(program .. " " .. table.concat(args, " ") .. " failed: " .. tostring(out), 0)
   end
@@ -40,7 +67,7 @@ local PULL_JQ = [[(map(select(.merge_commit_sha == "%s")) + map(select(.merged_a
   | if . == null then "" else "\(.number)\n\(.title)\n\(.body // "")" end]]
 
 local function item(env, sha)
-  local out = call(env, "gh", "api", "repos/{owner}/{repo}/commits/" .. sha .. "/pulls",
+  local out = callRead(env, "gh", "api", "repos/{owner}/{repo}/commits/" .. sha .. "/pulls",
     "--jq", PULL_JQ:format(sha))
   local number, title, body = out:match("^(%d+)\n([^\n]*)\n?(.*)$")
   if number then return { number = tonumber(number), title = title, body = (body:gsub("\n$", "")) } end
@@ -69,7 +96,7 @@ local function isAncestor(env, older, newer)
 end
 
 local function drafts(env)
-  local out = call(env, "gh", "api", "--paginate", "repos/{owner}/{repo}/releases",
+  local out = callRead(env, "gh", "api", "--paginate", "repos/{owner}/{repo}/releases",
     "--jq", [[.[] | select(.draft) | "\(.id) \(.tag_name) \(.target_commitish)"]])
   local list = {}
   for _, line in ipairs(lines(out)) do
@@ -84,7 +111,7 @@ local function isSha(text) return text:match("^%x+$") ~= nil and #text == 40 end
 -- mode "draft" (after a merge to main) or "dry-run". Returns what happened: { status, version, zip }.
 function Draft.run(env, mode)
   local head = trim(call(env, "git", "rev-parse", "HEAD"))
-  local previous = trim(call(env, "gh", "release", "list", "--exclude-drafts", "--exclude-pre-releases",
+  local previous = trim(callRead(env, "gh", "release", "list", "--exclude-drafts", "--exclude-pre-releases",
     "--limit", "1", "--json", "tagName", "--jq", [[.[0].tagName // ""]]))
   if previous == "" then previous = nil end
   local cache = {}
@@ -132,7 +159,7 @@ function Draft.run(env, mode)
   for _, old in ipairs(existing) do
     -- Robert may have published it since the list: look again right before deleting.
     local path = "repos/{owner}/{repo}/releases/" .. old.id
-    if trim(call(env, "gh", "api", path, "--jq", ".draft")) ~= "true" then
+    if trim(callRead(env, "gh", "api", path, "--jq", ".draft")) ~= "true" then
       env.log(old.tag .. " was published during this run: the next merge drafts the release after it.")
       return { status = "published", version = plan.version }
     end
@@ -142,7 +169,7 @@ function Draft.run(env, mode)
     local restore = "To restore it: run the Release workflow by hand on the tag " .. old.tag
       .. " for the zip, then on GitHub, Releases, Draft a new release, choose tag " .. old.tag
       .. ", attach the zip and publish."
-    local ok, found = env.run("gh", { "api", "repos/{owner}/{repo}/git/matching-refs/tags/" .. old.tag,
+    local ok, found = runRead(env, "gh", { "api", "repos/{owner}/{repo}/git/matching-refs/tags/" .. old.tag,
       "--jq", '.[] | select(.ref == "refs/tags/' .. old.tag .. '") | .ref' })
     if not ok then
       error("Deleted the draft " .. old.tag .. " but couldn't check whether it had just been published. "

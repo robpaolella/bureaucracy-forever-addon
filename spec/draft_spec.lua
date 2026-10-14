@@ -5,7 +5,7 @@ local TOC = "## Version: 0.0.0-dev\nCore.lua\nInbox.lua\n"
 -- A stand-in for git and GitHub: a straight line of commits on main, published tags and drafts.
 -- Each commit: { pr = { number, title, body } } or { subject }, plus toc to change the .toc.
 local function repo(commits)
-  local self = { commits = {}, releases = {}, published = {}, calls = {}, built = {}, nextId = 1 }
+  local self = { commits = {}, releases = {}, published = {}, calls = {}, waits = {}, built = {}, nextId = 1 }
   local index = {}
   function self.add(commit)
     local sha = string.rep(string.format("%x", (#self.commits + 1) % 16), 40)
@@ -97,6 +97,7 @@ local function repo(commits)
       if program == "git" then return git(args) end
       if program == "gh" then return gh(args) end
     end,
+    wait = function(seconds) self.waits[#self.waits + 1] = seconds end,
     build = function(version)
       self.built[#self.built + 1] = version
       return "dist/BureaucracyForever-" .. version .. ".zip"
@@ -104,8 +105,27 @@ local function repo(commits)
     log = function() end,
   }
   function self.run(mode)
-    self.calls, self.built = {}, {}
+    self.calls, self.waits, self.built = {}, {}, {}
     return Draft.run(self.env, mode or "draft")
+  end
+  -- Makes calls matching `pattern` fail their first `times` tries (nil: every try).
+  function self.flaky(pattern, times)
+    local run, left = self.env.run, times
+    self.env.run = function(program, args)
+      if (program .. " " .. table.concat(args, " ")):find(pattern) and (not left or left > 0) then
+        self.calls[#self.calls + 1] = program .. " " .. table.concat(args, " ")
+        if left then left = left - 1 end
+        return false, "HTTP 502"
+      end
+      return run(program, args)
+    end
+  end
+  function self.count(pattern)
+    local n = 0
+    for _, call in ipairs(self.calls) do
+      if call:find(pattern) then n = n + 1 end
+    end
+    return n
   end
   function self.called(pattern)
     for _, call in ipairs(self.calls) do
@@ -244,6 +264,73 @@ describe("Draft.run", function()
     assert.matches("couldn't check whether it had just been published", err, 1, true)
     assert.matches("To restore it", err, 1, true)
     assert.is_false(r.called("release create"))
+  end)
+
+  describe("when GitHub fails for a moment", function()
+    before_each(function() r.add(pr(2, "fix: a crash", "No more crash.")) end)
+
+    it("retries a read-only lookup that fails once, then succeeds", function()
+      r.flaky("/pulls", 1)
+      assert.equal("created", r.run().status)
+      assert.same({ 2 }, r.waits)
+    end)
+
+    it("retries the other read-only lookups too", function()
+      for _, pattern in ipairs({ "release list", "api %-%-paginate", "releases/1 %-%-jq", "matching%-refs" }) do
+        local fresh = repo({ pr(1, "feat: first", "The add-on.") })
+        fresh.publish("v1.0.0")
+        fresh.add(pr(2, "fix: a crash", "No more crash."))
+        fresh.run()
+        fresh.add(pr(3, "fix: another", "Another fix."))
+        fresh.flaky(pattern, 1)
+        assert.equal("created", fresh.run().status, pattern)
+        assert.same({ 2 }, fresh.waits, pattern)
+      end
+    end)
+
+    it("gives the existing error after three tries, waiting 2s then 5s", function()
+      r.flaky("/pulls")
+      local ok, err = pcall(r.run)
+      assert.is_false(ok)
+      assert.matches("gh api repos/{owner}/{repo}/commits/", err, 1, true)
+      assert.matches("failed: HTTP 502", err, 1, true)
+      assert.equal(3, r.count("/pulls"))
+      assert.same({ 2, 5 }, r.waits)
+    end)
+
+    it("keeps the tag check's own error after three tries", function()
+      r.run()
+      r.add(pr(3, "fix: another", "Another fix."))
+      r.flaky("matching%-refs")
+      local ok, err = pcall(r.run)
+      assert.is_false(ok)
+      assert.matches("couldn't check whether it had just been published", err, 1, true)
+      assert.equal(3, r.count("matching%-refs"))
+      assert.same({ 2, 5 }, r.waits)
+      assert.is_false(r.called("release create"))
+    end)
+
+    it("does not retry a call that exits 0 with nothing printed", function()
+      assert.equal("created", r.run().status)
+      assert.same({}, r.waits)
+      assert.equal(1, r.count("commits/" .. string.rep("2", 40) .. "/pulls"))
+    end)
+
+    it("tries a failing delete once", function()
+      r.run()
+      r.add(pr(3, "fix: another", "Another fix."))
+      r.flaky("DELETE")
+      assert.is_false((pcall(r.run)))
+      assert.equal(1, r.count("DELETE"))
+      assert.same({}, r.waits)
+    end)
+
+    it("tries a failing release create once", function()
+      r.flaky("release create")
+      assert.is_false((pcall(r.run)))
+      assert.equal(1, r.count("release create"))
+      assert.same({}, r.waits)
+    end)
   end)
 
   it("refuses a version whose tag is already taken", function()
