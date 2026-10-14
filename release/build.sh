@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the add-on's zip: the files the .toc lists (the empty inbox included) and the .toc with
+# Builds the add-on's zip: the files the .toc lists (the placeholder inbox included) and the .toc with
 # the version stamped in, all in one BureaucracyForever folder. The version is never committed:
 # the .toc in git says 0.0.0-dev. Run from the repo root; prints the zip's path.
 # Usage: sh release/build.sh <version> <out-dir>

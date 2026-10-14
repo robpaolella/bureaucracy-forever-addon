@@ -35,14 +35,21 @@ describe("the .toc", function()
     assert.are.equal("BureaucracyForeverDB", metadata.SavedVariables)
   end)
 
-  it("lists the helper's inbox file, which ships empty", function()
+  it("lists the helper's inbox file, which ships as a placeholder", function()
     -- The game reads a new file only after a full restart, so the inbox is listed from the start.
     local listed = false
     for _, file in ipairs(files) do listed = listed or file == "Inbox.lua" end
     assert.is_true(listed)
     local handle = assert(io.open("Inbox.lua", "rb"))
-    assert.are.equal("", handle:read("*a"))
+    local text = handle:read("*a")
     handle:close()
+    -- The game reports a zero-byte file as an error at login, so it ships one comment line.
+    assert.is_truthy(text:match("%S"))
+    local before = {}
+    for name in pairs(_G) do before[name] = true end
+    assert(loadstring(text, "Inbox.lua"))()
+    for name in pairs(_G) do assert.is_true(before[name], name .. " was defined by Inbox.lua") end
+    assert.is_nil(_G.BureaucracyLootInbox)
   end)
 
   it("lists every Lua file in the add-on, and only files that exist", function()
