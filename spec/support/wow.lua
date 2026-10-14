@@ -190,13 +190,14 @@ local function installGlobals(metadata)
 end
 
 -- Starts the game with the add-on installed: runs its files in .toc order, then fires
--- ADDON_LOADED. options.saved holds SavedVariables from an earlier session.
+-- ADDON_LOADED. options.saved holds SavedVariables from an earlier session; options.screen
+-- ({ width, height }) sets the screen's size.
 function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
   wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false,
-    screen = { width = 1920, height = 1080 }, cursor = { 0, 0 } }
+    screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 } }
   local metadata, files = wow.readToc()
   wow.addonName = TOC:gsub("%.toc$", "")
   installGlobals(metadata)

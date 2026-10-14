@@ -27,12 +27,13 @@ local function isNumber(value)
   return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
 end
 
--- The window's saved spot is an offset of its centre from the screen's centre. One that leaves the
--- centre off the screen (a smaller resolution than last time) is ignored.
+-- The window's saved spot is an offset of its centre from the screen's centre. One that leaves any
+-- of the window off the screen (a smaller resolution than last time) is ignored.
 local function savedWindowSpot()
   local spot = read().window
   if type(spot) ~= "table" or not isNumber(spot.x) or not isNumber(spot.y) then return end
-  if math.abs(spot.x) > UIParent:GetWidth() / 2 or math.abs(spot.y) > UIParent:GetHeight() / 2 then
+  if math.abs(spot.x) + WIDTH / 2 > UIParent:GetWidth() / 2
+    or math.abs(spot.y) + HEIGHT / 2 > UIParent:GetHeight() / 2 then
     return
   end
   return spot
@@ -219,9 +220,13 @@ local function buildButton()
   ring:SetPoint("TOPLEFT")
 
   badge = CreateFrame("Frame", nil, button)
+  UI.badge = badge
   badge:SetSize(14, 14)
   badge:SetPoint("TOPRIGHT", 4, 4)
   badge:SetFrameLevel(button:GetFrameLevel() + 3)
+  local dot = badge:CreateTexture(nil, "BACKGROUND")
+  dot:SetTexture("Interface\\COMMON\\Indicator-Red")
+  dot:SetAllPoints()
   badge.text = badge:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   badge.text:SetPoint("CENTER")
 

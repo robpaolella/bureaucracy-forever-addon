@@ -93,8 +93,21 @@ describe("the minimap button", function()
       "Bureaucracy Forever", "No raids loaded.", "1 hand-out not confirmed",
       "Click: open the window", "Drag: move the button",
     }, hover())
+    assert.is_true(ns.UI.badge:IsShown())
+    assert.are.equal(1, ns.UI.badge.text:GetText())
     wow.click(function() ns.Tracking.Give(2, 1) end)
     assert.are.equal("2 hand-outs not confirmed", hover()[3])
+  end)
+
+  it("hides the badge when nothing is waiting", function()
+    assert.is_false(ns.UI.badge:IsShown())
+    wow.openLoot({ item("Choker") })
+    wow.click(function() ns.Tracking.Give(1, 1) end)
+    hover()
+    assert.is_true(ns.UI.badge:IsShown())
+    wow.fire("LOOT_SLOT_CLEARED", 1)
+    wow.fire("CHAT_MSG_LOOT", "Alice receives loot: [Choker].")
+    assert.is_false(ns.UI.badge:IsShown())
   end)
 
   it("opens and closes the window on a click", function()
@@ -130,8 +143,11 @@ describe("the minimap button", function()
 end)
 
 describe("what the window remembers", function()
+  local screen
+  before_each(function() screen = nil end)
+
   local function reload(ns)
-    return wow.start({ saved = { BureaucracyForeverDB = ns.db } })
+    return wow.start({ saved = { BureaucracyForeverDB = ns.db }, screen = screen })
   end
 
   it("keeps the window's spot and whether it was open across /reload", function()
@@ -175,6 +191,15 @@ describe("what the window remembers", function()
     ns.db.ui = { window = { x = 0, y = -900 } }
     ns = reload(ns)
     assert.are.same({ 960, 540 }, { ns.UI.window:GetCenter() })
+    -- The centre is on the screen but the 640 wide window would stick out 100 pixels.
+    screen = { width = 1440, height = 900 }
+    ns.db.ui = { window = { x = 500, y = 0 } }
+    ns = reload(ns)
+    assert.are.same({ 720, 450 }, { ns.UI.window:GetCenter() })
+    -- A spot that fits exactly is kept.
+    ns.db.ui = { window = { x = 400, y = 0 } }
+    ns = reload(ns)
+    assert.are.same({ 1120, 450 }, { ns.UI.window:GetCenter() })
   end)
 
   it("ignores saved spots that aren't numbers", function()
