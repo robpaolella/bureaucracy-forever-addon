@@ -18,6 +18,8 @@ local function run(program, args)
   return status == "0", out
 end
 
+local function wait(seconds) os.execute("sleep " .. tonumber(seconds)) end
+
 local function log(text)
   print(text)
   local summary = os.getenv("GITHUB_STEP_SUMMARY")
@@ -39,7 +41,7 @@ if mode ~= "draft" and mode ~= "dry-run" then
   io.stderr:write("usage: lua5.1 release/main.lua draft|dry-run\n")
   os.exit(2)
 end
-local ok, result = pcall(Draft.run, { run = run, build = build, log = log }, mode)
+local ok, result = pcall(Draft.run, { run = run, wait = wait, build = build, log = log }, mode)
 if not ok then
   io.stderr:write(tostring(result), "\n")
   os.exit(1)
