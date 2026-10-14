@@ -3,7 +3,7 @@
 In-game officer add-on for the Bureaucracy guild's loot system: when an item drops, officers see who hard- and soft-reserved it, and awards flow back to the guild site. It runs in the WoW Forever game client, used by guild officers.
 
 ## Stack
-A World of Warcraft add-on in Lua 5.1, for the WoW Forever client: build 1.60.1.70338, `## Interface: 16001`, project id 18 (checked in the beta, robpaolella/bureaucracy-forever-addon#3). Lint with luacheck, test with busted, both on Lua 5.1.
+A World of Warcraft add-on in Lua 5.1, for the WoW Forever client: build 1.60.1.70374, `## Interface: 16001`, project id 18 (checked in the beta, robpaolella/bureaucracy-forever-addon#3 and #41). Lint with luacheck, test with busted, both on Lua 5.1.
 
 ## Checks
 Run both from the repo root before any PR; CI runs them on every PR.
@@ -27,7 +27,7 @@ sudo luarocks --lua-version=5.1 install busted 2.3.0-1
 - `Core.lua`: the shared namespace (`ns`), the event hub (`ns.On(event, handler)`) and the `/bf` command. Every file gets `local ADDON_NAME, ns = ...`.
 - `Modules/`: one file per part, each adding its table to `ns`: `Rules` (who should get each drop), `Records` (award records), `Tracking` (hand-outs until the game confirms them), `Snapshot` (the site's reserves text read and checked as data, never run), `Sync` (reserves in, awards out), `UI` (the pop-up and the officers' window).
 - `Inbox.lua`: written by the desktop helper, read at login or `/reload`. It ships empty and stays in the `.toc`, because the game only finds a new file after a full restart.
-- `spec/`: busted tests. `spec/support/wow.lua` is the game stand-in: it loads the add-on in `.toc` order and fakes the game calls the add-on uses (events, slash commands, loot window, master loot, chat, timers, the chat log). It blocks chat lines with no click behind them, as the game does. Extend it as code needs more of the game.
+- `spec/`: busted tests. `spec/support/wow.lua` is the game stand-in: it loads the add-on in `.toc` order and fakes the game calls the add-on uses (events, slash commands, loot window, master loot, chat, timers, the chat log). It blocks chat lines sent from a timer or event, to be safe: stricter than the game was seen to be (see Watch out for). Extend it as code needs more of the game.
 - Game calls the add-on uses are listed in `.luacheckrc`; add each new one there.
 - `release/`: the release tooling, not part of the add-on and not in the `.toc`. `Release.lua` works out the version and notes, `Draft.lua` creates or refreshes the draft, `build.sh` builds the zip, `main.lua` runs them for the workflow.
 
@@ -47,7 +47,9 @@ Releases are zips on GitHub Releases; see Releases. The game files never change 
 
 ## Watch out for
 - WoW add-ons can't make web requests. Reserves get in and awards get out only through files written on logout or `/reload` (SavedVariables), copy-paste export strings, or the desktop helper.
-- In a boss fight the game hides chat from add-ons and blocks their chat lines. A chat line sent from a timer, with no click behind it, was blocked in the beta (`ADDON_ACTION_BLOCKED`); the stand-in also blocks one sent from an event, to be safe. The beta results are in #3's comments.
+- In a boss fight the game hides chat from add-ons and blocks their chat lines. The beta did not test this.
+- Timer-sent chat lines (from `C_Timer.After`, 3 seconds after the command, no click behind them) were tested in the open world (Eastern Kingdoms), out of combat, with no chat lockdown: a party line, a raid line and a raid warning as raid leader, and a raid line as a non-leader all arrived, with no `ADDON_ACTION_BLOCKED`. A raid warning as a non-leader without assist was not tried. Boss fights, instances and chat lockdown were not tested. Results: robpaolella/bureaucracy-forever-addon#41 (https://github.com/robpaolella/bureaucracy-forever-addon/issues/41#issuecomment-6161604207).
+- The stand-in still blocks any chat line sent from a timer or event, as a cautious choice.
 
 ## Reference material
 - Loot add-on plan and beta results: robpaolella/bureaucracy-forever-addon#3. The site's loot plan: robpaolella/bureaucracy-forever#89.
