@@ -7,10 +7,10 @@ local Rules = {}
 ns.Rules = Rules
 
 -- Why a holder is skipped; a `blocked` code from the snapshot is passed on as given.
-Rules.NOT_IN_RAID = "not-in-raid"
-Rules.CANNOT_RECEIVE = "cannot-receive"
+Rules.NOT_IN_RAID = "not in raid"
+Rules.CANNOT_RECEIVE = "cannot receive"
 Rules.TRIAL = "trial"
-Rules.RECEIVED = "already-received"
+Rules.RECEIVED = "already received"
 
 -- "Bob-Realm" and "Bob" are the same character.
 local function bare(name)

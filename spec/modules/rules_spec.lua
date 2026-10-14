@@ -63,7 +63,7 @@ describe("Rules.Resolve", function()
     local r = resolve(holders, { awards = { { key = "a1", item = ITEM, user = "u1", voided = false } } })
     assert.are.equal("sr", r.mode)
     assert.are.same({ "Bo Ray" }, names(r.contenders))
-    assert.are.equal("already-received", r.skipped[1].reason)
+    assert.are.equal("already received", r.skipped[1].reason)
   end)
 
   it("spends every character of a user (alts)", function()
@@ -102,14 +102,14 @@ describe("Rules.Resolve", function()
     local holders = { holder("u1", "Ann Lee", "HR"), holder("u2", "Bo Ray", "HR") }
     local r = resolve(holders, { roster = { "Bo Ray-Realm", "Cy Dow" } })
     assert.are.same({ "Bo Ray" }, names(r.contenders))
-    assert.are.equal("not-in-raid", r.skipped[1].reason)
+    assert.are.equal("not in raid", r.skipped[1].reason)
   end)
 
   it("skips holders the game won't let receive it", function()
     local holders = { holder("u1", "Ann Lee", "HR"), holder("u2", "Bo Ray", "SR") }
     local r = resolve(holders, { roster = { "Ann Lee", "Bo Ray" }, candidates = { "Bo Ray" } })
     assert.are.equal("sr", r.mode)
-    assert.are.equal("cannot-receive", r.skipped[1].reason)
+    assert.are.equal("cannot receive", r.skipped[1].reason)
   end)
 
   it("resolves two copies in turn with one HR holder", function()
