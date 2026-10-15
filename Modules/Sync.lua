@@ -6,7 +6,7 @@ ns.Sync = Sync
 
 -- The site's pasted reserves text (spec 3.2): every line pasted so far, as a string or a list.
 -- Returns the validated snapshot and the update notice (nil when none), or nil and an error
--- for the officer. Stores nothing: loading the snapshot is the caller's (#47).
+-- for the officer. Stores nothing: the caller loads it (Raids.Load).
 function Sync.ReadPasted(pasted)
   local Snapshot = ns.Snapshot
   local text, err = Snapshot.Assemble(pasted)
