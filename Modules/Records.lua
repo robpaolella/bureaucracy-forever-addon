@@ -3,7 +3,8 @@
 -- .ops[raidId], its operations in spec 4's shape, in the order made or received (for sync,
 -- copy-out and the helper). Awards made with no loaded raid selected go to .noRaid and
 -- .noRaidOps, without raid or env, until Attach. An operation naming an award not held yet stays
--- in the list and takes effect when the award arrives (4.2).
+-- in the list and takes effect when the award arrives (4.2). Awards merged from the site's
+-- catch-up (Merge, spec 3.4) are records with no operation: they are the site's already.
 local _, ns = ...
 
 local Records = {}
@@ -105,13 +106,39 @@ end
 
 local effect
 
--- Records an award, then what was waiting for its key (a void always wins, 4.2).
+-- Voids in the site's catch-up waiting for an award the add-on doesn't hold, by key (spec 3.4).
+-- Kept for this session only and never as operations: every login or /reload merges again.
+local sitePending = {}
+
+-- Voids an award not yet voided; the first void's reason and time stand.
+local function void(award, reason, at)
+  if not award.voided then
+    award.voided, award.voidReason, award.voidedAt = true, reason, at
+  end
+end
+
+-- Adds an award record, then what was waiting for its key (a void always wins, 4.2).
+local function settle(awards, ops, award)
+  awards[#awards + 1] = award
+  for _, waiting in ipairs(ops) do
+    if waiting.key == award.key then effect(awards, ops, waiting) end
+  end
+  local pending = sitePending[award.key]
+  if pending then void(award, pending.reason, pending.at) end
+end
+
 local function arrive(awards, ops, op, replaces)
   local award = { key = op.id, state = "announced", stateAt = op.at, replaces = replaces }
   for _, field in ipairs(AWARD_FIELDS) do award[field] = op[field] end
-  awards[#awards + 1] = award
-  for _, waiting in ipairs(ops) do
-    if waiting.key == op.id then effect(awards, ops, waiting) end
+  settle(awards, ops, award)
+end
+
+-- Confirmed or not: the later `at` wins, a tie goes to confirmed (4.1). An announced award, or
+-- one made by hand on the site (`manual`, spec 3.4), takes either.
+local function advance(award, state, at)
+  if award.state == "announced" or award.state == "manual" or at > award.stateAt
+    or (at == award.stateAt and state == "confirmed") then
+    award.state, award.stateAt = state, at
   end
 end
 
@@ -121,21 +148,14 @@ effect = function(awards, ops, op)
   local award = find(awards, "key", op.key)
   if not award then return false end
   if op.type == "void" or op.type == "replace" then
-    -- A voided award stays on the record; the first void's reason and time stand.
-    if not award.voided then
-      award.voided, award.voidReason, award.voidedAt = true, op.reason, op.at
-    end
+    -- A voided award stays on the record.
+    void(award, op.reason, op.at)
     if op.type == "replace" then
       award.replacedBy = award.replacedBy or op.award.id
       if not find(awards, "key", op.award.id) then arrive(awards, ops, op.award, op.key) end
     end
   else
-    -- Confirmed or not: the later `at` wins, a tie goes to confirmed (4.1).
-    local state = op.type == "confirm" and "confirmed" or "not-confirmed"
-    if award.state == "announced" or op.at > award.stateAt
-      or (op.at == award.stateAt and state == "confirmed") then
-      award.state, award.stateAt = state, op.at
-    end
+    advance(award, op.type == "confirm" and "confirmed" or "not-confirmed", op.at)
   end
   return true
 end
@@ -287,6 +307,53 @@ function Records.Attach(raidId)
     if op.key then effect(awards, ops, op) end
   end
   return #movedAwards
+end
+
+local SITE_FIELDS = { "boss", "item", "char", "user", "method", "roll" }
+local COMPARED = { "boss", "item", "char", "method" }
+local SITE_STATES = { confirmed = true, ["not-confirmed"] = true }
+
+-- Merges a raid's catch-up from the site (spec 3.4), already checked against its raid, into the
+-- awards by key, wherever the add-on holds each. It only adds or advances: it deletes nothing
+-- and adds no operations, so nothing is re-sent, and merging again changes nothing. A key held
+-- with another boss, item, char or method keeps the add-on's own. Returns those conflicts, each
+-- { award = the add-on's record, fields = the fields that differ }; or nil and "quiet".
+function Records.Merge(catchup)
+  if quiet("merge") then return nil, "quiet" end
+  local conflicts = {}
+  for _, site in ipairs(catchup.awards) do
+    local award = locate(site.key)
+    if not award then
+      -- A catch-up award has no note or sender, and its `at` is its state's (spec 3.4).
+      award = { key = site.key, raid = catchup.raid, env = catchup.env,
+        practice = site.practice or nil, at = site.at, state = site.state, stateAt = site.at,
+        voided = site.voided or nil }
+      for _, field in ipairs(SITE_FIELDS) do award[field] = site[field] end
+      local awards, ops = lists(catchup.raid, true)
+      settle(awards, ops, award)
+    else
+      local fields = {}
+      for _, field in ipairs(COMPARED) do
+        if award[field] ~= site[field] then fields[#fields + 1] = field end
+      end
+      if #fields > 0 then
+        conflicts[#conflicts + 1] = { award = award, fields = fields }
+      elseif site.voided then
+        void(award)
+      elseif not award.voided and SITE_STATES[site.state] then
+        advance(award, site.state, site.at)
+      end
+    end
+  end
+  for _, pending in ipairs(catchup.voids) do
+    local award = locate(pending.key)
+    if award then
+      void(award, pending.reason, pending.at)
+    else
+      sitePending[pending.key] = pending
+    end
+  end
+  return conflicts
 end
 
 -- The operations of a raid (nil: no raid), in the order made or received.

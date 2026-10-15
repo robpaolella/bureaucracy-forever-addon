@@ -317,4 +317,163 @@ describe("Records", function()
     ns.Records.Award(ana({ id = "aw-7f3k2m9q" }))
     assert.is_true(ns.Records.Get("aw-7f3k2m9q").voided)
   end)
+  describe("merging the site's catch-up", function()
+    local T = 1792000000
+
+    -- A catch-up award (spec 3.4): Ana's HR award by default; fields override.
+    local function site(key, fields)
+      local a = { key = key, boss = "lb_lucifron", item = 16805, char = "Ana Vale", user = "u_ana",
+        method = "HR", roll = 91, voided = false, state = "confirmed", at = T }
+      for k, v in pairs(fields or {}) do a[k] = v end
+      return a
+    end
+
+    local function catchup(awards, voids)
+      return { formatVersion = 1, raid = RAID, env = "staging", generated = T,
+        awards = awards or {}, voids = voids or {} }
+    end
+
+    local function merge(awards, voids)
+      return Records.Merge(catchup(awards, voids))
+    end
+
+    before_each(function() selectRaid() end)
+
+    it("adds the awards it doesn't hold in their state, with no operation; again changes nothing", function()
+      local awards = {
+        site("site-key-0001"),
+        site("site-key-0002", { state = "manual", at = T + 5, practice = true }),
+        site("site-key-0003", { voided = true, state = "not-confirmed", method = "DISENCHANT_BANK" }),
+      }
+      awards[3].char, awards[3].user = nil, nil
+      assert.are.same({}, merge(awards))
+      assert.are.same({
+        key = "site-key-0001", raid = RAID, env = "staging", boss = "lb_lucifron", item = 16805,
+        char = "Ana Vale", user = "u_ana", method = "HR", roll = 91, at = T, state = "confirmed",
+        stateAt = T,
+      }, Records.Get("site-key-0001"))
+      local manual = Records.Get("site-key-0002")
+      assert.are.same({ "manual", T + 5, true }, { manual.state, manual.stateAt, manual.practice })
+      local voided = Records.Get("site-key-0003")
+      assert.are.same({ true, "not-confirmed" }, { voided.voided, voided.state })
+      assert.are.same({}, Records.Ops(RAID))
+      local before = copy(ns.db)
+      assert.are.same({}, merge(awards))
+      assert.are.same(before, ns.db)
+    end)
+
+    it("counts a manual award for spending like any other", function()
+      merge({ site("site-key-0001", { state = "manual" }) })
+      local resolved = ns.Rules.Resolve({ item = 16805, awards = ns.Raids.Awards(RAID),
+        reserves = { [16805] = { { user = "u_ana", char = "Ana Vale", kind = "HR", trial = false } } } })
+      assert.are.same({ "open", ns.Rules.RECEIVED }, { resolved.mode, resolved.skipped[1].reason })
+    end)
+
+    it("keeps a void for an award it doesn't hold pending, until the award arrives", function()
+      merge({}, { { key = "site-key-0001", reason = "wrong winner", at = T + 1 } })
+      assert.is_nil(Records.Get("site-key-0001"))
+      assert.are.same({}, Records.Ops(RAID))
+      merge({ site("site-key-0001") })
+      local award = Records.Get("site-key-0001")
+      assert.are.same({ true, "wrong winner", T + 1 }, { award.voided, award.voidReason, award.voidedAt })
+      -- An award from another officer (sync) takes a pending void the same way.
+      merge({}, { { key = "aw-7f3k2m9q", at = T + 2 } })
+      Records.Award(ana({ id = "aw-7f3k2m9q" }))
+      assert.is_true(Records.Get("aw-7f3k2m9q").voided)
+    end)
+
+    it("applies a void the site holds pending to an award held", function()
+      local key = Records.Award(ana()).id
+      merge({}, { { key = key, at = T + 1 } })
+      assert.are.same({ true, T + 1 }, { Records.Get(key).voided, Records.Get(key).voidedAt })
+      assert.are.equal(1, #Records.Ops(RAID))
+    end)
+
+    it("applies an officer's operation waiting for the award when the catch-up brings it", function()
+      Records.Void("site-key-0001", { reason = "mine" })
+      merge({ site("site-key-0001") })
+      assert.are.same({ true, "mine" }, { Records.Get("site-key-0001").voided,
+        Records.Get("site-key-0001").voidReason })
+    end)
+
+    it("voids a held award voided on either side, keeping its state", function()
+      local key = Records.Award(ana()).id
+      Records.Confirm(key)
+      merge({ site(key, { voided = true, state = "announced" }) })
+      assert.are.same({ true, "confirmed" }, { Records.Get(key).voided, Records.Get(key).state })
+
+      local other = Records.Award(ana()).id
+      Records.Void(other)
+      merge({ site(other, { at = T + 50 }) })
+      assert.are.same({ true, "announced" }, { Records.Get(other).voided, Records.Get(other).state })
+    end)
+
+    it("advances a held announced award with the site's confirmation", function()
+      local key = Records.Award(ana()).id
+      merge({ site(key, { at = T + 10 }) })
+      assert.are.same({ "confirmed", T + 10 }, { Records.Get(key).state, Records.Get(key).stateAt })
+      assert.are.equal(1, #Records.Ops(RAID))
+    end)
+
+    it("takes the later at, a tie going to confirmed", function()
+      local key = Records.Award(ana()).id
+      Records.Confirm(key, { at = T + 10 })
+      merge({ site(key, { state = "not-confirmed", at = T + 5 }) })
+      assert.are.equal("confirmed", Records.Get(key).state)
+      merge({ site(key, { state = "not-confirmed", at = T + 10 }) })
+      assert.are.equal("confirmed", Records.Get(key).state)
+      merge({ site(key, { state = "not-confirmed", at = T + 20 }) })
+      assert.are.same({ "not-confirmed", T + 20 }, { Records.Get(key).state, Records.Get(key).stateAt })
+      merge({ site(key, { state = "confirmed", at = T + 20 }) })
+      assert.are.equal("confirmed", Records.Get(key).state)
+    end)
+
+    it("never lets announced or manual replace confirmed or not confirmed", function()
+      local key = Records.Award(ana()).id
+      Records.NotConfirmed(key, { at = T + 10 })
+      merge({ site(key, { state = "announced", at = T + 99 }), site(key, { state = "manual", at = T + 99 }) })
+      assert.are.same({ "not-confirmed", T + 10 }, { Records.Get(key).state, Records.Get(key).stateAt })
+    end)
+
+    it("lets the game's confirmation advance a manual award", function()
+      merge({ site("site-key-0001", { state = "manual", at = T + 10 }) })
+      Records.Confirm("site-key-0001", { at = T + 5 })
+      assert.are.equal("confirmed", Records.Get("site-key-0001").state)
+    end)
+
+    it("keeps its own award on a conflicting field and returns the conflict", function()
+      local key = Records.Award(ana()).id
+      local before = copy(ns.db)
+      local conflicts = merge({ site(key, { char = "Bo Marsh", item = 17000, voided = true }) })
+      assert.are.same({ { "item", "char" }, key }, { conflicts[1].fields, conflicts[1].award.key })
+      assert.are.equal(1, #conflicts)
+      assert.are.same(before, ns.db)
+    end)
+
+    it("merges into an award held as no raid instead of adding it twice", function()
+      ns.db.activeRaid = nil
+      local key = Records.Award(ana()).id
+      merge({ site(key) })
+      assert.are.same({ "confirmed", 0 }, { Records.Get(key).state, #ns.Raids.Awards(RAID) })
+    end)
+
+    it("deletes nothing the catch-up leaves out", function()
+      local key = Records.Award(ana()).id
+      local before = copy(ns.db)
+      merge({})
+      assert.are.same(before, ns.db)
+      assert.is_truthy(Records.Get(key))
+    end)
+
+    it("merges nothing on a run that is not a guild run", function()
+      assert.is_true(ns.Selection.ChooseOff())
+      local before = copy(ns.db)
+      local result = { merge({ site("site-key-0001") }, { { key = "aw-7f3k2m9q", at = T } }) }
+      assert.are.same({ nil, "quiet" }, result)
+      assert.are.same(before, ns.db)
+      assert.is_true(ns.Selection.ChooseRaid(RAID, true))
+      Records.Award(ana({ id = "aw-7f3k2m9q" }))
+      assert.is_nil(Records.Get("aw-7f3k2m9q").voided)
+    end)
+  end)
 end)
