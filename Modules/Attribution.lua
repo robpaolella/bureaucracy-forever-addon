@@ -52,7 +52,9 @@ ns.On("ENCOUNTER_END", function(_, name, _, _, success)
   local raidId, snapshot = current()
   if not raidId or success ~= 1 then return end
   local bossId = match(snapshot, name)
-  if bossId then saved(raidId).kills[bossId] = time() end
+  if not bossId then return end
+  saved(raidId).kills[bossId] = time()
+  ns.UI.RefreshReserves() -- the heading gains its "· killed" mark if the tab is open
 end)
 
 -- True when this boss row is recorded as killed in the selected raid.

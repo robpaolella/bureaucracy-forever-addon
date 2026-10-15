@@ -321,6 +321,13 @@ describe("the Reserves tab", function()
     assert.are.same({ "Other" }, lines[8])
   end)
 
+  it("adds the mark at once when a boss dies with the tab open", function()
+    chooseRaid(ns)
+    names(ns)
+    wow.fire("ENCOUNTER_END", 1, "Lucifron", 0, 5, 1)
+    assert.are.same({ "Lucifron · killed" }, texts(ns.UI.reserves.shown)[1])
+  end)
+
   it("shows '-' for a column nobody reserved in", function()
     chooseRaid(ns)
     local lines = texts(names(ns))
