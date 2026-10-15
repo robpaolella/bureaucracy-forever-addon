@@ -120,6 +120,39 @@ function Selection.RaidGone(raidId)
   return "The selected raid (" .. name .. ") is no longer loaded. Choose the raid in the Sync tab."
 end
 
+-- The instance the player is in: its number (GetInstanceInfo's 8th value, the raid's `instance`)
+-- and its name, for people only (spec 2.1). Outside any instance the game gives a continent's.
+function Selection.Instance()
+  local name, _, _, _, _, _, _, id = GetInstanceInfo()
+  return id, name
+end
+
+local SUGGEST_AHEAD = 12 * 60 * 60
+
+-- The loaded raid to pre-select in the raid question for an instance number (spec 2.1), or nil.
+-- A candidate has that instance and is under way or starts within 12 hours (spec 7.5). One under
+-- way beats any not started; two under way give none; among those not started the soonest start
+-- wins, and two with that same start give none. It only suggests; it never selects.
+function Selection.Suggest(instance)
+  if instance == nil then return nil end
+  local now = time()
+  local underWay, soonest, tied = {}, nil, false
+  for _, raid in ipairs(ns.Raids.Status()) do
+    if raid.instance == instance and raid.startsAt <= now + SUGGEST_AHEAD
+      and now < raid.startsAt + raid.durationMin * 60 then
+      if raid.startsAt <= now then
+        underWay[#underWay + 1] = raid.id
+      elseif not soonest or raid.startsAt < soonest.startsAt then
+        soonest, tied = raid, false
+      elseif raid.startsAt == soonest.startsAt then
+        tied = true
+      end
+    end
+  end
+  if #underWay > 0 then return #underWay == 1 and underWay[1] or nil end
+  if soonest and not tied then return soonest.id end
+end
+
 -- Sets none and forgets the held choice, so any choice from the group applies (leaving the
 -- group, or logging in outside one; #62).
 function Selection.Clear()
