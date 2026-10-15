@@ -13,5 +13,6 @@ Modules\Snapshot.lua
 Modules\Raids.lua
 Modules\Selection.lua
 Modules\Sync.lua
+Modules\Inbox.lua
 Modules\UI.lua
 Inbox.lua

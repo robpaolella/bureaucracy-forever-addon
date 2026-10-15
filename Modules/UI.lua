@@ -87,9 +87,7 @@ local CONTENT_WIDTH = 616
 local COLUMNS = { item = { 0, 206 }, hr = { 210, 176 }, sr = { 390, 226 } } -- x and width
 local ROW_GAP, HEADING_HEIGHT = 4, 22
 
-local function bare(name)
-  return (name:gsub("%-.*$", ""))
-end
+local bare = ns.Rules.Bare
 
 -- The characters in the group, by bare name. Out of a group it is the player alone.
 local function rosterSet()

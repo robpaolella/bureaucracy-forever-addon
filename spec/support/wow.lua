@@ -238,28 +238,41 @@ local function installGlobals(metadata)
     return item.name, item.link, 4, 0, 0, "", "", 1, "", item.icon
   end
   _G.GetLootThreshold = function() return wow.state.lootThreshold end
+
+  -- Where the player is, as set by wow.state.instance: name, type ("none", "party", "raid")
+  -- and id, the 8th value.
+  _G.GetInstanceInfo = function()
+    local i = wow.state.instance
+    return i.name, i.type, 0, "", 40, 0, false, i.id
+  end
 end
 
 -- Starts the game with the add-on installed: runs its files in .toc order, then fires
 -- ADDON_LOADED. options.saved holds SavedVariables from an earlier session; options.screen
--- ({ width, height }) sets the screen's size.
+-- ({ width, height }) sets the screen's size; options.inbox is what the helper's Inbox.lua
+-- defines (BureaucracyLootInbox), or the shipped placeholder when absent.
 function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
   wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false,
     items = {}, screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 },
-    time = 1792000000 }
+    time = 1792000000, instance = { name = "Eastern Kingdoms", type = "none", id = 0 } }
   local metadata, files = wow.readToc()
   wow.addonName = TOC:gsub("%.toc$", "")
   installGlobals(metadata)
   -- Each start is a fresh session: only the saved data passed in survives from before.
   for name in (metadata.SavedVariables or ""):gmatch("[^,%s]+") do _G[name] = nil end
   for name, value in pairs(options.saved or {}) do _G[name] = value end
+  _G.BureaucracyLootInbox = nil
   wow.ns = {}
   for _, file in ipairs(files) do
-    local chunk = assert(loadfile(ADDON_DIR .. "/" .. file:gsub("\\", "/")))
-    chunk(wow.addonName, wow.ns)
+    if file == "Inbox.lua" and options.inbox ~= nil then
+      _G.BureaucracyLootInbox = options.inbox
+    else
+      local chunk = assert(loadfile(ADDON_DIR .. "/" .. file:gsub("\\", "/")))
+      chunk(wow.addonName, wow.ns)
+    end
   end
   wow.fire("ADDON_LOADED", wow.addonName)
   return wow.ns
