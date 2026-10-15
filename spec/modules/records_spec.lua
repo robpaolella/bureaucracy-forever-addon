@@ -450,6 +450,17 @@ describe("Records", function()
       assert.are.same(before, ns.db)
     end)
 
+    it("never records an award from the catch-up twice when an officer's copy arrives", function()
+      merge({ site("site-key-0001", { voided = true }) })
+      local before = copy(ns.db)
+      assert.are.equal("replayed", select(2, Records.Award(ana({ id = "site-key-0001" }))))
+      assert.are.same({ nil, "key-conflict" }, { Records.Award(ana({ id = "site-key-0001", item = 17000 })) })
+      local replace = Records.Replace(Records.Award(ana()).id, ana({ id = "site-key-0001" }))
+      assert.is_truthy(replace)
+      assert.are.same(before.awards[RAID][1], Records.Get("site-key-0001"))
+      assert.are.equal(2, #ns.Raids.Awards(RAID))
+    end)
+
     it("merges into an award held as no raid instead of adding it twice", function()
       ns.db.activeRaid = nil
       local key = Records.Award(ana()).id

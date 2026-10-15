@@ -17,6 +17,8 @@ local AWARD_FIELDS = {
   "raid", "env", "practice", "boss", "item", "char", "user", "method", "roll", "note", "sender", "at",
 }
 local MAX_TEXT = 200
+-- The fields that tell two awards under one key apart (spec 3.4).
+local COMPARED = { "boss", "item", "char", "method" }
 
 -- The one place for the "not a guild run" rule (spec 2.1 "No"; #63): nothing new is recorded.
 -- Voids and replaces of awards already held still are (Robert, #7, 2026-10-15).
@@ -152,7 +154,7 @@ effect = function(awards, ops, op)
     void(award, op.reason, op.at)
     if op.type == "replace" then
       award.replacedBy = award.replacedBy or op.award.id
-      if not find(awards, "key", op.award.id) then arrive(awards, ops, op.award, op.key) end
+      if not locate(op.award.id) then arrive(awards, ops, op.award, op.key) end
     end
   else
     advance(award, op.type == "confirm" and "confirmed" or "not-confirmed", op.at)
@@ -168,6 +170,14 @@ local function record(raidId, op)
   if held then
     if same(held, op) then return held, "replayed" end
     return nil, "key-conflict"
+  end
+  local award = op.type == "award" and locate(op.id)
+  if award then
+    -- Held from the site's catch-up, with no operation: the same award, or another one.
+    for _, field in ipairs(COMPARED) do
+      if award[field] ~= op[field] then return nil, "key-conflict" end
+    end
+    return op, "replayed"
   end
   local awards, ops = lists(raidId, true)
   ops[#ops + 1] = op
@@ -310,7 +320,6 @@ function Records.Attach(raidId)
 end
 
 local SITE_FIELDS = { "boss", "item", "char", "user", "method", "roll" }
-local COMPARED = { "boss", "item", "char", "method" }
 local SITE_STATES = { confirmed = true, ["not-confirmed"] = true }
 
 -- Merges a raid's catch-up from the site (spec 3.4), already checked against its raid, into the
