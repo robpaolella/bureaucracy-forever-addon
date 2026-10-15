@@ -13,6 +13,8 @@ read_globals = {
   "GetMasterLootCandidate", "GetNumLootItems", "GiveMasterLoot", "LoggingChat",
   "SendChatMessage", "UnitName", "strtrim", "date", "time", "GetTime",
   "UIParent", "Minimap", "GameTooltip", "UISpecialFrames", "GetCursorPosition",
+  "GetItemInfo", "IsInRaid", "GetNumGroupMembers", "GetRaidRosterInfo", "ItemRefTooltip",
+  "TooltipDataProcessor", "Enum",
 }
 
 files["spec"] = { std = "+busted" }
