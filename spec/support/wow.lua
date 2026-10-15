@@ -128,6 +128,7 @@ local function installGlobals(metadata)
   end
   _G.strtrim = function(text) return (text:gsub("^%s+", ""):gsub("%s+$", "")) end
   _G.date = os.date
+  _G.time = function() return wow.state.time end
   _G.GetTime = function() return now end
   _G.CreateFrame = function(kind, name, parent, template)
     -- Like the game, a template it doesn't have is an error that stops the add-on loading.
@@ -213,7 +214,7 @@ function wow.start(options)
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
   wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false,
-    screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 } }
+    screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 }, time = 1792000000 }
   local metadata, files = wow.readToc()
   wow.addonName = TOC:gsub("%.toc$", "")
   installGlobals(metadata)
