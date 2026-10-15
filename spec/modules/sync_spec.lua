@@ -199,6 +199,8 @@ describe("Sync's O messages", function()
     ["a missing count"] = "O;k4m8q2;SA0001;Zoé Brûlé;K;x",
     ["n of 0"] = "O;k4m8q2;0/2;SA0001;Zoé Brûlé;K;x",
     ["n over N"] = "O;k4m8q2;3/2;SA0001;Zoé Brûlé;K;x",
+    ["a count of four digits"] = "O;k4m8q2;1/1000;SA0001;Zoé Brûlé;K;x",
+    ["n over N past exact numbers"] = "O;k4m8q2;9007199254740993/9007199254740992;SA0001;Zoé Brûlé;K;x",
     ["a negative n"] = "O;k4m8q2;-1/2;SA0001;Zoé Brûlé;K;x",
     ["a msgid too short"] = "O;k4m8q;1/1;SA0001;Zoé Brûlé;K;x",
     ["a msgid too long"] = "O;k4m8q22;1/1;SA0001;Zoé Brûlé;K;x",

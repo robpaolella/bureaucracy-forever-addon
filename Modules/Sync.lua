@@ -101,9 +101,11 @@ end
 
 -- One O message body's fields: { msgid, n, total, raid, author, piece }, raid and author
 -- unescaped, piece as sent (its operation text is decoded once whole). Nil and "malformed" for
--- another type, missing fields, a bad msgid, n/N out of range, or a bad escape.
+-- another type, missing fields, a bad msgid, n/N out of range (n from 1 to N; N of at most three
+-- digits, far above the longest operation's chunks), or a bad escape.
 function Sync.ParseChunk(body)
-  local msgid, n, total, raid, author, piece = body:match("^O;([^;]*);(%d+)/(%d+);([^;]*);([^;]*);(.+)$")
+  local msgid, n, total, raid, author, piece =
+    body:match("^O;([^;]*);(%d%d?%d?)/(%d%d?%d?);([^;]*);([^;]*);(.+)$")
   if not msgid or not msgid:find("^[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9]$") then
     return nil, "malformed"
   end
