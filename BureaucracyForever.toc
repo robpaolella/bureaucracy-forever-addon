@@ -11,6 +11,7 @@ Modules\Records.lua
 Modules\Tracking.lua
 Modules\Snapshot.lua
 Modules\Raids.lua
+Modules\Selection.lua
 Modules\Sync.lua
 Modules\UI.lua
 Inbox.lua

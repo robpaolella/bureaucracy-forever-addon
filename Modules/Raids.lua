@@ -3,7 +3,7 @@
 -- { snapshot, loadedAt }. A raid's two copies are kept apart: a pasted one stays until the
 -- officer removes it, the inbox's are replaced on every read. The copy in use is the one with
 -- the later `generated`; on a tie the pasted one (same site build, so same content).
--- The selection (activeRaid) is #63's; the award lists (awards[raidId], noRaid) are #7's.
+-- The selection (activeRaid) is Selection's (#63); the award lists (awards[raidId], noRaid) are #7's.
 local _, ns = ...
 
 local Raids = {}
@@ -123,7 +123,8 @@ end
 
 -- The loaded raids for the Sync tab, soonest start first. Each: id, code, name, env, instance
 -- (when present), startsAt, durationMin, generated and loadedAt of the copy in use, origin (the
--- copy in use: "pasted" or "inbox"), and pasted and inbox (true for each copy held).
+-- copy in use: "pasted" or "inbox"), and pasted and inbox (true for each copy held). Then the
+-- selection (Selection.Status).
 function Raids.Status()
   local list = {}
   for id in pairs(loadedIds()) do
@@ -141,7 +142,7 @@ function Raids.Status()
     if a.startsAt ~= b.startsAt then return a.startsAt < b.startsAt end
     return a.id < b.id
   end)
-  return list
+  return list, ns.Selection.Status()
 end
 
 -- The environment of the selected raid (activeRaid), or nil with none or one not loaded:
