@@ -48,7 +48,8 @@ local frameMethods = {}
 local frameMeta = { __index = frameMethods }
 for _, name in ipairs({
   "SetFrameStrata", "SetMovable", "EnableMouse", "SetClampedToScreen", "RegisterForDrag",
-  "RegisterForClicks", "SetTexture", "SetAllPoints", "SetFont", "SetTextColor",
+  "RegisterForClicks", "SetTexture", "SetAllPoints", "SetFont", "SetTextColor", "SetJustifyH",
+  "EnableMouseWheel",
 }) do
   frameMethods[name] = function() end
 end
@@ -56,6 +57,19 @@ end
 function frameMethods.RegisterEvent(self, event) self.events[event] = true end
 function frameMethods.UnregisterEvent(self, event) self.events[event] = nil end
 function frameMethods.SetScript(self, name, fn) self.scripts[name] = fn end
+function frameMethods.HookScript(self, name, fn)
+  self.hooks = self.hooks or {}
+  self.hooks[name] = self.hooks[name] or {}
+  table.insert(self.hooks[name], fn)
+end
+-- A line of text is one line high; a scroll frame scrolls as far as its child is taller.
+function frameMethods.GetStringHeight() return 12 end
+function frameMethods.SetScrollChild(self, child) self.scrollChild = child end
+function frameMethods.SetVerticalScroll(self, offset) self.verticalScroll = offset end
+function frameMethods.GetVerticalScroll(self) return self.verticalScroll or 0 end
+function frameMethods.GetVerticalScrollRange(self)
+  return math.max(0, ((self.scrollChild or {}).height or 0) - (self.height or 0))
+end
 function frameMethods.GetScript(self, name) return self.scripts[name] end
 function frameMethods.SetID(self, id) self.id = id end
 function frameMethods.GetID(self) return self.id end
@@ -80,7 +94,7 @@ function frameMethods.SetPoint(self, point, relativeTo, relativePoint, x, y)
   -- A frame centred on the screen or a widget keeps a centre the tests can read and move.
   if point == "CENTER" and #self.points == 1 and relativeTo and relativeTo.GetCenter then
     local cx, cy = relativeTo:GetCenter()
-    self.center = { cx + (x or 0), cy + (y or 0) }
+    if cx then self.center = { cx + (x or 0), cy + (y or 0) } end
   end
 end
 function frameMethods.GetCenter(self)
@@ -150,7 +164,14 @@ local function installGlobals(metadata)
   _G.GameTooltip = newFrame("GameTooltip", "GameTooltip")
   _G.GameTooltip.lines, _G.GameTooltip.shown = {}, false
   _G.GameTooltip.SetOwner = function(self, owner) self.owner, self.lines = owner, {} end
+  -- The item link tooltip (a clicked link in chat) is a tooltip of the same kind.
+  _G.ItemRefTooltip = newFrame("GameTooltip", "ItemRefTooltip")
+  for _, tooltip in ipairs({ _G.GameTooltip, _G.ItemRefTooltip }) do
+    tooltip.GetItem = function(self) return self.item and "Item", self.item end
+  end
+  _G.ItemRefTooltip.lines = {}
   _G.GameTooltip.AddLine = function(self, text) self.lines[#self.lines + 1] = text end
+  _G.ItemRefTooltip.AddLine = _G.GameTooltip.AddLine
   _G.SlashCmdList = {}
   _G.C_AddOns = {
     GetAddOnMetadata = function(name, key)
@@ -202,7 +223,20 @@ local function installGlobals(metadata)
   _G.GiveMasterLoot = function(i, index)
     wow.gives[#wow.gives + 1] = { slot = i, candidate = index }
   end
-  _G.UnitName = function() return wow.state.player end
+  _G.UnitName = function(unit)
+    if unit == nil or unit == "player" then return wow.state.player end
+    return (wow.state.group or {})[tonumber(unit:match("^party(%d)$")) + 1]
+  end
+  -- The group: wow.state.group lists its names, the player first; groupIsRaid says if it is a raid.
+  _G.IsInRaid = function() return wow.state.groupIsRaid or false end
+  _G.GetNumGroupMembers = function() return #(wow.state.group or {}) end
+  _G.GetRaidRosterInfo = function(i) return (wow.state.group or {})[i] end
+  -- Item facts the game knows, as wow.state.items[id] = { name, link, icon }.
+  _G.GetItemInfo = function(id)
+    local item = wow.state.items[id]
+    if not item then return nil end
+    return item.name, item.link, 4, 0, 0, "", "", 1, "", item.icon
+  end
   _G.GetLootThreshold = function() return wow.state.lootThreshold end
 
   -- Where the player is, as set by wow.state.instance: name, type ("none", "party", "raid")
@@ -222,8 +256,8 @@ function wow.start(options)
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
   wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false,
-    screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 }, time = 1792000000,
-    instance = { name = "Eastern Kingdoms", type = "none", id = 0 } }
+    items = {}, screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 },
+    time = 1792000000, instance = { name = "Eastern Kingdoms", type = "none", id = 0 } }
   local metadata, files = wow.readToc()
   wow.addonName = TOC:gsub("%.toc$", "")
   installGlobals(metadata)
