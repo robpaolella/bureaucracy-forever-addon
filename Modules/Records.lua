@@ -56,19 +56,27 @@ local function locate(key)
   return find(ns.db.noRaid or {}, "key", key), nil
 end
 
+-- The operation with this id, a replacement's new award included.
+local function findIn(ops, id)
+  for _, op in ipairs(ops) do
+    if op.id == id then return op end
+    if op.award and op.award.id == id then return op.award end
+  end
+end
+
 local function findOp(id)
   for _, ops in pairs(ns.db.ops or {}) do
-    local op = find(ops, "id", id)
+    local op = findIn(ops, id)
     if op then return op end
   end
-  return find(ns.db.noRaidOps or {}, "id", id)
+  return findIn(ns.db.noRaidOps or {}, id)
 end
 
 local function newId(prefix)
   local id
   repeat
     local chars = {}
-    for i = 1, 10 do
+    for i = 1, 8 do
       local n = math.random(#ID_CHARS)
       chars[i] = ID_CHARS:sub(n, n)
     end
@@ -77,10 +85,11 @@ local function newId(prefix)
   return id
 end
 
+-- The same payload: every field but the times (spec 4.2).
 local function same(a, b)
   if type(a) ~= "table" or type(b) ~= "table" then return a == b end
   for k, v in pairs(a) do
-    if not same(v, b[k]) then return false end
+    if k ~= "at" and not same(v, b[k]) then return false end
   end
   for k in pairs(b) do
     if a[k] == nil then return false end
@@ -88,7 +97,8 @@ local function same(a, b)
   return true
 end
 
--- An operation id (spec 4): 8 to 128 letters, digits, "_" or "-".
+-- An operation id (spec 4): 8 to 128 letters, digits, "_" or "-". The add-on makes 11 (9.1a):
+-- a two-letter type, "-" and eight lower-case letters or digits.
 function Records.ValidId(id)
   return type(id) == "string" and #id >= 8 and #id <= 128 and not id:find("[^%w_%-]")
 end
@@ -244,6 +254,11 @@ function Records.Replace(key, award, fields)
     local reason = refusal(award)
     if reason then return reason end
     op.award = awardOp(raidId, env, practice, award)
+    -- The new award needs its own key: not the original's, nor another award's.
+    local held = findOp(op.award.id)
+    if op.award.id == key or op.award.id == op.id or (held and not same(held, op.award)) then
+      return "key-conflict"
+    end
   end)
 end
 

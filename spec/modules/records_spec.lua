@@ -76,7 +76,7 @@ describe("Records", function()
       local seen = {}
       for _ = 1, 50 do
         local op = Records.Award(ana())
-        assert.is_true(Records.ValidId(op.id))
+        assert.is_truthy(op.id:match("^aw%-" .. ("[a-z0-9]"):rep(8) .. "$"))
         assert.is_nil(seen[op.id])
         seen[op.id] = true
       end
@@ -98,6 +98,9 @@ describe("Records", function()
       selectRaid()
       Records.Award(ana({ id = "aw-7f3k2m9q" }))
       assert.are.equal("replayed", select(2, Records.Award(ana({ id = "aw-7f3k2m9q" }))))
+      -- Times aren't part of the payload (spec 4.2).
+      local later = ana({ id = "aw-7f3k2m9q", at = 1792000099 })
+      assert.are.equal("replayed", select(2, Records.Award(later)))
       assert.are.same({ nil, "key-conflict" },
         { Records.Award(ana({ id = "aw-7f3k2m9q", char = "Bo Marsh" })) })
       assert.are.equal(1, #ns.Raids.Awards(RAID))
@@ -157,6 +160,33 @@ describe("Records", function()
       assert.is_nil(new.voided)
       assert.are.equal(2, #ns.Raids.Awards(RAID))
       assert.are.equal(3, #Records.Ops(RAID))
+    end)
+
+    it("refuses a replacement that reuses a key, changing nothing", function()
+      local other = Records.Award(ana({ char = "Dee Holt" })).id
+      local ops = #Records.Ops(RAID)
+      for _, id in ipairs({ key, other }) do
+        assert.are.same({ nil, "key-conflict" },
+          { Records.Replace(key, ana({ id = id, char = "Bo Marsh" })) })
+      end
+      assert.is_nil(Records.Get(key).voided)
+      assert.are.same({ 2, ops }, { #ns.Raids.Awards(RAID), #Records.Ops(RAID) })
+    end)
+
+    it("knows a replacement's new award when it arrives again on its own", function()
+      local new = ana({ id = "aw-2h6j9z4b", char = "Bo Marsh" })
+      Records.Replace(key, new)
+      assert.are.equal("replayed", select(2, Records.Award(new)))
+      assert.are.same({ nil, "key-conflict" }, { Records.Award(ana({ id = "aw-2h6j9z4b" })) })
+      assert.are.equal(2, #ns.Raids.Awards(RAID))
+    end)
+
+    it("takes a replacement whose new award arrived first", function()
+      local new = ana({ id = "aw-2h6j9z4b", char = "Bo Marsh" })
+      Records.Award(new)
+      assert.are.equal("recorded", select(2, Records.Replace(key, new)))
+      assert.are.same({ true, "aw-2h6j9z4b" }, { Records.Get(key).voided, Records.Get(key).replacedBy })
+      assert.are.equal(2, #ns.Raids.Awards(RAID))
     end)
 
     it("gives a replacement the replaced award's practice mark", function()
