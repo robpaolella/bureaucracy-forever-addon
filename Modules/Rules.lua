@@ -16,6 +16,7 @@ Rules.RECEIVED = "already received"
 local function bare(name)
   return (name:gsub("%-.*$", ""))
 end
+Rules.Bare = bare
 
 local function nameSet(list)
   if not list then return nil end
