@@ -164,8 +164,14 @@ local function installGlobals(metadata)
   _G.GameTooltip = newFrame("GameTooltip", "GameTooltip")
   _G.GameTooltip.lines, _G.GameTooltip.shown = {}, false
   _G.GameTooltip.SetOwner = function(self, owner) self.owner, self.lines = owner, {} end
-  _G.GameTooltip.GetItem = function(self) return self.item and "Item", self.item end
+  -- The item link tooltip (a clicked link in chat) is a tooltip of the same kind.
+  _G.ItemRefTooltip = newFrame("GameTooltip", "ItemRefTooltip")
+  for _, tooltip in ipairs({ _G.GameTooltip, _G.ItemRefTooltip }) do
+    tooltip.GetItem = function(self) return self.item and "Item", self.item end
+  end
+  _G.ItemRefTooltip.lines = {}
   _G.GameTooltip.AddLine = function(self, text) self.lines[#self.lines + 1] = text end
+  _G.ItemRefTooltip.AddLine = _G.GameTooltip.AddLine
   _G.SlashCmdList = {}
   _G.C_AddOns = {
     GetAddOnMetadata = function(name, key)

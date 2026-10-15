@@ -144,10 +144,11 @@ local function nameText(holder)
   return text
 end
 
-local function namesText(holders)
+-- The names in a list, or the grey word for nobody.
+local function namesText(holders, nobody)
   local parts = {}
   for i, holder in ipairs(holders) do parts[i] = nameText(holder) end
-  return #parts > 0 and table.concat(parts, ", ") or GREY:format("-")
+  return #parts > 0 and table.concat(parts, ", ") or GREY:format(nobody)
 end
 
 -- The reserved items grouped by boss, in the snapshot's order: { boss, items }. An item that
@@ -285,8 +286,8 @@ function UI.RefreshReserves()
       local hr = cell(rows, reserves.hrs, reserves.child, "GameFontHighlightSmall")
       local sr = cell(rows, reserves.srs, reserves.child, "GameFontHighlightSmall")
       place(item, "item", y, itemText(row.item))
-      place(hr, "hr", y, namesText(row.hr))
-      place(sr, "sr", y, namesText(row.sr))
+      place(hr, "hr", y, namesText(row.hr, "-"))
+      place(sr, "sr", y, namesText(row.sr, "-"))
       reserves.shown[#reserves.shown + 1] = { item = item, hr = hr, sr = sr }
       y = y + math.max(item:GetStringHeight(), hr:GetStringHeight(), sr:GetStringHeight()) + ROW_GAP
     end
@@ -365,8 +366,8 @@ local function addReserveLines(tooltip, item)
   local hr, sr = holderLists(snapshot, item, allAwards(raidId, snapshot), rosterSet())
   tooltip:AddLine(" ")
   tooltip:AddLine("Bureaucracy reserves", 1, 0.82, 0)
-  tooltip:AddLine("Hard: " .. namesText(hr), 1, 1, 1, true)
-  tooltip:AddLine("Soft: " .. namesText(sr), 1, 1, 1, true)
+  tooltip:AddLine("Hard: " .. namesText(hr, "none"), 1, 1, 1, true)
+  tooltip:AddLine("Soft: " .. namesText(sr, "none"), 1, 1, 1, true)
   tooltip:Show()
 end
 

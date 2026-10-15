@@ -539,7 +539,7 @@ describe("the item tooltips", function()
     assert.are.same({
       " ", "Bureaucracy reserves",
       "Hard: Ashla Brightwater, Lyra Dawnmere " .. grey("(trial)"),
-      "Soft: " .. grey("-"),
+      "Soft: " .. grey("none"),
     }, hover(101))
   end)
 
@@ -551,6 +551,14 @@ describe("the item tooltips", function()
     local lines = hover(100)
     assert.are.equal("Hard: Ashla Brightwater " .. TICK, lines[3])
     assert.are.equal("Soft: " .. grey("Doran Vale") .. ", " .. grey("Kessa Moorfield"), lines[4])
+  end)
+
+  it("also adds the names to a clicked item link", function()
+    chooseRaid(ns)
+    local tip = _G.ItemRefTooltip
+    tip.item, tip.lines = "|Hitem:100::::::::60|h[Item]|h", {}
+    for _, fn in ipairs(tip.hooks.OnTooltipSetItem) do fn(tip) end
+    assert.are.equal("Bureaucracy reserves", tip.lines[2])
   end)
 
   it("adds nothing for an item nobody reserved, or one with an empty list", function()
