@@ -558,7 +558,9 @@ describe("the item tooltips", function()
     local tip = _G.ItemRefTooltip
     tip.item, tip.lines = "|Hitem:100::::::::60|h[Item]|h", {}
     for _, fn in ipairs(tip.hooks.OnTooltipSetItem) do fn(tip) end
-    assert.are.equal("Bureaucracy reserves", tip.lines[2])
+    assert.are.same({ " ", "Bureaucracy reserves",
+      "Hard: Ashla Brightwater",
+      "Soft: " .. grey("Doran Vale") .. ", " .. grey("Kessa Moorfield") }, tip.lines)
   end)
 
   it("adds nothing for an item nobody reserved, or one with an empty list", function()
