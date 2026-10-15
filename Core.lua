@@ -1,4 +1,4 @@
--- Core: the add-on's namespace, its event hub and the /bf command.
+-- Core: the add-on's namespace, its log, its event hub and the /bf command.
 -- Every file listed in the .toc receives the add-on's name and the shared namespace table.
 local ADDON_NAME, ns = ...
 
@@ -9,6 +9,26 @@ ns.version = getMetadata(ADDON_NAME, "Version")
 
 function ns.Print(text)
   print("|cff33ff99Bureaucracy:|r " .. text)
+end
+
+-- The log: the last 50 things the add-on noted that need no chat line, kept for this session
+-- only and printed by /bf log, oldest first.
+local LOG_SIZE = 50
+ns.log = {}
+
+function ns.Log(text)
+  table.insert(ns.log, { at = time(), text = text })
+  if #ns.log > LOG_SIZE then table.remove(ns.log, 1) end
+end
+
+local function printLog()
+  if #ns.log == 0 then
+    ns.Print("nothing has been logged this session.")
+    return
+  end
+  for _, entry in ipairs(ns.log) do
+    ns.Print(date("%H:%M:%S", entry.at) .. " " .. entry.text)
+  end
 end
 
 -- Modules call ns.On(event, handler) to hear a game event; handlers get the event's arguments.
@@ -44,8 +64,10 @@ SlashCmdList.BUREAUCRACYFOREVER = function(input)
     ns.Print("version " .. tostring(ns.version) .. ".")
   elseif command == "minimap" then
     ns.UI.ShowMinimapButton(not ns.UI.button:IsShown())
+  elseif command == "log" then
+    printLog()
   else
     ns.Print("type /bf to open or close the window, /bf version for the version,"
-      .. " /bf minimap to show or hide the minimap button.")
+      .. " /bf minimap to show or hide the minimap button, /bf log for the add-on's log.")
   end
 end
