@@ -311,6 +311,16 @@ describe("the Reserves tab", function()
     assert.are.equal(9, #lines) -- Item 104 has no holders, boss Magmadar's 105 no reserves
   end)
 
+  it("marks the heading of a killed boss '· killed', and no other", function()
+    chooseRaid(ns)
+    wow.fire("ENCOUNTER_END", 1, "Lucifron", 0, 5, 1)
+    local lines = texts(names(ns))
+    assert.are.same({ "Lucifron · killed" }, lines[1])
+    assert.are.same({ "Magmadar" }, lines[4])
+    assert.are.same({ "Trash" }, lines[6])
+    assert.are.same({ "Other" }, lines[8])
+  end)
+
   it("shows '-' for a column nobody reserved in", function()
     chooseRaid(ns)
     local lines = texts(names(ns))
