@@ -4,7 +4,9 @@ describe("the add-on", function()
   it("loads its files in .toc order and handles ADDON_LOADED without errors", function()
     local ns = wow.start()
     assert.are.equal("BureaucracyForever", ns.name)
-    for _, module in ipairs({ "Rules", "Records", "Tracking", "Snapshot", "Raids", "Sync", "UI" }) do
+    local modules =
+      { "Rules", "Records", "Tracking", "Snapshot", "Raids", "Selection", "Sync", "Inbox", "UI" }
+    for _, module in ipairs(modules) do
       assert.is_table(ns[module], module)
     end
     assert.are.same({}, BureaucracyForeverDB)

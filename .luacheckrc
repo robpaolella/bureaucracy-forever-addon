@@ -12,7 +12,9 @@ read_globals = {
   "GetLootSlotInfo", "GetLootSlotLink", "GetLootSourceInfo", "GetLootThreshold",
   "GetMasterLootCandidate", "GetNumLootItems", "GiveMasterLoot", "LoggingChat",
   "SendChatMessage", "UnitName", "strtrim", "date", "time", "GetTime",
-  "UIParent", "Minimap", "GameTooltip", "UISpecialFrames", "GetCursorPosition",
+  "UIParent", "Minimap", "GameTooltip", "UISpecialFrames", "GetCursorPosition", "GetInstanceInfo",
+  -- The desktop helper's inbox (Inbox.lua), read at load.
+  "BureaucracyLootInbox",
 }
 
 files["spec"] = { std = "+busted" }

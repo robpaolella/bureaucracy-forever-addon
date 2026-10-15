@@ -124,7 +124,7 @@ end
 -- The loaded raids for the Sync tab, soonest start first. Each: id, code, name, env, instance
 -- (when present), startsAt, durationMin, generated and loadedAt of the copy in use, origin (the
 -- copy in use: "pasted" or "inbox"), and pasted and inbox (true for each copy held). Then the
--- selection (Selection.Status).
+-- selection (Selection.Status) and the helper's inbox read (Inbox.Status).
 function Raids.Status()
   local list = {}
   for id in pairs(loadedIds()) do
@@ -142,7 +142,7 @@ function Raids.Status()
     if a.startsAt ~= b.startsAt then return a.startsAt < b.startsAt end
     return a.id < b.id
   end)
-  return list, ns.Selection.Status()
+  return list, ns.Selection.Status(), ns.Inbox.Status()
 end
 
 -- The environment of the selected raid (activeRaid), or nil with none or one not loaded:
