@@ -172,6 +172,8 @@ describe("the helper's inbox", function()
         "The helper's file has no list of raids, so no raids were loaded from it." },
       { { formatVersion = 1, raids = {} },
         "The helper's file has no time it was written, so no raids were loaded from it." },
+      { { formatVersion = 1, written = math.huge, raids = {} },
+        "The helper's file has no time it was written, so no raids were loaded from it." },
       { "inbox", "The helper's file isn't an inbox, so no raids were loaded from it." },
     }
     for _, case in ipairs(bad) do

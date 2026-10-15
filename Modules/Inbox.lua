@@ -21,7 +21,10 @@ local function isList(v)
   return true
 end
 
-local function isInteger(v) return type(v) == "number" and v == math.floor(v) end
+-- An integer as spec 7.3 rule 2 allows: whole and within ±(2^53 - 1), so not infinite.
+local function isInteger(v)
+  return type(v) == "number" and v == math.floor(v) and math.abs(v) <= 9007199254740991
+end
 
 -- Why the file as a whole can't be used, or nil.
 local function fileProblem(inbox)
