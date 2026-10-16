@@ -48,7 +48,7 @@ local frameMethods = {}
 local frameMeta = { __index = frameMethods }
 for _, name in ipairs({
   "SetFrameStrata", "SetMovable", "EnableMouse", "SetClampedToScreen", "RegisterForDrag",
-  "RegisterForClicks", "SetTexture", "SetAllPoints", "SetFont", "SetTextColor", "SetJustifyH",
+  "RegisterForClicks", "SetAllPoints", "SetFont", "SetTextColor", "SetJustifyH",
   "EnableMouseWheel", "SetMultiLine", "SetAutoFocus", "SetMaxLetters", "SetTextInsets",
 }) do
   frameMethods[name] = function() end
@@ -73,6 +73,8 @@ function frameMethods.GetVerticalScrollRange(self)
   return math.max(0, ((self.scrollChild or {}).height or 0) - (self.height or 0))
 end
 function frameMethods.GetScript(self, name) return self.scripts[name] end
+function frameMethods.SetTexture(self, texture) self.texture = texture end
+function frameMethods.GetParent(self) return self.parent end
 function frameMethods.SetID(self, id) self.id = id end
 function frameMethods.GetID(self) return self.id end
 function frameMethods.SetText(self, text) self.text = text end

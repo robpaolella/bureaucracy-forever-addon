@@ -17,5 +17,6 @@ Modules\OpText.lua
 Modules\Sync.lua
 Modules\Inbox.lua
 Modules\Popup.lua
+Modules\PopupFrame.lua
 Modules\UI.lua
 Inbox.lua
