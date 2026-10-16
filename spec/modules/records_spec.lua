@@ -398,7 +398,8 @@ describe("Records", function()
       assert.is_nil(ns.Sync.CopyOut(RAID):find("site%-key%-000"))
     end)
 
-    it("survives a reload and applies when the award arrives by sync, with the raid gone from the inbox",
+    -- An award from another officer is Records.Award with its id (sync's receive path, #20).
+    it("survives a reload and applies when another officer's award arrives, the raid not in the inbox",
       function()
       merge({}, { { key = "aw-7f3k2m9q", reason = "wrong winner", at = T + 1 } })
       ns = wow.start({ saved = { BureaucracyForeverDB = copy(BureaucracyForeverDB) } })
@@ -406,7 +407,7 @@ describe("Records", function()
       assert.is_not_nil(ns.db.siteVoids["aw-7f3k2m9q"])
       ns.Raids.Load(snapshot(ns, RAID), "pasted")
       assert.is_true(ns.Selection.ChooseRaid(RAID, true))
-      Records.Award(ana({ id = "aw-7f3k2m9q", raid = RAID, env = "staging" }))
+      Records.Award(ana({ id = "aw-7f3k2m9q" }))
       local award = Records.Get("aw-7f3k2m9q")
       assert.are.same({ true, "wrong winner", T + 1 }, { award.voided, award.voidReason, award.voidedAt })
       assert.is_nil(ns.db.siteVoids["aw-7f3k2m9q"])
@@ -424,12 +425,15 @@ describe("Records", function()
       local other = catchup({}, { { key = "aw-7f3k2m9q", at = T + 1 } })
       other.raid = "cm9xr2k4a0002"
       Records.Merge(other)
-      other.raid, other.env = RAID, "production"
-      Records.Merge(other)
-      -- The last catch-up named another environment, so the award in RAID (staging) isn't voided.
       Records.Award(ana({ id = "aw-7f3k2m9q" }))
       assert.is_nil(Records.Get("aw-7f3k2m9q").voided)
       assert.is_not_nil(ns.db.siteVoids["aw-7f3k2m9q"])
+      other = catchup({}, { { key = "aw-3q9k2m7f", at = T + 1 } })
+      other.env = "production"
+      Records.Merge(other)
+      Records.Award(ana({ id = "aw-3q9k2m7f" }))
+      assert.is_nil(Records.Get("aw-3q9k2m7f").voided)
+      assert.is_not_nil(ns.db.siteVoids["aw-3q9k2m7f"])
       merge({}, { { key = "aw-9k2m7f3q", at = T + 1 } })
       ns.db.activeRaid = nil
       Records.Award(ana({ id = "aw-9k2m7f3q" }))
