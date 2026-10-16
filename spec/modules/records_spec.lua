@@ -302,6 +302,97 @@ describe("Records", function()
     end)
   end)
 
+  describe("a named target raid", function()
+    local OTHER = "cm9xr2k4a0002"
+
+    before_each(function()
+      selectRaid()
+      ns.Raids.Load(snapshot(ns, OTHER), "pasted")
+    end)
+
+    it("puts an award in the named raid and its operations, leaving the selected raid untouched", function()
+      local op, outcome = Records.Award(ana({ raid = OTHER }))
+      assert.are.same({ "recorded", OTHER, "staging" }, { outcome, op.raid, op.env })
+      assert.are.same({ op }, Records.Ops(OTHER))
+      assert.are.equal(OTHER, Records.Get(op.id).raid)
+      assert.are.same({}, Records.Ops(RAID))
+      assert.are.same({}, ns.Raids.Awards(RAID))
+      assert.are.equal(RAID, ns.db.activeRaid)
+    end)
+
+    it("puts each key operation for an award not held yet in the named raid", function()
+      local ops = {
+        Records.Confirm("aw-00000001", { raid = OTHER }),
+        Records.NotConfirmed("aw-00000002", { raid = OTHER }),
+        Records.Void("aw-00000003", { raid = OTHER, reason = "x" }),
+        Records.Replace("aw-00000004", ana({ id = "aw-00000005" }), { raid = OTHER }),
+      }
+      ops[5] = nil
+      assert.are.equal(4, #Records.Ops(OTHER))
+      for i, op in ipairs(ops) do
+        assert.are.equal(OTHER, op.raid)
+        assert.are.equal(op, Records.Ops(OTHER)[i])
+      end
+      assert.are.equal(OTHER, ops[4].award.raid)
+      assert.are.same({}, Records.Ops(RAID))
+      assert.are.same({}, ns.Raids.Awards(RAID))
+    end)
+
+    it("takes effect when the award arrives in the named raid", function()
+      Records.Confirm("aw-00000001", { raid = OTHER })
+      Records.Award(ana({ id = "aw-00000001", raid = OTHER }))
+      assert.are.equal("confirmed", Records.Get("aw-00000001").state)
+    end)
+
+    it("refuses a raid that isn't loaded and changes nothing", function()
+      local before = copy(ns.db)
+      local key = "aw-00000001"
+      local results = {
+        { Records.Award(ana({ raid = "cm9xr2k4a0099" })) },
+        { Records.Confirm(key, { raid = "nope" }) },
+        { Records.NotConfirmed(key, { raid = "nope" }) },
+        { Records.Void(key, { raid = "nope" }) },
+        { Records.Replace(key, ana(), { raid = "nope" }) },
+      }
+      for _, result in ipairs(results) do assert.are.same({ nil, "not loaded" }, result) end
+      assert.are.same(before, ns.db)
+    end)
+
+    it("refuses an unloaded raid even for an award held, and ignores a loaded one", function()
+      local key = Records.Award(ana()).id
+      local before = copy(ns.db)
+      assert.are.same({ nil, "not loaded" }, { Records.Void(key, { raid = "nope" }) })
+      assert.are.same(before, ns.db)
+      local op = Records.Confirm(key, { raid = OTHER })
+      assert.are.equal(RAID, op.raid)
+      assert.are.same({}, Records.Ops(OTHER))
+    end)
+
+    it("replays an award already held, whatever raid is named", function()
+      local first = Records.Award(ana({ id = "aw-00000001" }))
+      local op, outcome = Records.Award(ana({ id = "aw-00000001", raid = OTHER }))
+      assert.are.same({ "replayed", RAID }, { outcome, op.raid })
+      assert.are.equal(first, op)
+      assert.are.same({}, Records.Ops(OTHER))
+    end)
+
+    it("keeps the not-a-guild-run rule whatever the target", function()
+      local key = Records.Award(ana()).id
+      ns.Selection.ChooseOff()
+      assert.are.same({ nil, "quiet" }, { Records.Award(ana({ raid = OTHER })) })
+      assert.are.same({ nil, "quiet" }, { Records.Confirm("aw-00000001", { raid = OTHER }) })
+      assert.are.same({}, Records.Ops(OTHER))
+      local void, outcome = Records.Void(key, { raid = OTHER })
+      assert.are.same({ "recorded", RAID }, { outcome, void.raid })
+    end)
+
+    it("behaves as before without a raid", function()
+      local op = Records.Award(ana())
+      assert.are.equal(RAID, op.raid)
+      assert.are.same({}, Records.Ops(OTHER))
+    end)
+  end)
+
   it("keeps records through a save and reload", function()
     selectRaid()
     local key = Records.Award(ana()).id
