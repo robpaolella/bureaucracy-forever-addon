@@ -59,6 +59,19 @@ describe("the helper's inbox", function()
     assert.are.same({}, wow.printed)
   end)
 
+  it("skips and reports an entry whose boss rows share a code, and loads the others", function()
+    local function boss(id) return { id = id, name = id, trash = false, items = {} } end
+    local ns = wow.start({ inbox = inbox({
+      { snapshot = tree("raid00001", { bosses = { boss("lb_magmadar"), boss("xx_MAGMADAR") } }) },
+      { snapshot = tree("raid00002", { bosses = { boss("lb_magmadar"), boss("lb_lucifron") } }) },
+    }) })
+    assert.are.same({ "raid00002 inbox" }, loaded(ns))
+    local problem = "Raid 1 in the helper's file wasn't loaded: it isn't valid: bosses 1 and 2 share a code "
+      .. "(madar)."
+    assert.are.same({ problem }, inboxStatus(ns).problems)
+    assert.is_truthy(wow.printed[1]:find(problem, 1, true))
+  end)
+
   it("skips and reports an entry it can't read, and loads the others", function()
     local ns = wow.start({ inbox = inbox({
       { snapshot = tree("raid00001") },
