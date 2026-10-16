@@ -807,7 +807,7 @@ local function drawCopyMenu(offered, picked)
   for i, entry in ipairs(offered) do
     local b = sync.menuEntries[i]
     if not b then
-      b = newButton(menu, 308, 18)
+      b = newButton(menu, "", 308, 18)
       b.label:ClearAllPoints()
       b.label:SetPoint("LEFT", b, "LEFT", 4, 0)
       b.background = b:CreateTexture(nil, "BACKGROUND")

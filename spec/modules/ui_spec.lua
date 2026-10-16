@@ -985,6 +985,9 @@ describe("the Sync tab", function()
         assert.is_true(sync.menu:IsShown())
         assert.are.equal("Which raid's awards?", sync.menu.title:GetText())
         assert.are.same({ "   Molten Core, " .. DAY, "   Blackwing Lair, " .. DAY }, entries())
+        for _, b in ipairs(sync.menuEntries) do
+          assert.are.same({ 308, 18 }, { b:GetWidth(), b:GetHeight() })
+        end
       end)
 
       it("offers nothing picked when the selected raid has no text", function()
