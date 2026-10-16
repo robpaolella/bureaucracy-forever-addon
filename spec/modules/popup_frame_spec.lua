@@ -1,0 +1,236 @@
+local wow = require("spec.support.wow")
+
+local function link(id) return "|cffa335ee|Hitem:" .. id .. "::::::::60:::::|h[Item " .. id .. "]|h|r" end
+
+local function holder(char, kind, fields)
+  fields = fields or {}
+  return { user = fields.user or char:lower():gsub("%s", ""), char = char, kind = kind,
+    trial = fields.trial or false }
+end
+
+local function tree(fields)
+  local t = {
+    formatVersion = 1, raid = "raid00001", code = "MC0001", env = "staging", name = "Molten Core",
+    startsAt = 1792000000, durationMin = 240, generated = 1791990000,
+    addon = { version = "0.1.0", url = "https://example.invalid/addon" },
+    bosses = {
+      { id = "luc", name = "Lucifron", trash = false, items = { 1, 2, 3, 6 } },
+      { id = "tra", name = "Trash", trash = true, items = {} },
+    },
+    reserves = {}, awards = {},
+  }
+  for k, v in pairs(fields or {}) do t[k] = v end
+  return t
+end
+
+describe("PopupFrame", function()
+  local ns, pf
+
+  local GROUP
+
+  local function setup(fields, group)
+    ns = wow.start()
+    pf = ns.PopupFrame
+    GROUP = group or { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein", "Mirel Stone" }
+    wow.state.group = GROUP
+    wow.state.groupIsRaid = true
+    wow.state.lootMethod = { "master", 0, 0 }
+    if fields then
+      ns.Raids.Load(assert(ns.Snapshot.Validate(tree(fields), "0.1.0")), "pasted")
+      assert(ns.Selection.ChooseRaid("raid00001"))
+    end
+  end
+
+  local function drop(items)
+    for _, it in ipairs(items) do
+      it.link = it.link or link(it.id)
+      it.quality = it.quality or 4
+      it.sourceGuid = it.sourceGuid or "corpse1"
+      it.candidates = it.candidates or GROUP
+    end
+    wow.openLoot(items)
+  end
+
+  local function shownRows()
+    local list = {}
+    for _, row in ipairs(pf.rows()) do
+      if row:IsShown() then list[#list + 1] = row end
+    end
+    return list
+  end
+
+  describe("showing and closing", function()
+    it("shows for the loot master and closes with the loot window", function()
+      setup({})
+      drop({ { id = 1 } })
+      assert.is_true(pf.frame:IsShown())
+      wow.closeLoot()
+      assert.is_false(pf.frame:IsShown())
+    end)
+
+    it("does not show for another officer, or when it is not a guild run", function()
+      setup({})
+      wow.state.lootMethod = { "master", 2, 0 }
+      drop({ { id = 1 } })
+      assert.is_false(pf.frame:IsShown())
+      wow.state.lootMethod = { "master", 0, 0 }
+      assert.is_true(ns.Selection.ChooseOff())
+      drop({ { id = 1 } })
+      assert.is_false(pf.frame:IsShown())
+    end)
+
+    it("stays shut for the loot window once the officer closes it, and comes back for the next", function()
+      setup({})
+      drop({ { id = 1 } })
+      local close = pf.frame.close
+      close.scripts.OnClick() -- the click runs the button's own script, then the add-on's hook
+      for _, hook in ipairs(close.hooks.OnClick) do hook() end
+      assert.is_false(pf.frame:IsShown())
+      wow.closeLoot()
+      drop({ { id = 1 } })
+      assert.is_true(pf.frame:IsShown())
+    end)
+  end)
+
+  describe("the states", function()
+    it("draws a typical corpse (popup-typical)", function()
+      setup({ reserves = { [1] = { holder("Ashla Brightwater", "HR") },
+        [2] = { holder("Doran Vale", "SR") } } })
+      drop({ { id = 1 }, { id = 2 }, { id = 3 } })
+      assert.are.equal("Loot · Lucifron", pf.frame.title:GetText())
+      assert.are.equal("3 items", pf.frame.count:GetText())
+      assert.are.equal("Lucifron ▾", pf.frame.boss.label:GetText())
+      local rows = shownRows()
+      assert.are.equal(3, #rows)
+      assert.are.same({ "HARD RESERVE", "Ashla Brightwater", "Give to Ashla Brightwater" },
+        { rows[1].badgeText:GetText(), rows[1].beside:GetText(), rows[1].primary.label:GetText() })
+      assert.are.same({ "SOFT RESERVE", "Give to Doran Vale" },
+        { rows[2].badgeText:GetText(), rows[2].primary.label:GetText() })
+      assert.are.same({ "OPEN ROLL", "Nobody reserved it · everyone can roll", "Call open roll" },
+        { rows[3].badgeText:GetText(), rows[3].beside:GetText(), rows[3].primary.label:GetText() })
+      for _, row in ipairs(rows) do
+        assert.are.equal("D/B: choose ▾", row.db.label:GetText())
+        assert.is_true(row.primary:IsEnabled() and row.db:IsEnabled())
+      end
+      assert.are.equal(link(1), rows[1].title:GetText())
+      assert.is_truthy(pf.frame.foot:GetText():find("Reserves: Molten Core", 1, true))
+      assert.is_false(pf.frame.notice:IsShown())
+    end)
+
+    it("lists every item with its contenders and skipped holders (popup-crowded, popup-page2)", function()
+      local hr = {}
+      for i = 1, 4 do hr[i] = holder("Raider " .. string.char(64 + i), "HR") end
+      hr[#hr + 1] = holder("Kessa Moorfield", "HR")
+      local group = { "Masterlooter", "Bram Ironvein", "Mirel Stone", "Doran Vale" }
+      for i = 1, 4 do group[#group + 1] = "Raider " .. string.char(64 + i) end
+      setup({ reserves = { [1] = hr, [6] = { holder("Bram Ironvein", "HR"), holder("Mirel Stone", "SR"),
+        holder("Doran Vale", "SR") } } }, group)
+      drop({ { id = 1 }, { id = 2 }, { id = 3 }, { id = 4 }, { id = 6 }, { id = 6 } })
+      local rows = shownRows()
+      assert.are.equal(6, #rows)
+      assert.are.equal("6 items", pf.frame.count:GetText())
+      assert.are.equal("HARD RESERVE ROLL-OFF", rows[1].badgeText:GetText())
+      assert.are.equal("Raider A, Raider B, Raider C, Raider D", rows[1].detail:GetText())
+      assert.are.equal("Skipped: Kessa Moorfield (not in raid)", rows[1].skipped:GetText())
+      assert.are.equal("Call roll (4)", rows[1].primary.label:GetText())
+      assert.are.equal(link(6) .. " · Copy 2 of 2", rows[6].title:GetText())
+      assert.are.equal("Mirel Stone, Doran Vale · Copy 1 goes to the hard reserve", rows[6].detail:GetText())
+      for i = 2, #rows do -- each row sits below the one before, so none is hidden under another
+        assert.is_true(rows[i].points[1].y < rows[i - 1].points[1].y)
+      end
+    end)
+
+    it("asks which boss, with Give and D/B greyed until one is picked (popup-boss)", function()
+      setup({ reserves = { [3] = { holder("Ashla Brightwater", "HR") } },
+        bosses = { { id = "luc", name = "Lucifron", trash = false, items = { 3, 6 } },
+          { id = "mag", name = "Magmadar", trash = false, items = { 3, 6 } },
+          { id = "tra", name = "Trash", trash = true, items = {} } } })
+      ns.db.attribution = { raid00001 = { kills = { luc = 1792000000, mag = 1792000000 }, pulls = {},
+        corpses = { other = 1792000100 } } }
+      drop({ { id = 3, sourceGuid = "other" }, { id = 2, sourceGuid = "other" } })
+      assert.are.equal("Loot · Trash", pf.frame.title:GetText())
+      assert.are.equal("These items drop from more than one boss. Pick the boss before awarding.",
+        pf.frame.notice:GetText())
+      local row = shownRows()[1]
+      assert.is_false(row.primary:IsEnabled())
+      assert.is_false(row.db:IsEnabled())
+      assert.is_true(shownRows()[2].primary:IsEnabled()) -- an open roll needs no boss
+      assert.is_false(pf.menu:IsShown())
+      pf.frame.boss.scripts.OnClick()
+      assert.is_true(pf.menu:IsShown())
+      assert.are.equal("Which boss dropped this?", pf.menu.title:GetText())
+      pf.pickEntries()[2].scripts.OnClick()
+      assert.is_false(pf.menu:IsShown())
+      assert.are.equal("Loot · Magmadar", pf.frame.title:GetText())
+      assert.is_false(pf.frame.notice:IsShown())
+      row = shownRows()[1]
+      assert.is_true(row.primary:IsEnabled() and row.db:IsEnabled())
+    end)
+
+    it("enables Give and D/B once Trash is picked", function()
+      setup({ reserves = { [3] = { holder("Ashla Brightwater", "HR") } },
+        bosses = { { id = "luc", name = "Lucifron", trash = false, items = { 3 } },
+          { id = "mag", name = "Magmadar", trash = false, items = { 3 } },
+          { id = "tra", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = 3 } })
+      assert.is_false(shownRows()[1].primary:IsEnabled())
+      pf.frame.boss.scripts.OnClick()
+      pf.pickEntries()[3].scripts.OnClick()
+      assert.are.equal("Trash ▾", pf.frame.boss.label:GetText())
+      assert.is_true(shownRows()[1].primary:IsEnabled())
+    end)
+
+    it("says no reserves are loaded and links to the Sync tab (popup-no-reserves)", function()
+      setup()
+      drop({ { id = 1 }, { id = 2 } })
+      assert.are.equal("No reserves loaded, so every item is an open roll.", pf.frame.notice:GetText())
+      assert.are.equal("Load reserves", pf.frame.link.label:GetText())
+      assert.are.equal("Reserves: none loaded", pf.frame.foot:GetText())
+      for _, row in ipairs(shownRows()) do
+        assert.are.equal("OPEN ROLL", row.badgeText:GetText())
+        assert.are.equal("No reserves loaded · everyone can roll", row.beside:GetText())
+        assert.are.equal("Call open roll", row.primary.label:GetText())
+      end
+      pf.frame.link.scripts.OnClick()
+      assert.are.equal("Sync", ns.UI.selected)
+      assert.is_true(ns.UI.tabs.Sync:GetParent():IsShown())
+    end)
+
+    it("hides rows left over from a longer corpse", function()
+      setup({})
+      drop({ { id = 1 }, { id = 2 }, { id = 3 } })
+      wow.closeLoot()
+      drop({ { id = 1 } })
+      assert.are.equal(1, #shownRows())
+      assert.are.equal("1 item", pf.frame.count:GetText())
+    end)
+  end)
+
+  describe("names still loading", function()
+    it("asks again after a wait and shows the winner once the name loads", function()
+      setup({ reserves = { [1] = { holder("Ashla Brightwater", "HR") } } })
+      drop({ { id = 1, candidates = { "Masterlooter", "Unknown" } } })
+      local row = shownRows()[1]
+      assert.are.equal("Give to Unknown", row.primary.label:GetText())
+      assert.is_false(row.primary:IsEnabled())
+      wow.advance(1)
+      assert.are.equal("Give to Unknown", shownRows()[1].primary.label:GetText()) -- still loading
+      wow.state.loot[1].candidates = { "Masterlooter", "Ashla Brightwater" }
+      wow.advance(1)
+      row = shownRows()[1]
+      assert.are.equal("Give to Ashla Brightwater", row.primary.label:GetText())
+      assert.is_true(row.primary:IsEnabled())
+      wow.advance(5) -- nothing left to wait for
+      assert.are.equal("Give to Ashla Brightwater", shownRows()[1].primary.label:GetText())
+    end)
+
+    it("stops asking when the loot window closes", function()
+      setup({ reserves = { [1] = { holder("Ashla Brightwater", "HR") } } })
+      drop({ { id = 1, candidates = { "Masterlooter", "Unknown" } } })
+      wow.closeLoot()
+      wow.state.loot = { { link = link(1), quality = 4, candidates = GROUP } }
+      wow.advance(5)
+      assert.is_false(pf.frame:IsShown())
+    end)
+  end)
+end)
