@@ -14,7 +14,7 @@ read_globals = {
   "SendChatMessage", "UnitName", "strtrim", "date", "time", "GetTime",
   "UIParent", "Minimap", "GameTooltip", "UISpecialFrames", "GetCursorPosition", "GetInstanceInfo",
   "GetItemInfo", "IsInRaid", "GetNumGroupMembers", "GetRaidRosterInfo", "ItemRefTooltip",
-  "TooltipDataProcessor", "Enum",
+  "TooltipDataProcessor", "Enum", "C_PartyInfo",
   -- The desktop helper's inbox (Inbox.lua), read at load.
   "BureaucracyLootInbox",
 }

@@ -248,6 +248,13 @@ local function installGlobals(metadata)
     return item.name, item.link, 4, 0, 0, "", "", 1, "", item.icon
   end
   _G.GetLootThreshold = function() return wow.state.lootThreshold end
+  -- The loot method, as wow.state.lootMethod = { method, partyIndex, raidIndex } (index 0: the player).
+  _G.C_PartyInfo = {
+    GetLootMethod = function()
+      local m = wow.state.lootMethod
+      return m[1], m[2], m[3]
+    end,
+  }
 
   -- Where the player is, as set by wow.state.instance: name, type ("none", "party", "raid")
   -- and id, the 8th value.
@@ -265,7 +272,8 @@ function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
-  wow.state = { loot = {}, lootThreshold = 2, player = "Masterlooter", chatLog = false, chatLockdown = false,
+  wow.state = { loot = {}, lootThreshold = 2, lootMethod = { "group", 0, 0 }, player = "Masterlooter",
+    chatLog = false, chatLockdown = false,
     items = {}, screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 },
     time = 1792000000, instance = { name = "Eastern Kingdoms", type = "none", id = 0 } }
   local metadata, files = wow.readToc()
