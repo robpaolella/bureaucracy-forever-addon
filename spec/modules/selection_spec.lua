@@ -256,6 +256,16 @@ describe("Selection", function()
     assert.is_nil(ns.Selection.Gone())
   end)
 
+  it("keeps the selected raid's latest name and start for the notice", function()
+    Selection.ChooseRaid("raid00002")
+    Raids.Load(snapshot(ns, "raid00002", { name = "Molten Core (moved)", startsAt = 1792003600,
+      generated = 1791995000 }), "inbox")
+    Raids.ReplaceInbox({})
+    Selection.RaidGone("raid00002")
+    local gone = Selection.Gone()
+    assert.are.same({ "Molten Core (moved)", 1792003600 }, { gone.name, gone.startsAt })
+  end)
+
   it("names a raid that left by its code when the choice was saved without its name", function()
     Selection.ChooseRaid("raid00002")
     ns.db.selectionName, ns.db.selectionStartsAt = nil, nil

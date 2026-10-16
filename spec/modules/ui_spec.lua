@@ -1047,9 +1047,13 @@ describe("the Sync tab", function()
       assert.are.equal("You're in Molten Core (instance 409).", sync.where:GetText())
       assert.are.equal("Choosing another raid changes it for every officer in the group.",
         sync.whereHint:GetText())
+      -- It follows the player as they move.
       wow.state.instance = { name = "Ironforge", type = "none", id = 0 }
-      ns.UI.RefreshSync()
+      wow.fire("ZONE_CHANGED_NEW_AREA")
       assert.are.equal("You're not in an instance.", sync.where:GetText())
+      wow.state.instance = { name = "Onyxia's Lair", type = "raid", id = 249 }
+      wow.fire("PLAYER_ENTERING_WORLD", false, false)
+      assert.are.equal("You're in Onyxia's Lair (instance 249).", sync.where:GetText())
     end)
 
     it("changes the raid at once when the current raid has no awards (sync-switched)", function()
@@ -1168,7 +1172,8 @@ describe("the Sync tab", function()
       assert.is_true(ns.UI.dialog:IsShown())
       assert.are.same({ "|cffffffffMolten Core, " .. DAY .. "|r has left the helper's list: it was cancelled "
         .. "or has ended.",
-        "Its 12 awards are kept and still sent to the site. Choose the raid in the Sync tab.",
+        "Its 12 awards are kept and still sent to the site. You'll be asked which raid it is when you next "
+          .. "enter a raid instance.",
         "", "OK" }, dialog())
       -- Choose a raid now opens the raid question (#53); until then the notice has OK alone.
       assert.is_false(ns.UI.dialog.yes:IsShown())
@@ -1186,10 +1191,12 @@ describe("the Sync tab", function()
 
     it("says an award in the singular, and none", function()
       relog(saved(1))
-      assert.are.equal("Its 1 award is kept and still sent to the site. Choose the raid in the Sync tab.",
+      assert.are.equal("Its 1 award is kept and still sent to the site. You'll be asked which raid it is "
+        .. "when you next enter a raid instance.",
         dialog()[2])
       relog(saved(0))
-      assert.are.equal("It had no awards. Choose the raid in the Sync tab.", dialog()[2])
+      assert.are.equal("It had no awards. You'll be asked which raid it is when you next enter a raid "
+        .. "instance.", dialog()[2])
     end)
 
     it("shows the notice once, keeps the status until a raid is chosen, then drops it", function()

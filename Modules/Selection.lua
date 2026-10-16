@@ -188,10 +188,16 @@ function Selection.Status()
 end
 
 -- A raid loaded with the chosen code: a choice waiting for it is applied, and a second raid
--- with the selected raid's code leaves neither selected (spec 10.4).
+-- with the selected raid's code leaves neither selected (spec 10.4). A newer copy of the selected
+-- raid updates its name and start, kept for the notice when it leaves the list.
 ns.Raids.afterLoad = function(raidId)
   local d = db()
-  if Selection.ActiveBy() ~= "chosen" or d.activeRaid == raidId or not d.selectionCode then return end
+  if d.activeRaid == raidId then
+    local snapshot = ns.Raids.Get(raidId)
+    d.selectionName, d.selectionStartsAt = snapshot.name, snapshot.startsAt
+    return
+  end
+  if Selection.ActiveBy() ~= "chosen" or not d.selectionCode then return end
   if ns.Raids.Get(raidId).code:upper() ~= d.selectionCode then return end
   applyCode(d.selectionCode, d.selectionAt, d.selectionBy)
 end

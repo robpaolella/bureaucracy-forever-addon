@@ -325,6 +325,10 @@ local function redrawSoon()
   end)
 end
 ns.On("GROUP_ROSTER_UPDATE", redrawSoon)
+-- The Sync tab says which instance the player is in.
+for _, event in ipairs({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD" }) do
+  ns.On(event, function() UI.RefreshSync() end)
+end
 ns.On("GET_ITEM_INFO_RECEIVED", redrawSoon)
 
 local function scrollByWheel(self, delta)
@@ -576,7 +580,7 @@ local function goneNotice(gone)
     or string.format("Its %s %s kept and still sent to the site.", plural(n, "award", "awards"),
       agree(n, "is", "are"))
   notify(WHITE:format(goneName(gone)) .. " has left the helper's list: it was cancelled or has ended.",
-    kept .. " Choose the raid in the Sync tab.")
+    kept .. " You'll be asked which raid it is when you next enter a raid instance.")
 end
 
 local function buildDialog()
