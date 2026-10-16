@@ -233,6 +233,18 @@ describe("Sync.ReadPasted", function()
       refused(paste('"just text"'), "isn't a raid snapshot")
     end)
 
+    it("refuses boss rows that share a code, comparing the last five characters in lower case", function()
+      refused(paste(edit('id = "lb_magmadar"', 'id = "xx_LUCIFRON"')), "bosses 1 and 2 share a code")
+      refused(paste(edit('id = "lb_magmadar"', 'id = "ifron"')), "bosses 1 and 2 share a code")
+      assert.is_table(Sync.ReadPasted(paste(edit('id = "lb_magmadar"', 'id = "lb_lucifrox"'))))
+    end)
+
+    it("treats an id shorter than five characters as its own code", function()
+      local two = edit('id = "lb_magmadar"', 'id = "a"')
+      assert.is_table(Sync.ReadPasted(paste(two)))
+      refused(paste(two:gsub('id = "lb_trash"', 'id = "A"')), "bosses 2 and 3 share a code")
+    end)
+
     it("refuses a float, with no rounding", function()
       refused(paste(edit("durationMin = 240", "durationMin = 240.5")), "whole numbers")
       refused(paste(edit("durationMin = 240", "durationMin = 2e2")), "whole numbers")
