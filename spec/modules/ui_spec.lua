@@ -46,8 +46,8 @@ describe("the officers' window", function()
     assert.is_false(ns.UI.window:IsShown())
   end)
 
-  it("closes with Escape", function()
-    assert.are.same({ "BureaucracyForeverWindow" }, _G.UISpecialFrames)
+  it("closes with Escape, as does its dialog", function()
+    assert.are.same({ "BureaucracyForeverWindow", "BureaucracyForeverDialog" }, _G.UISpecialFrames)
   end)
 
   it("shows the Awards tab first, then the tab clicked, each with its placeholder", function()
@@ -626,5 +626,343 @@ describe("the item tooltips", function()
     calls[1][2](tip, { id = 999 })
     calls[1][2](tip, nil)
     assert.are.same({}, tip.lines)
+  end)
+end)
+
+-- A raid's snapshot as the site's tree; fields override the rest.
+local function raidTree(id, fields)
+  local tree = {
+    formatVersion = 1, raid = id, code = "C" .. id:sub(-5):upper(), env = "staging", name = "Molten Core",
+    startsAt = 1792000000, durationMin = 240, instance = 409, generated = 1791990000,
+    addon = { version = "0.0.0", url = "https://example.invalid/addon" },
+    bosses = {}, awards = {},
+    reserves = { [100] = { holder("u1", "Ashla Brightwater", "HR"), holder("u2", "Doran Vale", "SR") },
+      [101] = { holder("u1", "Ashla Brightwater", "SR") } },
+  }
+  for k, v in pairs(fields or {}) do tree[k] = v end
+  return tree
+end
+
+-- A value written as the site writes its reserves text: a Lua table constructor.
+local function serialize(value)
+  if type(value) == "string" then return string.format("%q", value) end
+  if type(value) ~= "table" then return tostring(value) end
+  local parts = {}
+  for k, v in pairs(value) do
+    local key = type(k) == "string" and k or "[" .. k .. "]"
+    parts[#parts + 1] = key .. " = " .. serialize(v)
+  end
+  return "{ " .. table.concat(parts, ", ") .. " }"
+end
+
+local function pasteText(id, fields)
+  return "BFSNAP1:1/1:" .. serialize(raidTree(id, fields))
+end
+
+local function copy(value)
+  if type(value) ~= "table" then return value end
+  local out = {}
+  for k, v in pairs(value) do out[k] = copy(v) end
+  return out
+end
+
+local RELEASES = "https://github.com/robpaolella/bureaucracy-forever-addon/releases/latest"
+
+describe("the Sync tab", function()
+  local ns, sync
+  local DAY = date("%a %d %b", 1792000000)
+
+  local function open()
+    ns.UI.Toggle()
+    ns.UI.tabButtons.Sync.scripts.OnClick()
+  end
+
+  local function start(options)
+    ns = wow.start(options)
+    sync = ns.UI.sync
+    wow.state.player = "Konvett"
+    open()
+  end
+
+  local function paste(text)
+    sync.box:SetText(text)
+    wow.click(function() sync.load.scripts.OnClick() end)
+  end
+
+  local function status() return sync.status.kind, sync.status.text:GetText() end
+
+  local function row(i)
+    local r = sync.rows[i]
+    return { r.name:GetText(), r.when:GetText(), r.instance:GetText(), r.counts:GetText(), r.awards:GetText(),
+      r.pasted:GetText() }
+  end
+
+  local function awards(raidId, count)
+    ns.db.awards = ns.db.awards or {}
+    ns.db.awards[raidId] = {}
+    for i = 1, count do
+      ns.db.awards[raidId][i] = { key = "k" .. i, item = 100, char = "Ashla", method = "HR" }
+    end
+  end
+
+  local function dialog()
+    local d = ns.UI.dialog
+    return { d.text:GetText(), d.hint:GetText(), d.yes.label:GetText(), d.no.label:GetText() }
+  end
+
+  before_each(function() start() end)
+
+  describe("with nothing loaded", function()
+    it("says no raids are loaded, with no table, and how to load one", function()
+      assert.are.same({ "warn", "No raids loaded. The pop-up still works, but every item is an open roll." },
+        { status() })
+      assert.are.equal("Raid events", sync.raidsHeading:GetText())
+      assert.is_false(sync.columns:IsShown())
+      assert.are.same({}, sync.rows)
+      assert.are.equal("|TInterface\\COMMON\\Indicator-Gray:12|t Desktop helper not running: paste "
+        .. "reserves in and copy awards out below.", sync.helper:GetText())
+      assert.are.equal("Reserves in", sync.inHeading:GetText())
+      assert.are.equal("On the guild site, open the raid and choose |cffffffffCopy reserves|r. Paste it here "
+        .. "with Ctrl+V (Cmd+V on Mac). Pasting chooses that raid for the group.", sync.inHint:GetText())
+      assert.are.equal("Paste the reserves text here", sync.placeholder:GetText())
+      assert.is_true(sync.placeholder:IsShown())
+      assert.are.equal("Load", sync.load.label:GetText())
+      assert.is_true(sync.load:IsShown())
+      assert.is_false(sync.resultNote:IsShown())
+      assert.is_false(sync.link:IsShown())
+    end)
+
+    it("draws nothing while the window is closed", function()
+      ns.UI.Toggle()
+      ns.Raids.Load(assert(ns.Sync.ReadPasted(pasteText("raid00001"))), "pasted")
+      ns.UI.RefreshSync()
+      assert.are.same({}, sync.rows)
+      ns.UI.Toggle()
+      assert.are.equal(1, #sync.rows)
+    end)
+  end)
+
+  describe("loading a paste", function()
+    it("loads the raid, chooses it for the group, and says when it was copied and loaded", function()
+      paste(pasteText("raid00001"))
+      assert.are.same({ "chosen", "raid00001", "Konvett" },
+        { ns.db.activeBy, ns.db.activeRaid, ns.db.chosenBy })
+      assert.are.equal("good", sync.resultNote.kind)
+      assert.are.equal("Loaded Molten Core, " .. DAY .. ". Copied from the site " .. date("%H:%M", 1791990000)
+        .. ", loaded " .. date("%H:%M", 1792000000) .. ".", sync.resultNote.text:GetText())
+      assert.are.equal("", sync.box:GetText())
+      assert.is_true(sync.placeholder:IsShown())
+      assert.are.same({ "good", "|cffffffffMolten Core, " .. DAY .. "|r · 2 players · 3 reserves · 0 awards\n"
+        .. "Chosen when you pasted its reserves at " .. date("%H:%M", 1792000000) .. "." }, { status() })
+      local at = date("%H:%M", 1792000000)
+      assert.are.same({ "Molten Core " .. grey(DAY), "Under way since " .. at, "409", "2 · 3", grey("-"),
+        grey("Pasted " .. at) }, row(1))
+      assert.is_true(sync.rows[1].selected)
+      assert.is_true(sync.rows[1].remove:IsShown())
+      assert.are.same({}, wow.blocked)
+    end)
+
+    it("adds the update notice when the site names a newer add-on", function()
+      paste(pasteText("raid00001", { addon = { version = "9.0.0", url = "https://example.invalid/new" } }))
+      assert.is_truthy(sync.resultNote.text:GetText():find(
+        ". Version 9.0.0 of the add-on is out (you have 0.0.0-dev). Download it from "
+          .. "https://example.invalid/new.",
+        1, true))
+    end)
+
+    it("refuses a bad paste, changing nothing and keeping the text", function()
+      paste(pasteText("raid00001"))
+      local before = copy(ns.db)
+      paste("hello")
+      assert.are.same(before, ns.db)
+      assert.are.equal("bad", sync.resultNote.kind)
+      assert.are.equal("This isn't the reserves text from the site. Copy it again from the site. Nothing was "
+        .. "loaded; your raids are unchanged.", sync.resultNote.text:GetText())
+      assert.are.equal("hello", sync.box:GetText())
+      assert.is_false(sync.link:IsShown())
+      assert.are.equal(1, #sync.rows)
+    end)
+
+    it("refuses a newer format with the download link selected, changing nothing", function()
+      local before = copy(ns.db)
+      paste(pasteText("raid00001", { formatVersion = 2 }))
+      assert.are.same(before, ns.db)
+      assert.are.equal("This reserves text needs a newer version of the add-on. Update the add-on, then "
+        .. "paste it again. Nothing was loaded; your raids are unchanged.", sync.resultNote.text:GetText())
+      assert.are.equal("Download link:", sync.linkLabel:GetText())
+      assert.is_true(sync.link:IsShown())
+      assert.are.equal(RELEASES, sync.link:GetText())
+      assert.is_true(sync.link.highlighted)
+      assert.are.equal("Press Ctrl+C to copy the link, open it in your browser, replace the add-on folder, "
+        .. "then /reload.", sync.linkHint:GetText())
+      -- Typing in the link box puts the link back.
+      sync.link:SetText("x")
+      sync.link.scripts.OnTextChanged(sync.link, true)
+      assert.are.equal(RELEASES, sync.link:GetText())
+      -- The next good paste clears the refusal.
+      paste(pasteText("raid00001"))
+      assert.is_false(sync.link:IsShown())
+      assert.are.equal("good", sync.resultNote.kind)
+    end)
+
+    it("replaces a raid already held with the new paste", function()
+      paste(pasteText("raid00001"))
+      awards("raid00001", 2)
+      wow.state.time = 1792000600
+      paste(pasteText("raid00001", { name = "Molten Core (updated)", generated = 1791999000,
+        reserves = { [100] = { holder("u1", "Ashla Brightwater", "HR") } } }))
+      assert.is_nil(ns.UI.dialog:IsShown() or nil)
+      assert.are.equal(1, #sync.rows)
+      assert.are.same({ "Molten Core (updated) " .. grey(DAY), "1 · 1", "2" },
+        { row(1)[1], row(1)[4], row(1)[5] })
+      assert.are.equal("raid00001", ns.db.activeRaid)
+    end)
+
+    it("chooses the pasted raid at once when the selected raid has no awards", function()
+      paste(pasteText("raid00001"))
+      paste(pasteText("raid00002", { name = "Onyxia's Lair", startsAt = 1792010000 }))
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.are.equal("raid00002", ns.db.activeRaid)
+      assert.is_true(sync.rows[2].selected)
+      assert.is_nil(sync.rows[1].selected)
+    end)
+
+    describe("when the selected raid has awards", function()
+      before_each(function()
+        paste(pasteText("raid00001"))
+        awards("raid00001", 12)
+        paste(pasteText("raid00002", { name = "Onyxia's Lair" }))
+      end)
+
+      it("asks first, with the raid still loaded and listed", function()
+        assert.is_true(ns.UI.dialog:IsShown())
+        assert.are.same({ "Switch the raid to |cffffffffOnyxia's Lair, " .. DAY .. "|r?",
+          "You have 12 awards for Molten Core. They stay with that raid and are still sent to the site. "
+            .. "Every officer in the group switches too.", "Switch", "Keep Molten Core" }, dialog())
+        assert.are.equal("raid00001", ns.db.activeRaid)
+        assert.are.equal(2, #sync.rows)
+      end)
+
+      it("Keep leaves the selection as it was, and the pasted raid loaded", function()
+        wow.click(function() ns.UI.dialog.no.scripts.OnClick() end)
+        assert.is_false(ns.UI.dialog:IsShown())
+        assert.are.equal("raid00001", ns.db.activeRaid)
+        assert.is_table(ns.Raids.Get("raid00002"))
+        assert.are.equal(2, #sync.rows)
+      end)
+
+      it("Switch chooses the pasted raid", function()
+        wow.click(function() ns.UI.dialog.yes.scripts.OnClick() end)
+        assert.is_false(ns.UI.dialog:IsShown())
+        assert.are.equal("raid00002", ns.db.activeRaid)
+        assert.is_truthy(select(2, status()):find("Chosen when you pasted its reserves", 1, true))
+      end)
+
+      it("says award and stays in the singular", function()
+        awards("raid00001", 1)
+        paste(pasteText("raid00002", { name = "Onyxia's Lair" }))
+        assert.are.equal("You have 1 award for Molten Core. It stays with that raid and is still sent to the "
+          .. "site. Every officer in the group switches too.", dialog()[2])
+      end)
+    end)
+  end)
+
+  describe("removing a pasted raid", function()
+    it("removes one with no awards without asking, and clears the selection", function()
+      paste(pasteText("raid00001"))
+      wow.click(function() sync.rows[1].remove.scripts.OnClick(sync.rows[1].remove) end)
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.is_nil(ns.Raids.Get("raid00001"))
+      assert.are.equal("none", ns.db.activeBy)
+      assert.are.same({}, sync.rows)
+      assert.are.equal("No raids loaded. The pop-up still works, but every item is an open roll.",
+        select(2, status()))
+    end)
+
+    it("asks first for one with awards; Cancel keeps it, Remove drops it and keeps its awards", function()
+      paste(pasteText("raid00001"))
+      awards("raid00001", 12)
+      local button = sync.rows[1].remove
+      wow.click(function() button.scripts.OnClick(button) end)
+      assert.are.same({ "Remove |cffffffffMolten Core, " .. DAY .. "|r?",
+        "Its 12 awards stay saved and can still be copied.", "Remove", "Cancel" }, dialog())
+      wow.click(function() ns.UI.dialog.no.scripts.OnClick() end)
+      assert.is_table(ns.Raids.Get("raid00001"))
+      assert.are.equal("raid00001", ns.db.activeRaid)
+      wow.click(function() button.scripts.OnClick(button) end)
+      wow.click(function() ns.UI.dialog.yes.scripts.OnClick() end)
+      assert.is_nil(ns.Raids.Get("raid00001"))
+      assert.are.equal("none", ns.db.activeBy)
+      assert.are.equal(12, #ns.db.awards.raid00001)
+      assert.are.same({}, sync.rows)
+    end)
+
+    it("says award and stays in the singular", function()
+      paste(pasteText("raid00001"))
+      awards("raid00001", 1)
+      wow.click(function() sync.rows[1].remove.scripts.OnClick(sync.rows[1].remove) end)
+      assert.are.equal("Its 1 award stays saved and can still be copied.", dialog()[2])
+    end)
+  end)
+
+  it("lists four raids, with no instance number and long names, Remove only on the pasted one", function()
+    local long = "Zul'Gurub alt run (custom raid with a very long name)"
+    local custom = raidTree("raid00003", { name = long, startsAt = 1792003600 })
+    custom.instance = nil
+    start({ inbox = { formatVersion = 1, written = 1791999000, raids = {
+      { snapshot = raidTree("raid00001") },
+      { snapshot = raidTree("raid00002", { name = "Onyxia's Lair", instance = 249, startsAt = 1792007200 }) },
+      { snapshot = custom },
+    } } })
+    paste(pasteText("raid00004", { name = "Blackwing Lair", instance = 469, startsAt = 1791900000 }))
+    local at = function(t) return date("%H:%M", t) end
+    assert.are.equal(4, #sync.rows)
+    assert.are.same({ "Blackwing Lair " .. grey(date("%a %d %b", 1791900000)), "Ended " .. at(1791914400),
+      "469", "2 · 3", grey("-"), grey("Pasted " .. at(1792000000)) }, row(1))
+    assert.are.same({ "Molten Core " .. grey(DAY), "Under way since " .. at(1792000000), "409" },
+      { row(2)[1], row(2)[2], row(2)[3] })
+    assert.are.same({ long .. " " .. grey(DAY), "Starts " .. at(1792003600), "|cffffa020None|r", "" },
+      { row(3)[1], row(3)[2], row(3)[3], row(3)[6] })
+    assert.are.equal("Starts " .. at(1792007200), row(4)[2])
+    assert.is_table(sync.rows[1].remove)
+    for i = 2, 4 do assert.is_nil(sync.rows[i].remove) end
+    for column, label in pairs({ name = "Raid event", when = "When", instance = "Instance",
+      counts = "Players · reserves", awards = "Awards" }) do
+      assert.are.equal(label, sync.headings[column]:GetText())
+    end
+    assert.are.equal("|TInterface\\COMMON\\Indicator-Green:12|t Desktop helper in use: raid events read at "
+      .. at(1792000000) .. " (they update at login or /reload), and awards go to the site live.",
+      sync.helper:GetText())
+  end)
+
+  describe("its status bar", function()
+    it("names another officer who chose the raid", function()
+      ns.Raids.Load(assert(ns.Sync.ReadPasted(pasteText("raid00001"))), "pasted")
+      ns.Selection.Apply("C00001", 1792000300, "Ashla")
+      ns.UI.RefreshSync()
+      assert.are.equal("Chosen by Ashla at " .. date("%H:%M", 1792000300) .. ". Awards from this group go to "
+        .. "this raid.", select(2, status()):match("\n(.*)$"))
+    end)
+
+    it("says when raids are loaded but none is chosen", function()
+      ns.Raids.Load(assert(ns.Sync.ReadPasted(pasteText("raid00001"))), "pasted")
+      ns.UI.RefreshSync()
+      assert.are.same({ "warn", "No raid chosen yet. Awards are held as \"no raid\" until one is chosen." },
+        { status() })
+    end)
+
+    it("says when the run is not a guild run", function()
+      ns.Selection.ChooseOff()
+      ns.UI.RefreshSync()
+      assert.are.equal("Not a guild run. The add-on is off for this group: no loot pop-up, no chat lines, "
+        .. "nothing recorded. It turns back on when you leave the group.", select(2, status()))
+    end)
+
+    it("says when the chosen raid isn't loaded here yet", function()
+      ns.Selection.Apply("C00009", 1792000300, "Ashla")
+      ns.UI.RefreshSync()
+      assert.are.equal("The chosen raid (C00009) isn't loaded here yet. Awards are held as \"no raid\" until "
+        .. "it loads.", select(2, status()))
+    end)
   end)
 end)
