@@ -2,7 +2,9 @@
 -- Saved for the helper: activeRaid (a raid id or nil), activeBy ("none", "chosen" or "off") and
 -- chosenBy (the officer's name or nil). Beside them, the add-on's own: selectionCode (the chosen
 -- raid's code, kept while it waits for that raid to load), selectionAt and selectionBy (the
--- choice's time and chooser, which order changes that cross: the later (at, by) wins).
+-- choice's time and chooser, which order changes that cross: the later (at, by) wins),
+-- selectionName and selectionStartsAt (the chosen raid's, for the notice when it leaves the list)
+-- and gone (the raid that left the list, until the next choice).
 local _, ns = ...
 
 local Selection = {}
@@ -11,12 +13,16 @@ ns.Selection = Selection
 local NEEDS_CONFIRMATION = "needs confirmation"
 
 local function db() return ns.db end
+local goneThisSession = false
 
 local function set(activeBy, raidId, code, at, by)
   local d = db()
+  local snapshot = ns.Raids.Get(raidId)
   d.activeBy, d.activeRaid = activeBy, raidId
   d.chosenBy = activeBy ~= "none" and by or nil
   d.selectionCode, d.selectionAt, d.selectionBy = code, at, by
+  d.selectionName, d.selectionStartsAt = snapshot and snapshot.name, snapshot and snapshot.startsAt
+  d.gone = nil
 end
 
 -- True when (at, by) is later than the held choice: at first, then by byte by byte.
@@ -116,8 +122,18 @@ function Selection.RaidGone(raidId)
   local d = db()
   if raidId == nil or d.activeRaid ~= raidId or ns.Raids.Get(raidId) then return nil end
   local name = d.selectionCode or raidId
+  local gone = { raid = raidId, code = d.selectionCode, name = d.selectionName,
+    startsAt = d.selectionStartsAt }
   set("none", nil, nil, d.selectionAt, d.selectionBy)
+  d.gone, goneThisSession = gone, true
   return "The selected raid (" .. name .. ") is no longer loaded. Choose the raid in the Sync tab."
+end
+
+-- The raid that left the list and cleared the selection, until the next choice: raid, code, and
+-- name and startsAt when known (nil for a choice saved before they were kept). Then true when it
+-- left in this session, so the notice shows once.
+function Selection.Gone()
+  return db().gone, db().gone ~= nil and goneThisSession
 end
 
 -- The instance the player is in: its number (GetInstanceInfo's 8th value, the raid's `instance`)
