@@ -240,6 +240,40 @@ describe("Selection", function()
     assert.is_nil(Selection.Apply("S00001", 1791999999, "Bo Marsh"))
   end)
 
+  it("remembers the raid that left, by name and start, until the next choice", function()
+    assert.is_nil(Selection.Gone())
+    Selection.ChooseRaid("raid00002")
+    Raids.ReplaceInbox({})
+    Selection.RaidGone("raid00002")
+    assert.are.same(
+      { { raid = "raid00002", code = "S00002", name = "Molten Core", startsAt = 1792000000 }, true },
+      { Selection.Gone() })
+    local saved = copy(ns.db)
+    ns = wow.start({ saved = { BureaucracyForeverDB = saved } })
+    -- Saved for the Sync tab, but it left in an earlier session.
+    assert.are.same({ "raid00002", false }, { ns.Selection.Gone().raid, select(2, ns.Selection.Gone()) })
+    ns.Selection.ChooseOff()
+    assert.is_nil(ns.Selection.Gone())
+  end)
+
+  it("keeps the selected raid's latest name and start for the notice", function()
+    Selection.ChooseRaid("raid00002")
+    Raids.Load(snapshot(ns, "raid00002", { name = "Molten Core (moved)", startsAt = 1792003600,
+      generated = 1791995000 }), "inbox")
+    Raids.ReplaceInbox({})
+    Selection.RaidGone("raid00002")
+    local gone = Selection.Gone()
+    assert.are.same({ "Molten Core (moved)", 1792003600 }, { gone.name, gone.startsAt })
+  end)
+
+  it("names a raid that left by its code when the choice was saved without its name", function()
+    Selection.ChooseRaid("raid00002")
+    ns.db.selectionName, ns.db.selectionStartsAt = nil, nil
+    Raids.ReplaceInbox({})
+    Selection.RaidGone("raid00002")
+    assert.are.same({ raid = "raid00002", code = "S00002" }, Selection.Gone())
+  end)
+
   it("clears the selection and forgets the held choice", function()
     Selection.ChooseOff()
     Selection.Clear()

@@ -325,6 +325,10 @@ local function redrawSoon()
   end)
 end
 ns.On("GROUP_ROSTER_UPDATE", redrawSoon)
+-- The Sync tab says which instance the player is in.
+for _, event in ipairs({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD" }) do
+  ns.On(event, function() UI.RefreshSync() end)
+end
 ns.On("GET_ITEM_INFO_RECEIVED", redrawSoon)
 
 local function scrollByWheel(self, delta)
@@ -405,8 +409,9 @@ local function hookTooltips()
   end
 end
 
--- The Sync tab (#16, design/44-sync-raids): the loaded raids, the helper line, and the paste box
--- that loads a raid's reserves and chooses it for the group. Copy awards is #72's.
+-- The Sync tab (#16, #51, design/44-sync-raids): the selection and who made it, the loaded raids
+-- with a choice per row (and Not a guild run), the helper line, and the paste box that loads a
+-- raid's reserves and chooses it for the group. Copy awards is #72's.
 local sync = {} -- the tab's pieces
 UI.sync = sync
 
@@ -414,7 +419,7 @@ local RELEASES = "https://github.com/robpaolella/bureaucracy-forever-addon/relea
 local WHITE, AMBER = "|cffffffff%s|r", "|cffffa020%s|r"
 local NOTE_COLORS = { good = { 0.08, 0.22, 0.08 }, warn = { 0.28, 0.2, 0.04 }, bad = { 0.32, 0.06, 0.06 } }
 local RAID_COLUMNS = { -- x and width
-  name = { 6, 180 }, when = { 190, 118 }, instance = { 312, 50 }, counts = { 366, 64 },
+  radio = { 4, 18 }, name = { 26, 160 }, when = { 190, 118 }, instance = { 312, 50 }, counts = { 366, 64 },
   awards = { 434, 40 }, pasted = { 478, 70 },
 }
 local RAID_HEADINGS = {
@@ -424,9 +429,38 @@ local RAID_HEADINGS = {
 local function plain(text) return (text:gsub("|", "||")) end
 local function clock(at) return date("%H:%M", at) end
 local function raidName(raid) return plain(raid.name) .. ", " .. date("%a %d %b", raid.startsAt) end
+-- The raid that left the list, by name and day, or by its code for a choice saved without them.
+local function goneName(gone)
+  return gone.name and raidName(gone) or "The selected raid (" .. plain(gone.code or gone.raid) .. ")"
+end
 
 local function agree(count, one, many) return count == 1 and one or many end
 
+-- The game's radio button art, drawn in text: its texture holds the unchecked and checked looks.
+local RADIO = { [false] = "|TInterface\\Buttons\\UI-RadioButton:14:14:0:0:64:16:0:16:0:16|t",
+  [true] = "|TInterface\\Buttons\\UI-RadioButton:14:14:0:0:64:16:16:32:0:16|t" }
+local OFF_LABEL = "Not a guild run " .. GREY:format("· the add-on stays off until you leave the group")
+
+-- The loot master's name, or nil when master loot is off.
+local function lootMaster()
+  if not (C_PartyInfo and C_PartyInfo.GetLootMethod) then return nil end
+  local method, partyIndex, raidIndex = C_PartyInfo.GetLootMethod()
+  if method ~= "master" and not (Enum and Enum.LootMethod and method == Enum.LootMethod.Masterlooter) then
+    return nil
+  end
+  if partyIndex == 0 then return UnitName("player") end
+  if IsInRaid() then return raidIndex and raidIndex > 0 and (GetRaidRosterInfo(raidIndex)) or nil end
+  return partyIndex and UnitName("party" .. partyIndex)
+end
+
+-- Who chose: "you", or the officer's name, marked when they are the loot master.
+local function chooser(name)
+  if name == UnitName("player") then return "you" end
+  if not name then return "an officer" end
+  local master = lootMaster()
+  local tag = master and bare(master) == bare(name) and " (loot master)" or ""
+  return plain(name) .. tag
+end
 -- A note bar: a tinted strip of text, green (good), amber (warn) or red (bad).
 local function newNote(parent)
   local note = CreateFrame("Frame", nil, parent)
@@ -459,25 +493,34 @@ function UI.SyncStatus()
     if sync.pasted and sync.pasted.raid == status.activeRaid and sync.pasted.at == status.at then
       how = "Chosen when you pasted its reserves at " .. clock(status.at) .. "."
     else
-      local by = status.chosenBy == UnitName("player") and "you" or plain(status.chosenBy or "an officer")
-      how = "Chosen by " .. by .. " at " .. clock(status.at) .. ". Awards from this group go to this raid."
+      how = "Chosen by " .. chooser(status.chosenBy) .. " at " .. clock(status.at)
+        .. ". Awards from this group go to this raid."
     end
     return "good", WHITE:format(raidName(snapshot)) .. " · " .. plural(players, "player", "players") .. " · "
       .. plural(total, "reserve", "reserves") .. " · " .. plural(awards, "award", "awards")
       .. "\n" .. how
   end
   if status.activeBy == "off" then
+    local by = chooser(status.chosenBy)
     return "warn", "Not a guild run. The add-on is off for this group: no loot pop-up, no chat lines, "
-      .. "nothing recorded. It turns back on when you leave the group."
+      .. "nothing recorded. It turns back on when you leave the group.\n"
+      .. (by == "you" and "You chose" or by .. " chose") .. " this at " .. clock(status.at) .. "."
   end
   if status.waiting then
     return "warn", "The chosen raid (" .. plain(status.code) .. ") isn't loaded here yet. Awards are held as "
-      .. "\"no raid\" until it loads."
+      .. "\"no raid\" until it loads.\nChosen by " .. chooser(status.chosenBy) .. " at " .. clock(status.at)
+      .. ". It applies here once the raid loads: from the helper at login or /reload, or by pasting its "
+      .. "reserves below."
+  end
+  local gone = ns.Selection.Gone()
+  if gone then
+    return "warn", "No raid chosen. " .. goneName(gone) .. " has left the helper's list. Awards are held as "
+      .. "\"no raid\" until a raid is chosen."
   end
   if #raids == 0 then
     return "warn", "No raids loaded. The pop-up still works, but every item is an open roll."
   end
-  return "warn", "No raid chosen yet. Awards are held as \"no raid\" until one is chosen."
+  return "warn", "No raid chosen yet. Awards are held as \"no raid\" until you choose one."
 end
 
 local function whenText(raid)
@@ -496,6 +539,13 @@ local function helperText(inbox)
     .. "awards out below."
 end
 
+-- Where the player is, under the raid table.
+local function whereText()
+  local name, kind, _, _, _, _, _, id = GetInstanceInfo()
+  if kind == nil or kind == "none" then return "You're not in an instance." end
+  return "You're in " .. plain(name) .. " (instance " .. tostring(id) .. ")."
+end
+
 local dialog
 
 -- The confirmation dialog in the middle of the screen: a question, a line on what follows, and
@@ -508,7 +558,29 @@ local function confirm(question, hint, yes, no, onYes)
     b:SetWidth(math.max(90, b.label:GetStringWidth() + 24))
   end
   dialog.onYes = onYes
+  dialog.yes:Show()
+  dialog.no:ClearAllPoints()
+  dialog.no:SetPoint("BOTTOMLEFT", dialog, "BOTTOM", 4, 14)
   dialog:Show()
+end
+
+-- The same dialog as a notice: its one button closes it.
+local function notify(text, hint)
+  confirm(text, hint, "", "OK", nil)
+  dialog.yes:Hide()
+  dialog.no:ClearAllPoints()
+  dialog.no:SetPoint("BOTTOM", dialog, "BOTTOM", 0, 14)
+end
+
+-- The notice when the selected raid has left the helper's list. Choose a raid now (the raid
+-- question, #53) is added with that question.
+local function goneNotice(gone)
+  local n = #ns.Raids.Awards(gone.raid)
+  local kept = n == 0 and "It had no awards."
+    or string.format("Its %s %s kept and still sent to the site.", plural(n, "award", "awards"),
+      agree(n, "is", "are"))
+  notify(WHITE:format(goneName(gone)) .. " has left the helper's list: it was cancelled or has ended.",
+    kept .. " You'll be asked which raid it is when you next enter a raid instance.")
 end
 
 local function buildDialog()
@@ -540,6 +612,33 @@ local function buildDialog()
   table.insert(UISpecialFrames, "BureaucracyForeverDialog")
 end
 
+-- Asks before moving the selection from current, which has awards, to raidId; Switch chooses it
+-- (then runs after, if given) and Keep changes nothing.
+local function askSwitch(raidId, current, after)
+  local keep, n = plain(ns.Raids.Get(current).name), #ns.Raids.Awards(current)
+  confirm("Switch the raid to " .. WHITE:format(raidName(ns.Raids.Get(raidId))) .. "?",
+    string.format("You have %s for %s. %s with that raid and %s still sent to the site. Every officer in "
+      .. "the group switches too.", plural(n, "award", "awards"), keep, agree(n, "It stays", "They stay"),
+      agree(n, "is", "are")),
+    "Switch", "Keep " .. keep, function()
+      ns.Selection.ChooseRaid(raidId, true)
+      if after then after() end
+      UI.RefreshSync()
+    end)
+end
+
+-- A row's choice: a raid id, or "off" for Not a guild run. Leaving a raid with awards asks first.
+local function choose(choice)
+  if choice == "off" then
+    ns.Selection.ChooseOff()
+  else
+    local current = ns.Selection.Status().activeRaid
+    local _, why = ns.Selection.ChooseRaid(choice)
+    if why == "needs confirmation" then askSwitch(choice, current) end
+  end
+  UI.RefreshSync()
+end
+
 -- Notes the raid as chosen by this paste when the paste changed the selection to it.
 local function notePasted(raidId, before)
   local status = ns.Selection.Status()
@@ -569,16 +668,7 @@ local function load()
       .. clock(snapshot.generated) .. ", loaded " .. clock(time()) .. "."
       .. (notice and " " .. notice or "") }
     if waiting then
-      local keep, n = plain(ns.Raids.Get(current).name), #ns.Raids.Awards(current)
-      confirm("Switch the raid to " .. WHITE:format(raidName(snapshot)) .. "?",
-        string.format("You have %s for %s. %s with that raid and %s still sent to the site. Every officer in "
-          .. "the group switches too.", plural(n, "award", "awards"), keep, agree(n, "It stays", "They stay"),
-          agree(n, "is", "are")),
-        "Switch", "Keep " .. keep, function()
-          ns.Selection.ChooseRaid(raidId, true)
-          notePasted(raidId, before)
-          UI.RefreshSync()
-        end)
+      askSwitch(raidId, current, function() notePasted(raidId, before) end)
     else
       notePasted(raidId, before)
     end
@@ -617,14 +707,32 @@ local function at(piece, y, x)
   piece:Show()
 end
 
--- One row of the raid table: its cells by column, and Remove for a pasted raid.
-local function drawRaid(index, raid, y)
+-- The click target over a row of the raid table: choosing it chooses that row's raid (or off).
+-- The selected row's is hidden, as choosing it again changes nothing.
+local function drawPick(index, choice, y, height, on)
+  local b = sync.picks[index]
+  if not b then
+    b = CreateFrame("Button", nil, sync.child)
+    b:SetFrameLevel(sync.child:GetFrameLevel() + 1)
+    b:SetScript("OnClick", function(self) choose(self.choice) end)
+    sync.picks[index] = b
+  end
+  b.choice = choice
+  b:SetSize(CONTENT_WIDTH, height)
+  at(b, y - 4)
+  if on then b:Hide() end
+  return b
+end
+
+-- One row of the raid table: its choice, cells by column, and Remove for a pasted raid.
+local function drawRaid(index, raid, y, on)
   local snapshot = ns.Raids.Get(raid.id)
   local players, total = reserveCounts(snapshot)
   local awards = #ns.Raids.Awards(raid.id)
   local pastedAt = raid.origin == "pasted" and "Pasted " .. clock(raid.loadedAt) or "Pasted"
   local row = {}
   for column, value in pairs({
+    radio = RADIO[on],
     name = plain(raid.name) .. " " .. GREY:format(date("%a %d %b", raid.startsAt)),
     when = whenText(raid),
     instance = raid.instance and tostring(raid.instance) or AMBER:format("None"),
@@ -643,6 +751,7 @@ local function drawRaid(index, raid, y)
     local b = sync.removes[index]
     if not b then
       b = newButton(sync.child, "Remove", 60, 18)
+      b:SetFrameLevel(sync.child:GetFrameLevel() + 2)
       b:SetScript("OnClick", function(self) remove(self.raidId) end)
       sync.removes[index] = b
     end
@@ -650,7 +759,9 @@ local function drawRaid(index, raid, y)
     at(b, y - 3, CONTENT_WIDTH - 62)
     row.remove = b
   end
-  return row, math.max(row.name:GetStringHeight(), 14) + 8
+  local height = math.max(row.name:GetStringHeight(), 14) + 8
+  row.pick = drawPick(index, raid.id, y, height, on)
+  return row, height
 end
 
 -- Draws the tab: the status bar, the raid table, the helper line and the paste box with its result.
@@ -660,11 +771,13 @@ function UI.RefreshSync()
   for _, pool in pairs(sync.cells) do
     for _, text in ipairs(pool) do text:Hide() end
   end
-  local optional = { sync.columns, sync.selected, sync.resultNote, sync.linkLabel, sync.link, sync.linkHint }
+  local optional = { sync.columns, sync.selected, sync.offRadio, sync.offLabel, sync.where, sync.whereHint,
+    sync.resultNote, sync.linkLabel, sync.link, sync.linkHint }
   for _, piece in ipairs(optional) do
     piece:Hide()
   end
   for _, b in pairs(sync.removes) do b:Hide() end -- keyed by row, with gaps for raids not pasted
+  for _, b in ipairs(sync.picks) do b:Hide() end
 
   local y = 0
   at(sync.status, y)
@@ -677,8 +790,9 @@ function UI.RefreshSync()
     at(sync.columns, y)
     y = y + 18
     for i, raid in ipairs(raids) do
-      local row, height = drawRaid(i, raid, y)
-      if raid.id == status.activeRaid then
+      local on = raid.id == status.activeRaid
+      local row, height = drawRaid(i, raid, y, on)
+      if on then
         at(sync.selected, y - 4)
         sync.selected:SetHeight(height)
         row.selected = true
@@ -686,6 +800,21 @@ function UI.RefreshSync()
       sync.rows[i] = row
       y = y + height
     end
+    -- Not a guild run, as the table's last row.
+    local off = status.activeBy == "off"
+    at(sync.offRadio, y, RAID_COLUMNS.radio[1])
+    sync.offRadio:SetText(RADIO[off])
+    at(sync.offLabel, y, RAID_COLUMNS.name[1])
+    sync.offPick = drawPick(#raids + 1, "off", y, 22, off)
+    if off then
+      at(sync.selected, y - 4)
+      sync.selected:SetHeight(22)
+    end
+    y = y + 22
+    at(sync.where, y)
+    sync.where:SetText(whereText())
+    at(sync.whereHint, y)
+    y = y + 18
   end
   at(sync.helper, y + 2)
   sync.helper:SetText(helperText(inbox))
@@ -716,7 +845,7 @@ end
 
 local function buildSync(content)
   content.placeholder:Hide()
-  sync.cells, sync.removes, sync.rows = {}, {}, {}
+  sync.cells, sync.removes, sync.rows, sync.picks = {}, {}, {}, {}
   sync.scroll = CreateFrame("ScrollFrame", nil, content)
   sync.scroll:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
   sync.scroll:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
@@ -752,6 +881,13 @@ local function buildSync(content)
     piece:SetText(text)
     return piece
   end
+  sync.offRadio = newText(sync.child, "GameFontHighlightSmall")
+  sync.offLabel = line("GameFontHighlightSmall", OFF_LABEL)
+  sync.offLabel:SetWidth(CONTENT_WIDTH - RAID_COLUMNS.name[1])
+  sync.where = line("GameFontHighlightSmall")
+  sync.whereHint = line("GameFontHighlightSmall",
+    "Choosing another raid changes it for every officer in the group.")
+  sync.whereHint:SetJustifyH("RIGHT")
   sync.helper = line("GameFontHighlightSmall")
   sync.inHeading = line("GameFontNormal", "Reserves in")
   sync.inHint = line("GameFontHighlightSmall", "On the guild site, open the raid and choose "
@@ -1006,6 +1142,9 @@ ns.On("ADDON_LOADED", function(name)
   buildButton()
   hookTooltips()
   if wasShown then window:Show() end
+  -- The inbox, read just before, may have taken the selected raid off the list.
+  local gone, now = ns.Selection.Gone()
+  if now then goneNotice(gone) end
 end)
 
 for _, event in ipairs({ "confirmed", "unconfirmed", "late" }) do
