@@ -28,17 +28,24 @@ local function normal(name)
   return (tostring(name):lower():gsub("%s", ""))
 end
 
--- The row id of the one non-Trash boss row whose name matches the game's, ignoring case and
--- spaces. No match, or two, gives nil: nothing is guessed.
-local function match(snapshot, name)
-  local found
+-- The row id of the one non-Trash boss row for the game's kill. A row with an `encounter` matches
+-- by that id; the name (ignoring case and spaces) is tried only against rows without one, and
+-- only when no row has the id (ADDON-SPEC.md 3.1). No match, or two, gives nil: nothing is guessed.
+local function match(snapshot, id, name)
+  local byId, byName, ids, names = nil, nil, 0, 0
   for _, boss in ipairs(snapshot.bosses) do
-    if not boss.trash and normal(boss.name) == normal(name) then
-      if found then return nil end
-      found = boss.id
+    if not boss.trash then
+      if boss.encounter ~= nil then
+        if boss.encounter == id then
+          byId, ids = boss.id, ids + 1
+        end
+      elseif normal(boss.name) == normal(name) then
+        byName, names = boss.id, names + 1
+      end
     end
   end
-  return found
+  if ids > 0 then return ids == 1 and byId or nil end
+  return names == 1 and byName or nil
 end
 
 ns.On("ENCOUNTER_START", function()
@@ -48,10 +55,10 @@ ns.On("ENCOUNTER_START", function()
   pulls[#pulls + 1] = time()
 end)
 
-ns.On("ENCOUNTER_END", function(_, name, _, _, success)
+ns.On("ENCOUNTER_END", function(id, name, _, _, success)
   local raidId, snapshot = current()
   if not raidId or success ~= 1 then return end
-  local bossId = match(snapshot, name)
+  local bossId = match(snapshot, id, name)
   if not bossId then return end
   saved(raidId).kills[bossId] = time()
   ns.UI.RefreshReserves() -- the heading gains its "· killed" mark if the tab is open

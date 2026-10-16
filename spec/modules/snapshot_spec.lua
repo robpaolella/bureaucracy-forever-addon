@@ -175,6 +175,19 @@ describe("Sync.ReadPasted", function()
       assert.is_nil(snapshot.instance)
     end)
 
+    it("keeps a boss row's encounter, and leaves it absent when there is none", function()
+      local snapshot = Sync.ReadPasted(paste(edit('name = "Lucifron", trash = false,',
+        'name = "Lucifron", trash = false, encounter = 663,')))
+      assert.are.equal(663, snapshot.bosses[1].encounter)
+      assert.is_nil(snapshot.bosses[2].encounter)
+    end)
+
+    it("refuses an encounter that is not a whole number", function()
+      local from = 'name = "Lucifron", trash = false,'
+      refused(paste(edit(from, from .. ' encounter = "663",')), "bosses 1, encounter has the wrong type")
+      refused(paste(edit(from, from .. " encounter = 6.5,")), "whole numbers")
+    end)
+
     it("ignores unknown fields, leaving them out of the snapshot", function()
       local text = edit("formatVersion = 1,", 'formatVersion = 1, colour = "red", extra = { 1, { a = 2 } },')
       text = text:gsub('trial = true }', 'trial = true, mood = "keen" }')
