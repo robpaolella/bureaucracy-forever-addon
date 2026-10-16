@@ -4,7 +4,9 @@
 -- copy-out and the helper). Awards made with no loaded raid selected go to .noRaid and
 -- .noRaidOps, without raid or env, until Attach. An operation naming an award not held yet stays
 -- in the list and takes effect when the award arrives (4.2). Awards merged from the site's
--- catch-up (Merge, spec 3.4) are records with no operation: they are the site's already.
+-- catch-up (Merge, spec 3.4) are records with no operation: they are the site's already. Its
+-- voids for awards not held yet wait in .siteVoids[key] = { raid, env, reason, at } (spec 4.4),
+-- never as operations.
 local _, ns = ...
 
 local Records = {}
@@ -108,10 +110,6 @@ end
 
 local effect
 
--- Voids in the site's catch-up waiting for an award the add-on doesn't hold, by key (spec 3.4).
--- Kept for this session only and never as operations: every login or /reload merges again.
-local sitePending = {}
-
 -- Voids an award not yet voided; the first void's reason and time stand.
 local function void(award, reason, at)
   if not award.voided then
@@ -125,8 +123,13 @@ local function settle(awards, ops, award)
   for _, waiting in ipairs(ops) do
     if waiting.key == award.key then effect(awards, ops, waiting) end
   end
-  local pending = sitePending[award.key]
-  if pending then void(award, pending.reason, pending.at) end
+  -- A pending site void (BureaucracyForeverDB.siteVoids, spec 4.4) applies to the award of its
+  -- own raid and environment, then is no longer pending; another raid's or none leaves it.
+  local pending = (ns.db.siteVoids or {})[award.key]
+  if pending and pending.raid == award.raid and pending.env == award.env then
+    void(award, pending.reason, pending.at)
+    ns.db.siteVoids[award.key] = nil
+  end
 end
 
 local function arrive(awards, ops, op, replaces)
@@ -359,7 +362,9 @@ function Records.Merge(catchup)
     if award then
       void(award, pending.reason, pending.at)
     else
-      sitePending[pending.key] = pending
+      ns.db.siteVoids = ns.db.siteVoids or {}
+      ns.db.siteVoids[pending.key] = { raid = catchup.raid, env = catchup.env,
+        reason = pending.reason, at = pending.at }
     end
   end
   return conflicts
