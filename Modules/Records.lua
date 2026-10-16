@@ -202,8 +202,10 @@ local function envOf(raidId)
   return snapshot and snapshot.env
 end
 
+-- kind is given only for an operation's own fields, which may name the target raid.
 local function refusal(fields, kind, held)
   if kind and quiet(kind, held) then return "quiet" end
+  if kind and fields.raid ~= nil and not ns.Raids.Get(fields.raid) then return "not loaded" end
   if fields.id ~= nil and not Records.ValidId(fields.id) then return "bad id" end
   for _, field in ipairs({ "note", "reason" }) do
     if fields[field] and #fields[field] > MAX_TEXT then return "too long" end
@@ -231,17 +233,17 @@ end
 -- note or reason over 200 characters) or "key-conflict".
 
 -- A hand-out was announced. fields: boss, item, char, user, method, roll, note, practice, and
--- optionally id, at and sender (this officer by default). It goes to the selected raid, or is
--- held as no raid while none is loaded.
+-- optionally id, at, sender (this officer by default) and raid. It goes to the raid named, else
+-- the selected raid, or is held as no raid while none is loaded.
 function Records.Award(fields)
   local reason = refusal(fields, "award")
   if reason then return nil, reason end
-  local raidId = current()
+  local raidId = fields.raid or current()
   return record(raidId, awardOp(raidId, envOf(raidId), fields.practice, fields))
 end
 
 -- An operation naming an award by key goes where the award is held; for an award not held yet,
--- where awards go now. It takes the award's practice mark.
+-- the raid named or where awards go now. It takes the award's practice mark.
 local function keyOp(kind, key, fields, extra)
   fields = fields or {}
   local award, raidId = locate(key)
@@ -251,7 +253,7 @@ local function keyOp(kind, key, fields, extra)
   if award then
     env, practice = award.env, award.practice
   else
-    raidId = current()
+    raidId = fields.raid or current()
     env, practice = envOf(raidId), fields.practice
   end
   local op = newOp(kind, raidId, env, practice, fields)
