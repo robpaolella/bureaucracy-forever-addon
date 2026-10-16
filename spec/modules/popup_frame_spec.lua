@@ -82,7 +82,9 @@ describe("PopupFrame", function()
     it("stays shut for the loot window once the officer closes it, and comes back for the next", function()
       setup({})
       drop({ { id = 1 } })
-      pf.frame.close.scripts.OnClick()
+      local close = pf.frame.close
+      close.scripts.OnClick() -- the click runs the button's own script, then the add-on's hook
+      for _, hook in ipairs(close.hooks.OnClick) do hook() end
       assert.is_false(pf.frame:IsShown())
       wow.closeLoot()
       drop({ { id = 1 } })

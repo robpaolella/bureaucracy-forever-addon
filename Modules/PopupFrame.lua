@@ -61,7 +61,8 @@ function PopupFrame.rows() return rows end
 function PopupFrame.pickEntries() return entries end
 
 local function build()
-  frame = CreateFrame("Frame", "BureaucracyForeverPopup", UIParent)
+  -- The same standard window as the officers' window: the client confirmed this template.
+  frame = CreateFrame("Frame", "BureaucracyForeverPopup", UIParent, "BasicFrameTemplateWithInset")
   PopupFrame.frame = frame
   frame:SetSize(WIDTH, 100)
   frame:SetPoint("CENTER", UIParent, "CENTER", 120, 0)
@@ -72,19 +73,21 @@ local function build()
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", frame.StartMoving)
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-  frame.background = frame:CreateTexture(nil, "BACKGROUND")
-  frame.background:SetAllPoints()
-  frame.background:SetColorTexture(0.03, 0.03, 0.03, 0.95)
 
-  frame.title = newText(frame, "GameFontNormal")
-  frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -PAD)
-  frame.close = newButton(frame, 20, 20)
-  frame.close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
-  setButton(frame.close, "X", true)
-  frame.close:SetScript("OnClick", function()
-    dismissed = true
-    frame:Hide()
-  end)
+  frame.title = frame.TitleText or (frame.TitleContainer and frame.TitleContainer.TitleText)
+  if not frame.title then
+    frame.title = newText(frame, "GameFontNormal")
+    frame.title:SetPoint("TOP", frame, "TOP", 0, -5)
+  end
+  -- The template's own close button; without one the add-on draws its own.
+  frame.close = frame.CloseButton
+  if not frame.close then
+    frame.close = newButton(frame, 20, 20)
+    frame.close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
+    setButton(frame.close, "X", true)
+    frame.close:SetScript("OnClick", function() frame:Hide() end)
+  end
+  frame.close:HookScript("OnClick", function() dismissed = true end)
 
   frame.notice = newText(frame, "GameFontNormal")
   frame.notice:SetWidth(WIDTH - 2 * PAD)
@@ -222,7 +225,7 @@ function PopupFrame.Refresh()
   end
   local boss = model.boss
   frame.title:SetText(model.title)
-  local y = 30
+  local y = 32
   if boss.notice or model.notice then
     frame.notice:ClearAllPoints()
     frame.notice:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
