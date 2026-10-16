@@ -51,3 +51,91 @@ function OpText.Encode(op)
   end
   error("unknown operation type: " .. tostring(kind))
 end
+
+-- Whether text is well-formed UTF-8: no stray continuation bytes, overlong forms, surrogates or
+-- code points past U+10FFFF.
+function OpText.ValidUtf8(text)
+  local i, n = 1, #text
+  while i <= n do
+    local c = text:byte(i)
+    local size, low, high = 1, 0x80, 0xBF
+    if c >= 0xC2 and c <= 0xDF then size = 2
+    elseif c >= 0xE0 and c <= 0xEF then
+      size = 3
+      if c == 0xE0 then low = 0xA0 elseif c == 0xED then high = 0x9F end
+    elseif c >= 0xF0 and c <= 0xF4 then
+      size = 4
+      if c == 0xF0 then low = 0x90 elseif c == 0xF4 then high = 0x8F end
+    elseif c >= 0x80 then return false end
+    for k = 1, size - 1 do
+      local b = text:byte(i + k)
+      if not b or b < (k == 1 and low or 0x80) or b > (k == 1 and high or 0xBF) then return false end
+    end
+    i = i + size
+  end
+  return true
+end
+
+-- Undoes Escape: the field's text, or nil when it has a "%" without two hex digits, a byte
+-- Escape always writes as %XX (";" is the separator), or isn't valid UTF-8 once decoded.
+function OpText.Unescape(field)
+  if field:find("[<>|%c]") or field:gsub("%%%x%x", ""):find("%%") then return nil end
+  local text = field:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end)
+  if not OpText.ValidUtf8(text) then return nil end
+  return text
+end
+
+local CODES = {}
+for kind, code in pairs(TYPES) do CODES[code] = kind end
+-- Fields after the type (spec 10.1); a replace's are followed by its new award's.
+local LAYOUT = {
+  award = { "id", "boss", "item", "char", "user", "method", "roll", "note", "sender", "at", "practice" },
+  confirm = { "id", "key", "at", "practice" },
+  ["not-confirmed"] = { "id", "key", "at", "practice" },
+  void = { "id", "key", "reason", "at", "practice" },
+  replace = { "id", "key", "at", "practice" },
+}
+local NUMBERS = { item = true, roll = true, at = true }
+
+-- Sets fields[from..] on target by the names in layout; nil when a value has the wrong type.
+local function fill(target, layout, fields, from)
+  for i, name in ipairs(layout) do
+    local value = fields[from + i - 1]
+    if value == "" then
+      value = nil
+    elseif name == "practice" then
+      if value ~= "1" then return nil end
+      value = true
+    elseif NUMBERS[name] then
+      if not value:find("^%d+$") then return nil end
+      value = tonumber(value)
+    end
+    target[name] = value
+  end
+  return target
+end
+
+-- The operation an operation text (spec 10.1) describes, with the fields Encode reads, or nil and
+-- "malformed": an unknown type, the wrong field count, a bad escape, text that isn't UTF-8, a
+-- practice field other than "1" or empty, or an item, roll or time that isn't a whole number.
+-- Raid and env are not in the text: the caller adds them from the envelope.
+function OpText.Decode(text)
+  local fields = {}
+  for field in (text .. ";"):gmatch("([^;]*);") do
+    local value = OpText.Unescape(field)
+    if value == nil then return nil, "malformed" end
+    fields[#fields + 1] = value
+  end
+  local kind = CODES[fields[1]]
+  local layout = LAYOUT[kind]
+  if not layout then return nil, "malformed" end
+  local count = 1 + #layout + (kind == "replace" and #AWARD_FIELDS + 1 or 0)
+  if #fields ~= count then return nil, "malformed" end
+  local op = fill({ type = kind }, layout, fields, 2)
+  if op and kind == "replace" then
+    op.award = fill({}, { "id", unpack(AWARD_FIELDS) }, fields, 2 + #layout)
+    if not op.award then op = nil end
+  end
+  if not op then return nil, "malformed" end
+  return op
+end
