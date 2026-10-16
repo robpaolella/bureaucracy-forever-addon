@@ -78,6 +78,20 @@ function UI.Select(name)
   end
   UI.selected = name
   if name == "Reserves" then UI.RefreshReserves() end
+  if name == "Sync" then UI.RefreshSync() end
+end
+
+-- A button drawn like the add-on's others: dark red, its label in the game's gold.
+local function newButton(parent, label, width, height)
+  local b = CreateFrame("Button", nil, parent)
+  b:SetSize(width, height or 24)
+  local background = b:CreateTexture(nil, "BACKGROUND")
+  background:SetAllPoints()
+  background:SetColorTexture(0.35, 0.08, 0.08, 1)
+  b.label = newText(b, "GameFontNormal")
+  b.label:SetPoint("CENTER")
+  b.label:SetText(label)
+  return b
 end
 
 -- The Reserves tab and the item tooltips (#15): the selected raid's reserves, read only.
@@ -177,6 +191,19 @@ local function plural(count, one, many)
   return count .. " " .. (count == 1 and one or many)
 end
 
+-- How many players reserved in a raid, and how many reserves they hold.
+local function reserveCounts(snapshot)
+  local users, players, total = {}, 0, 0
+  for _, holders in pairs(snapshot.reserves) do
+    for _, h in ipairs(holders) do
+      if not users[h.user] then players = players + 1 end
+      users[h.user] = true
+      total = total + 1
+    end
+  end
+  return players, total
+end
+
 -- What the Reserves tab shows. { empty = "no-raid" } with no selected raid loaded;
 -- { empty = "no-reserves", raid = name } for a raid nobody reserved in; otherwise the header
 -- line and each boss's rows, every row { item, hr, sr } (the item id and two lists of holders).
@@ -184,16 +211,8 @@ function UI.ReservesView()
   local raidId = ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
   if not snapshot then return { empty = "no-raid" } end
-  local users, total = {}, 0
-  for _, holders in pairs(snapshot.reserves) do
-    for _, h in ipairs(holders) do
-      users[h.user] = true
-      total = total + 1
-    end
-  end
+  local players, total = reserveCounts(snapshot)
   if total == 0 then return { empty = "no-reserves", raid = snapshot.name } end
-  local players = 0
-  for _ in pairs(users) do players = players + 1 end
   local awards, roster = allAwards(raidId, snapshot), rosterSet()
   local groups = {}
   for _, group in ipairs(reservedGroups(snapshot)) do
@@ -308,6 +327,11 @@ end
 ns.On("GROUP_ROSTER_UPDATE", redrawSoon)
 ns.On("GET_ITEM_INFO_RECEIVED", redrawSoon)
 
+local function scrollByWheel(self, delta)
+  local to = self:GetVerticalScroll() - delta * 40
+  self:SetVerticalScroll(math.max(0, math.min(to, self:GetVerticalScrollRange())))
+end
+
 local function buildReserves(content)
   content.placeholder:Hide()
   reserves.content = content
@@ -334,10 +358,7 @@ local function buildReserves(content)
   reserves.child:SetSize(CONTENT_WIDTH, 1)
   reserves.scroll:SetScrollChild(reserves.child)
   reserves.scroll:EnableMouseWheel(true)
-  reserves.scroll:SetScript("OnMouseWheel", function(self, delta)
-    local to = self:GetVerticalScroll() - delta * 40
-    self:SetVerticalScroll(math.max(0, math.min(to, self:GetVerticalScrollRange())))
-  end)
+  reserves.scroll:SetScript("OnMouseWheel", scrollByWheel)
 
   -- The empty state: what is missing, and a way to the Sync tab.
   reserves.title = newText(content, "GameFontNormal")
@@ -345,15 +366,8 @@ local function buildReserves(content)
   reserves.hint = newText(content, "GameFontDisable")
   reserves.hint:SetPoint("TOP", reserves.title, "BOTTOM", 0, -6)
   reserves.hint:SetWidth(380)
-  reserves.toSync = CreateFrame("Button", nil, content)
-  reserves.toSync:SetSize(90, 24)
+  reserves.toSync = newButton(content, "Go to Sync", 90)
   reserves.toSync:SetPoint("TOP", reserves.hint, "BOTTOM", 0, -12)
-  local background = reserves.toSync:CreateTexture(nil, "BACKGROUND")
-  background:SetAllPoints()
-  background:SetColorTexture(0.35, 0.08, 0.08, 1)
-  reserves.toSync.label = newText(reserves.toSync, "GameFontNormal")
-  reserves.toSync.label:SetPoint("CENTER")
-  reserves.toSync.label:SetText("Go to Sync")
   reserves.toSync:SetScript("OnClick", function() UI.Select("Sync") end)
 end
 
@@ -389,6 +403,403 @@ local function hookTooltips()
       addReserveLines(self, link and tonumber(link:match("item:(%d+)")))
     end)
   end
+end
+
+-- The Sync tab (#16, design/44-sync-raids): the loaded raids, the helper line, and the paste box
+-- that loads a raid's reserves and chooses it for the group. Copy awards is #72's.
+local sync = {} -- the tab's pieces
+UI.sync = sync
+
+local RELEASES = "https://github.com/robpaolella/bureaucracy-forever-addon/releases/latest"
+local WHITE, AMBER = "|cffffffff%s|r", "|cffffa020%s|r"
+local NOTE_COLORS = { good = { 0.08, 0.22, 0.08 }, warn = { 0.28, 0.2, 0.04 }, bad = { 0.32, 0.06, 0.06 } }
+local RAID_COLUMNS = { -- x and width
+  name = { 6, 180 }, when = { 190, 118 }, instance = { 312, 50 }, counts = { 366, 64 },
+  awards = { 434, 40 }, pasted = { 478, 70 },
+}
+local RAID_HEADINGS = {
+  name = "Raid event", when = "When", instance = "Instance", counts = "Players · reserves", awards = "Awards",
+}
+
+local function plain(text) return (text:gsub("|", "||")) end
+local function clock(at) return date("%H:%M", at) end
+local function raidName(raid) return plain(raid.name) .. ", " .. date("%a %d %b", raid.startsAt) end
+
+local function agree(count, one, many) return count == 1 and one or many end
+
+-- A note bar: a tinted strip of text, green (good), amber (warn) or red (bad).
+local function newNote(parent)
+  local note = CreateFrame("Frame", nil, parent)
+  note:SetWidth(CONTENT_WIDTH)
+  note.background = note:CreateTexture(nil, "BACKGROUND")
+  note.background:SetAllPoints()
+  note.text = newText(note, "GameFontHighlightSmall")
+  note.text:SetPoint("TOPLEFT", note, "TOPLEFT", 6, -5)
+  note.text:SetWidth(CONTENT_WIDTH - 12)
+  note.text:SetJustifyH("LEFT")
+  return note
+end
+
+local function setNote(note, kind, text)
+  local c = NOTE_COLORS[kind]
+  note.kind = kind
+  note.background:SetColorTexture(c[1], c[2], c[3], 1)
+  note.text:SetText(text)
+  note:SetHeight(note.text:GetStringHeight() + 10)
+end
+
+-- The status bar's kind and text: the selected raid and who chose it, or why there is none.
+function UI.SyncStatus()
+  local raids, status = ns.Raids.Status()
+  local snapshot = ns.Raids.Get(status.activeRaid)
+  if snapshot then
+    local players, total = reserveCounts(snapshot)
+    local awards = #ns.Raids.Awards(status.activeRaid)
+    local how
+    if sync.pasted and sync.pasted.raid == status.activeRaid and sync.pasted.at == status.at then
+      how = "Chosen when you pasted its reserves at " .. clock(status.at) .. "."
+    else
+      local by = status.chosenBy == UnitName("player") and "you" or plain(status.chosenBy or "an officer")
+      how = "Chosen by " .. by .. " at " .. clock(status.at) .. ". Awards from this group go to this raid."
+    end
+    return "good", WHITE:format(raidName(snapshot)) .. " · " .. plural(players, "player", "players") .. " · "
+      .. plural(total, "reserve", "reserves") .. " · " .. plural(awards, "award", "awards")
+      .. "\n" .. how
+  end
+  if status.activeBy == "off" then
+    return "warn", "Not a guild run. The add-on is off for this group: no loot pop-up, no chat lines, "
+      .. "nothing recorded. It turns back on when you leave the group."
+  end
+  if status.waiting then
+    return "warn", "The chosen raid (" .. plain(status.code) .. ") isn't loaded here yet. Awards are held as "
+      .. "\"no raid\" until it loads."
+  end
+  if #raids == 0 then
+    return "warn", "No raids loaded. The pop-up still works, but every item is an open roll."
+  end
+  return "warn", "No raid chosen yet. Awards are held as \"no raid\" until one is chosen."
+end
+
+local function whenText(raid)
+  local now, ends = time(), raid.startsAt + raid.durationMin * 60
+  if now < raid.startsAt then return "Starts " .. clock(raid.startsAt) end
+  if now < ends then return "Under way since " .. clock(raid.startsAt) end
+  return "Ended " .. clock(ends)
+end
+
+local function helperText(inbox)
+  if inbox.present then
+    return "|TInterface\\COMMON\\Indicator-Green:12|t Desktop helper in use: raid events read at "
+      .. clock(inbox.readAt) .. " (they update at login or /reload), and awards go to the site live."
+  end
+  return "|TInterface\\COMMON\\Indicator-Gray:12|t Desktop helper not running: paste reserves in and copy "
+    .. "awards out below."
+end
+
+local dialog
+
+-- The confirmation dialog in the middle of the screen: a question, a line on what follows, and
+-- two buttons. The second, or Escape, closes it and changes nothing.
+local function confirm(question, hint, yes, no, onYes)
+  dialog.text:SetText(question)
+  dialog.hint:SetText(hint)
+  for b, label in pairs({ [dialog.yes] = yes, [dialog.no] = no }) do
+    b.label:SetText(label)
+    b:SetWidth(math.max(90, b.label:GetStringWidth() + 24))
+  end
+  dialog.onYes = onYes
+  dialog:Show()
+end
+
+local function buildDialog()
+  dialog = CreateFrame("Frame", "BureaucracyForeverDialog", UIParent)
+  UI.dialog = dialog
+  dialog:SetSize(440, 130)
+  dialog:SetFrameStrata("DIALOG")
+  dialog:EnableMouse(true)
+  dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+  local background = dialog:CreateTexture(nil, "BACKGROUND")
+  background:SetAllPoints()
+  background:SetColorTexture(0, 0, 0, 0.92)
+  dialog.text = newText(dialog, "GameFontHighlight")
+  dialog.text:SetPoint("TOP", dialog, "TOP", 0, -18)
+  dialog.text:SetWidth(400)
+  dialog.hint = newText(dialog, "GameFontHighlightSmall")
+  dialog.hint:SetPoint("TOP", dialog.text, "BOTTOM", 0, -8)
+  dialog.hint:SetWidth(400)
+  dialog.yes = newButton(dialog, "", 90)
+  dialog.yes:SetPoint("BOTTOMRIGHT", dialog, "BOTTOM", -4, 14)
+  dialog.yes:SetScript("OnClick", function()
+    dialog:Hide()
+    dialog.onYes()
+  end)
+  dialog.no = newButton(dialog, "", 90)
+  dialog.no:SetPoint("BOTTOMLEFT", dialog, "BOTTOM", 4, 14)
+  dialog.no:SetScript("OnClick", function() dialog:Hide() end)
+  dialog:Hide()
+  table.insert(UISpecialFrames, "BureaucracyForeverDialog")
+end
+
+-- Notes the raid as chosen by this paste when the paste changed the selection to it.
+local function notePasted(raidId, before)
+  local status = ns.Selection.Status()
+  if status.activeRaid == raidId and status.at ~= before then
+    sync.pasted = { raid = raidId, at = status.at }
+  end
+end
+
+-- Load: reads the pasted text, loads the raid and chooses it, asking first when the selected raid
+-- has awards. A refused text changes nothing and stays in the box.
+local function load()
+  local held = ns.Selection.Status()
+  local before, current = held.at, held.activeRaid
+  local raidId, notice, waiting = ns.Selection.Paste(sync.box:GetText())
+  if not raidId then
+    local newer = notice:find("newer version of the add-on", 1, true) ~= nil
+    if newer then
+      notice = "This text needs a newer version of the add-on (you have " .. ns.version .. ")."
+    end
+    sync.result = { kind = "bad", link = newer,
+      text = notice .. " Nothing was loaded; your raids are unchanged." }
+  else
+    sync.box:SetText("")
+    sync.box:ClearFocus()
+    local snapshot = ns.Raids.Get(raidId)
+    sync.result = { kind = "good", text = "Loaded " .. raidName(snapshot) .. ". Copied from the site "
+      .. clock(snapshot.generated) .. ", loaded " .. clock(time()) .. "."
+      .. (notice and " " .. notice or "") }
+    if waiting then
+      local keep, n = plain(ns.Raids.Get(current).name), #ns.Raids.Awards(current)
+      confirm("Switch the raid to " .. WHITE:format(raidName(snapshot)) .. "?",
+        string.format("You have %s for %s. %s with that raid and %s still sent to the site. Every officer in "
+          .. "the group switches too.", plural(n, "award", "awards"), keep, agree(n, "It stays", "They stay"),
+          agree(n, "is", "are")),
+        "Switch", "Keep " .. keep, function()
+          ns.Selection.ChooseRaid(raidId, true)
+          notePasted(raidId, before)
+          UI.RefreshSync()
+        end)
+    else
+      notePasted(raidId, before)
+    end
+  end
+  UI.RefreshSync()
+  if sync.result.link then
+    sync.link:SetFocus()
+    sync.link:HighlightText()
+  end
+end
+
+-- Remove: drops a pasted raid, asking first when it has awards (they stay saved).
+local function remove(raidId)
+  local snapshot, n = ns.Raids.Get(raidId), #ns.Raids.Awards(raidId)
+  local _, why = ns.Raids.Remove(raidId)
+  if why == "needs confirmation" then
+    confirm("Remove " .. WHITE:format(raidName(snapshot)) .. "?",
+      string.format("Its %s %s saved.", plural(n, "award", "awards"),
+        agree(n, "stays", "stay")), "Remove", "Cancel",
+      function()
+        ns.Raids.Remove(raidId, true)
+        UI.RefreshSync()
+      end)
+  end
+  UI.RefreshSync()
+end
+
+local function showPlaceholder()
+  if (sync.box:GetText() or "") == "" then sync.placeholder:Show() else sync.placeholder:Hide() end
+end
+
+-- Puts a piece y pixels down the tab (and x across), and shows it.
+local function at(piece, y, x)
+  piece:ClearAllPoints()
+  piece:SetPoint("TOPLEFT", sync.child, "TOPLEFT", x or 0, -y)
+  piece:Show()
+end
+
+-- One row of the raid table: its cells by column, and Remove for a pasted raid.
+local function drawRaid(index, raid, y)
+  local snapshot = ns.Raids.Get(raid.id)
+  local players, total = reserveCounts(snapshot)
+  local awards = #ns.Raids.Awards(raid.id)
+  local pastedAt = raid.origin == "pasted" and "Pasted " .. clock(raid.loadedAt) or "Pasted"
+  local row = {}
+  for column, value in pairs({
+    name = plain(raid.name) .. " " .. GREY:format(date("%a %d %b", raid.startsAt)),
+    when = whenText(raid),
+    instance = raid.instance and tostring(raid.instance) or AMBER:format("None"),
+    counts = players .. " · " .. total,
+    awards = awards > 0 and tostring(awards) or GREY:format("-"),
+    pasted = raid.pasted and GREY:format(pastedAt) or "",
+  }) do
+    sync.cells[column] = sync.cells[column] or {}
+    local text = cell(index, sync.cells[column], sync.child, "GameFontHighlightSmall")
+    at(text, y, RAID_COLUMNS[column][1])
+    text:SetWidth(RAID_COLUMNS[column][2])
+    text:SetText(value)
+    row[column] = text
+  end
+  if raid.pasted then
+    local b = sync.removes[index]
+    if not b then
+      b = newButton(sync.child, "Remove", 60, 18)
+      b:SetScript("OnClick", function(self) remove(self.raidId) end)
+      sync.removes[index] = b
+    end
+    b.raidId = raid.id
+    at(b, y - 3, CONTENT_WIDTH - 62)
+    row.remove = b
+  end
+  return row, math.max(row.name:GetStringHeight(), 14) + 8
+end
+
+-- Draws the tab: the status bar, the raid table, the helper line and the paste box with its result.
+function UI.RefreshSync()
+  if not sync.child or not window:IsShown() or not UI.tabs.Sync:IsShown() then return end
+  local raids, status, inbox = ns.Raids.Status()
+  for _, pool in pairs(sync.cells) do
+    for _, text in ipairs(pool) do text:Hide() end
+  end
+  local optional = { sync.columns, sync.selected, sync.resultNote, sync.linkLabel, sync.link, sync.linkHint }
+  for _, piece in ipairs(optional) do
+    piece:Hide()
+  end
+  for _, b in pairs(sync.removes) do b:Hide() end -- keyed by row, with gaps for raids not pasted
+
+  local y = 0
+  at(sync.status, y)
+  setNote(sync.status, UI.SyncStatus())
+  y = y + sync.status:GetHeight() + 8
+  at(sync.raidsHeading, y)
+  y = y + 18
+  sync.rows = {}
+  if #raids > 0 then
+    at(sync.columns, y)
+    y = y + 18
+    for i, raid in ipairs(raids) do
+      local row, height = drawRaid(i, raid, y)
+      if raid.id == status.activeRaid then
+        at(sync.selected, y - 4)
+        sync.selected:SetHeight(height)
+        row.selected = true
+      end
+      sync.rows[i] = row
+      y = y + height
+    end
+  end
+  at(sync.helper, y + 2)
+  sync.helper:SetText(helperText(inbox))
+  y = y + 24
+  at(sync.inHeading, y)
+  y = y + 18
+  at(sync.inHint, y)
+  y = y + sync.inHint:GetStringHeight() + 6
+  at(sync.boxScroll, y)
+  showPlaceholder()
+  y = y + 48
+  at(sync.load, y)
+  y = y + 30
+  if sync.result then
+    at(sync.resultNote, y)
+    setNote(sync.resultNote, sync.result.kind, sync.result.text)
+    y = y + sync.resultNote:GetHeight() + 6
+    if sync.result.link then
+      at(sync.linkLabel, y + 4)
+      at(sync.link, y, 90)
+      y = y + 24
+      at(sync.linkHint, y)
+      y = y + 16
+    end
+  end
+  sync.child:SetHeight(y)
+end
+
+local function buildSync(content)
+  content.placeholder:Hide()
+  sync.cells, sync.removes, sync.rows = {}, {}, {}
+  sync.scroll = CreateFrame("ScrollFrame", nil, content)
+  sync.scroll:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+  sync.scroll:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+  sync.child = CreateFrame("Frame", nil, sync.scroll)
+  sync.child:SetSize(CONTENT_WIDTH, 1)
+  sync.scroll:SetScrollChild(sync.child)
+  sync.scroll:EnableMouseWheel(true)
+  sync.scroll:SetScript("OnMouseWheel", scrollByWheel)
+
+  sync.status = newNote(sync.child)
+  sync.raidsHeading = newText(sync.child, "GameFontNormal")
+  sync.raidsHeading:SetText("Raid events")
+  sync.columns = CreateFrame("Frame", nil, sync.child)
+  sync.columns:SetSize(CONTENT_WIDTH, 16)
+  sync.headings = {}
+  for column, label in pairs(RAID_HEADINGS) do
+    local text = newText(sync.columns, "GameFontNormalSmall")
+    text:SetPoint("TOPLEFT", sync.columns, "TOPLEFT", RAID_COLUMNS[column][1], 0)
+    text:SetWidth(RAID_COLUMNS[column][2])
+    text:SetJustifyH("LEFT")
+    text:SetText(label)
+    sync.headings[column] = text
+  end
+  -- The selected raid's row is highlighted, like the selected tab.
+  sync.selected = sync.child:CreateTexture(nil, "BACKGROUND")
+  sync.selected:SetWidth(CONTENT_WIDTH)
+  sync.selected:SetColorTexture(0.25, 0.2, 0.05, 1)
+
+  local function line(fontName, text)
+    local piece = newText(sync.child, fontName)
+    piece:SetWidth(CONTENT_WIDTH)
+    piece:SetJustifyH("LEFT")
+    piece:SetText(text)
+    return piece
+  end
+  sync.helper = line("GameFontHighlightSmall")
+  sync.inHeading = line("GameFontNormal", "Reserves in")
+  sync.inHint = line("GameFontHighlightSmall", "On the guild site, open the raid and choose "
+    .. WHITE:format("Copy reserves") .. ". Paste it here with Ctrl+V (Cmd+V on Mac). "
+    .. "Pasting chooses that raid for the group.")
+
+  -- The paste box: an edit box in a scroll frame, so a long text stays inside it.
+  sync.boxScroll = CreateFrame("ScrollFrame", nil, sync.child)
+  sync.boxScroll:SetSize(CONTENT_WIDTH, 40)
+  sync.boxScroll:EnableMouse(true)
+  local boxBackground = sync.boxScroll:CreateTexture(nil, "BACKGROUND")
+  boxBackground:SetAllPoints()
+  boxBackground:SetColorTexture(0, 0, 0, 0.6)
+  sync.box = CreateFrame("EditBox", nil, sync.boxScroll)
+  sync.box:SetMultiLine(true)
+  sync.box:SetAutoFocus(false)
+  sync.box:SetMaxLetters(0)
+  sync.box:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+  sync.box:SetWidth(CONTENT_WIDTH - 12)
+  sync.box:SetTextInsets(6, 6, 4, 4)
+  sync.box:SetScript("OnEscapePressed", sync.box.ClearFocus)
+  sync.box:SetScript("OnTextChanged", showPlaceholder)
+  sync.boxScroll:SetScrollChild(sync.box)
+  sync.boxScroll:SetScript("OnMouseDown", function() sync.box:SetFocus() end)
+  sync.placeholder = newText(sync.box, "GameFontDisable")
+  sync.placeholder:SetPoint("TOPLEFT", sync.box, "TOPLEFT", 6, -4)
+  sync.placeholder:SetText("Paste the reserves text here")
+  sync.load = newButton(sync.child, "Load", 80)
+  sync.load:SetScript("OnClick", load)
+
+  sync.resultNote = newNote(sync.child)
+  sync.linkLabel = line("GameFontHighlightSmall", "Download link:")
+  sync.linkLabel:SetWidth(86)
+  -- The download link, in a box so it can be copied; typing in it puts the link back.
+  sync.link = CreateFrame("EditBox", nil, sync.child)
+  sync.link:SetAutoFocus(false)
+  sync.link:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+  sync.link:SetSize(CONTENT_WIDTH - 90, 20)
+  sync.link:SetText(RELEASES)
+  sync.link:SetScript("OnTextChanged", function(self, typed)
+    if typed then
+      self:SetText(RELEASES)
+      self:HighlightText()
+    end
+  end)
+  sync.link:SetScript("OnEscapePressed", sync.link.ClearFocus)
+  sync.linkHint = line("GameFontHighlightSmall",
+    "Press Ctrl+C to copy the link, open it in your browser, replace the add-on folder, then /reload.")
 end
 
 local function build()
@@ -449,7 +860,9 @@ local function build()
     content.placeholder = placeholder
     UI.tabs[name] = content
     if name == "Reserves" then buildReserves(content) end
+    if name == "Sync" then buildSync(content) end
   end
+  buildDialog()
   UI.Select(TAB_NAMES[1])
 
   placeWindow()
@@ -459,6 +872,7 @@ local function build()
   window:SetScript("OnShow", function()
     saved().shown = true
     UI.RefreshReserves()
+    UI.RefreshSync()
   end)
 end
 
