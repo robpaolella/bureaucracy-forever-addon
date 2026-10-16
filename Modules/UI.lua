@@ -411,7 +411,8 @@ end
 
 -- The Sync tab (#16, #51, design/44-sync-raids): the selection and who made it, the loaded raids
 -- with a choice per row (and Not a guild run), the helper line, and the paste box that loads a
--- raid's reserves and chooses it for the group. Copy awards is #72's.
+-- raid's reserves and chooses it for the group, and Awards out (#72): the text to paste into
+-- Import awards on the site.
 local sync = {} -- the tab's pieces
 UI.sync = sync
 
@@ -764,6 +765,97 @@ local function drawRaid(index, raid, y, on)
   return row, height
 end
 
+-- The loaded raids whose awards give copy-out text, with the text: { { raid, text }, ... }.
+local function copyable(raids)
+  local list = {}
+  for _, raid in ipairs(raids) do
+    local text = ns.Sync.CopyOut(raid.id)
+    if text then list[#list + 1] = { raid = raid, text = text } end
+  end
+  return list
+end
+
+-- The count line's numbers from a copy-out text: an award is an A or R line, an undo a V or R
+-- line (a replace is both); confirmations are not counted.
+local function copyCounts(text)
+  local awards, undos = 0, 0
+  for kind in text:gmatch("\n(%u);") do
+    if kind == "A" or kind == "R" then awards = awards + 1 end
+    if kind == "V" or kind == "R" then undos = undos + 1 end
+  end
+  return awards, undos
+end
+
+-- The raid to copy: the one the officer picked, if it still gives text, else the selected raid if
+-- it does, else nothing. Returns its entry in offered.
+local function copyPicked(offered)
+  local selected
+  for _, entry in ipairs(offered) do
+    if entry.raid.id == sync.copyPick then return entry end
+    if entry.raid.id == ns.Selection.Status().activeRaid then selected = entry end
+  end
+  return selected
+end
+
+-- Picks the next raid that can be copied (the picker's button), wrapping round.
+local function nextCopyPick()
+  local offered = copyable((ns.Raids.Status()))
+  local current = copyPicked(offered)
+  local index = 0
+  for i, entry in ipairs(offered) do
+    if entry == current then index = i end
+  end
+  if offered[1] then sync.copyPick = offered[index % #offered + 1].raid.id end
+  UI.RefreshSync()
+end
+
+-- Copy awards: shows the picked raid's text in the box, selected, for Ctrl+C.
+local function copyOut()
+  local picked = copyPicked(copyable((ns.Raids.Status())))
+  if not picked then return UI.RefreshSync() end
+  sync.copied = picked.raid.id
+  UI.RefreshSync()
+  sync.out:SetFocus()
+  sync.out:HighlightText()
+end
+
+-- Draws Awards out at y; returns the new y.
+local function drawAwardsOut(y, raids)
+  local offered = copyable(raids)
+  local picked = copyPicked(offered)
+  if sync.copied and not (picked and sync.copied == picked.raid.id) then sync.copied = nil end
+
+  at(sync.outHeading, y)
+  y = y + 18
+  at(sync.outHint, y)
+  y = y + sync.outHint:GetStringHeight() + 6
+  if sync.copied then
+    at(sync.outNote, y)
+    y = y + 18
+    at(sync.outScroll, y)
+    sync.outText = picked.text
+    sync.out:SetText(picked.text)
+    y = y + 46
+  end
+  if #offered > 0 then
+    at(sync.outRaidLabel, y + 4)
+    at(sync.outPick, y, 40)
+    sync.outPick.label:SetText(picked and plain(picked.raid.name) or "Choose a raid")
+  end
+  local x = #offered > 0 and 290 or 0
+  at(sync.copy, y, x)
+  if picked then sync.copy:Enable() else sync.copy:Disable() end
+  at(sync.outCount, y + 5, x + 90)
+  if picked then
+    local awards, undos = copyCounts(picked.text)
+    sync.outCount:SetText(plural(awards, "award", "awards") .. ", " .. plural(undos, "undo", "undos")
+      .. ". Practice awards are never included.")
+  else
+    sync.outCount:SetText(#offered > 0 and "Choose a raid to copy." or "Nothing to copy yet.")
+  end
+  return y + 30
+end
+
 -- Draws the tab: the status bar, the raid table, the helper line and the paste box with its result.
 function UI.RefreshSync()
   if not sync.child or not window:IsShown() or not UI.tabs.Sync:IsShown() then return end
@@ -772,7 +864,8 @@ function UI.RefreshSync()
     for _, text in ipairs(pool) do text:Hide() end
   end
   local optional = { sync.columns, sync.selected, sync.offRadio, sync.offLabel, sync.where, sync.whereHint,
-    sync.resultNote, sync.linkLabel, sync.link, sync.linkHint }
+    sync.resultNote, sync.linkLabel, sync.link, sync.linkHint, sync.outHeading, sync.outHint, sync.outNote,
+    sync.outScroll, sync.outRaidLabel, sync.outPick, sync.copy, sync.outCount }
   for _, piece in ipairs(optional) do
     piece:Hide()
   end
@@ -840,6 +933,7 @@ function UI.RefreshSync()
       y = y + 16
     end
   end
+  y = drawAwardsOut(y + 8, raids)
   sync.child:SetHeight(y)
 end
 
@@ -936,6 +1030,41 @@ local function buildSync(content)
   sync.link:SetScript("OnEscapePressed", sync.link.ClearFocus)
   sync.linkHint = line("GameFontHighlightSmall",
     "Press Ctrl+C to copy the link, open it in your browser, replace the add-on folder, then /reload.")
+  -- Awards out: the raid picker (a button that steps through the raids with text to copy), Copy
+  -- awards, and the box that shows the text selected.
+  sync.outHeading = line("GameFontNormal", "Awards out")
+  sync.outHint = line("GameFontHighlightSmall", "Paste the text into " .. WHITE:format("Import awards")
+    .. " on the raid's page on the guild site.")
+  sync.outNote = line("GameFontHighlightSmall", "The text is selected: press Ctrl+C (Cmd+C on Mac).")
+  sync.outScroll = CreateFrame("ScrollFrame", nil, sync.child)
+  sync.outScroll:SetSize(CONTENT_WIDTH, 40)
+  local outBackground = sync.outScroll:CreateTexture(nil, "BACKGROUND")
+  outBackground:SetAllPoints()
+  outBackground:SetColorTexture(0, 0, 0, 0.6)
+  -- Read only: typing in it puts the text back.
+  sync.out = CreateFrame("EditBox", nil, sync.outScroll)
+  sync.out:SetMultiLine(true)
+  sync.out:SetAutoFocus(false)
+  sync.out:SetMaxLetters(0)
+  sync.out:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+  sync.out:SetWidth(CONTENT_WIDTH - 12)
+  sync.out:SetTextInsets(6, 6, 4, 4)
+  sync.out:SetScript("OnEscapePressed", sync.out.ClearFocus)
+  sync.out:SetScript("OnTextChanged", function(self, typed)
+    if typed then
+      self:SetText(sync.outText)
+      self:HighlightText()
+    end
+  end)
+  sync.outScroll:SetScrollChild(sync.out)
+  sync.outRaidLabel = line("GameFontHighlightSmall", "Raid:")
+  sync.outRaidLabel:SetWidth(36)
+  sync.outPick = newButton(sync.child, "", 240, 22)
+  sync.outPick:SetScript("OnClick", nextCopyPick)
+  sync.copy = newButton(sync.child, "Copy awards", 90)
+  sync.copy:SetScript("OnClick", copyOut)
+  sync.outCount = line("GameFontHighlightSmall")
+  sync.outCount:SetWidth(CONTENT_WIDTH - 380)
 end
 
 local function build()
@@ -1016,9 +1145,14 @@ function UI.Toggle()
   if window:IsShown() then window:Hide() else window:Show() end
 end
 
--- The tooltip's raid line. #16 replaces this once it connects the loaded raids.
+-- The tooltip's raid line: the selected raid's name, or why there is none.
 function UI.RaidLine()
-  return "No raids loaded."
+  local raids, status = ns.Raids.Status()
+  local snapshot = ns.Raids.Get(status.activeRaid)
+  if snapshot then return raidName(snapshot) end
+  if status.activeBy == "off" then return "Not a guild run." end
+  if #raids == 0 then return "No raids loaded." end
+  return "No raid chosen yet."
 end
 
 -- The tooltip's lines: { text, kind } with kind "title", "text", "warning" or "hint".
