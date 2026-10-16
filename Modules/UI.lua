@@ -797,16 +797,37 @@ local function copyPicked(offered)
   return selected
 end
 
--- Picks the next raid that can be copied (the picker's button), wrapping round.
-local function nextCopyPick()
-  local offered = copyable((ns.Raids.Status()))
-  local current = copyPicked(offered)
-  local index = 0
+-- The raid menu drops from the picker button, like the pop-up's boss menu: a title and one entry per
+-- raid that can be copied, the picked one marked.
+local function drawCopyMenu(offered, picked)
+  local menu = sync.menu
+  menu:ClearAllPoints()
+  menu:SetPoint("TOPLEFT", sync.outPick, "BOTTOMLEFT", 0, -2)
+  local y = 26
   for i, entry in ipairs(offered) do
-    if entry == current then index = i end
+    local b = sync.menuEntries[i]
+    if not b then
+      b = newButton(menu, 308, 18)
+      b.label:ClearAllPoints()
+      b.label:SetPoint("LEFT", b, "LEFT", 4, 0)
+      b.background = b:CreateTexture(nil, "BACKGROUND")
+      b.background:SetAllPoints()
+      sync.menuEntries[i] = b
+    end
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -y)
+    b.label:SetText((entry == picked and "> " or "   ") .. raidName(entry.raid))
+    b.background:SetColorTexture(0.08, 0.08, 0.08, 1)
+    b:SetScript("OnClick", function()
+      sync.copyPick = entry.raid.id
+      menu:Hide()
+      UI.RefreshSync()
+    end)
+    b:Show()
+    y = y + 20
   end
-  if offered[1] then sync.copyPick = offered[index % #offered + 1].raid.id end
-  UI.RefreshSync()
+  for i = #offered + 1, #sync.menuEntries do sync.menuEntries[i]:Hide() end
+  menu:SetHeight(y + 6)
 end
 
 -- Copy awards: shows the picked raid's text in the box, selected, for Ctrl+C.
@@ -840,7 +861,10 @@ local function drawAwardsOut(y, raids)
   if #offered > 0 then
     at(sync.outRaidLabel, y + 4)
     at(sync.outPick, y, 40)
-    sync.outPick.label:SetText(picked and plain(picked.raid.name) or "Choose a raid")
+    sync.outPick.label:SetText((picked and raidName(picked.raid) or "Choose a raid") .. " ▾")
+    drawCopyMenu(offered, picked)
+  else
+    sync.menu:Hide()
   end
   local x = #offered > 0 and 290 or 0
   at(sync.copy, y, x)
@@ -1060,7 +1084,20 @@ local function buildSync(content)
   sync.outRaidLabel = line("GameFontHighlightSmall", "Raid:")
   sync.outRaidLabel:SetWidth(36)
   sync.outPick = newButton(sync.child, "", 240, 22)
-  sync.outPick:SetScript("OnClick", nextCopyPick)
+  sync.menuEntries = {}
+  sync.menu = CreateFrame("Frame", nil, sync.child)
+  sync.menu:SetFrameStrata("TOOLTIP")
+  sync.menu:SetSize(320, 100)
+  local menuBackground = sync.menu:CreateTexture(nil, "BACKGROUND")
+  menuBackground:SetAllPoints()
+  menuBackground:SetColorTexture(0.08, 0.08, 0.08, 1)
+  sync.menu.title = newText(sync.menu, "GameFontNormal")
+  sync.menu.title:SetPoint("TOPLEFT", sync.menu, "TOPLEFT", 8, -6)
+  sync.menu.title:SetText("Which raid's awards?")
+  sync.menu:Hide()
+  sync.outPick:SetScript("OnClick", function()
+    if sync.menu:IsShown() then sync.menu:Hide() else sync.menu:Show() end
+  end)
   sync.copy = newButton(sync.child, "Copy awards", 90)
   sync.copy:SetScript("OnClick", copyOut)
   sync.outCount = line("GameFontHighlightSmall")
@@ -1133,7 +1170,10 @@ local function build()
   placeWindow()
   window:Hide()
   -- Set after the first Hide, which isn't the officer closing it.
-  window:SetScript("OnHide", function() saved().shown = false end)
+  window:SetScript("OnHide", function()
+    saved().shown = false
+    if sync.menu then sync.menu:Hide() end
+  end)
   window:SetScript("OnShow", function()
     saved().shown = true
     UI.RefreshReserves()
