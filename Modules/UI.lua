@@ -162,7 +162,7 @@ local function reservedGroups(snapshot)
         placed[item] = true
       end
     end
-    if #items > 0 then groups[#groups + 1] = { boss = boss.name, items = items } end
+    if #items > 0 then groups[#groups + 1] = { boss = boss.name, id = boss.id, items = items } end
   end
   local others = {}
   for item, holders in pairs(reserved) do
@@ -202,7 +202,9 @@ function UI.ReservesView()
       local hr, sr = holderLists(snapshot, item, awards, roster)
       rows[#rows + 1] = { item = item, hr = hr, sr = sr }
     end
-    groups[#groups + 1] = { boss = group.boss, rows = rows }
+    groups[#groups + 1] = {
+      boss = group.boss, rows = rows, killed = group.id ~= nil and ns.Attribution.Killed(group.id),
+    }
   end
   return {
     header = snapshot.name .. ", " .. date("%a %d %b", snapshot.startsAt) .. " · "
@@ -275,7 +277,7 @@ function UI.RefreshReserves()
     headings = headings + 1
     local heading = cell(headings, reserves.headings, reserves.child, "GameFontNormal")
     heading:SetPoint("TOPLEFT", reserves.child, "TOPLEFT", 0, -y)
-    heading:SetText(group.boss)
+    heading:SetText(group.killed and group.boss .. " · killed" or group.boss)
     reserves.shown[#reserves.shown + 1] = { heading = heading }
     y = y + HEADING_HEIGHT
     for _, row in ipairs(group.rows) do
