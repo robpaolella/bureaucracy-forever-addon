@@ -149,9 +149,15 @@ local function apply(op, raidId, author)
   end
 end
 
+-- A whole message is kept for 40 seconds, so a late copy of one of its chunks (a resend
+-- crossing in flight) changes nothing; a different chunk under its msgid is a new message.
 local function complete(entry, raidId)
   forget(entry)
-  done[entry.sender .. ";" .. entry.msgid] = true
+  local key = entry.sender .. ";" .. entry.msgid
+  done[key] = entry
+  C_Timer.After(RETRY_EVERY * (RETRIES + 1), function()
+    if done[key] == entry then done[key] = nil end
+  end)
   local op = ns.OpText.Decode(table.concat(entry.pieces, "", 1, entry.total))
   if not op then
     return ns.Log("Sync: dropped " .. entry.sender .. "'s message " .. entry.msgid .. " (malformed).")
@@ -172,7 +178,11 @@ Hub.Register("O", function(body, sender)
       .. (notice or "not loaded."))
   end
   local key = sender .. ";" .. chunk.msgid
-  if done[key] then return end
+  local whole = done[key]
+  if whole and whole.total == chunk.total and whole.raid == chunk.raid
+    and whole.pieces[chunk.n] == chunk.piece then
+    return
+  end
   local entry = partials[key]
   if not entry then
     entry = { sender = sender, msgid = chunk.msgid, total = chunk.total, raid = chunk.raid,
