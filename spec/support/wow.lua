@@ -123,6 +123,10 @@ function frameMethods.CreateFontString(_, _, _, font)
 end
 function frameMethods.CreateTexture() return newFrame() end
 function frameMethods.SetColorTexture(self, r, g, b, a) self.color = { r, g, b, a } end
+-- A button is enabled until Disable.
+function frameMethods.Enable(self) self.disabled = false end
+function frameMethods.Disable(self) self.disabled = true end
+function frameMethods.IsEnabled(self) return not self.disabled end
 -- An edit box keeps whether it has the keyboard and whether its text is selected.
 function frameMethods.SetFocus(self) self.focused = true end
 function frameMethods.ClearFocus(self) self.focused, self.highlighted = false, false end

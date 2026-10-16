@@ -555,8 +555,12 @@ local function load()
   local before, current = held.at, held.activeRaid
   local raidId, notice, waiting = ns.Selection.Paste(sync.box:GetText())
   if not raidId then
-    sync.result = { kind = "bad", text = notice .. " Nothing was loaded; your raids are unchanged.",
-      link = notice:find("newer version of the add-on", 1, true) ~= nil }
+    local newer = notice:find("newer version of the add-on", 1, true) ~= nil
+    if newer then
+      notice = "This text needs a newer version of the add-on (you have " .. ns.version .. ")."
+    end
+    sync.result = { kind = "bad", link = newer,
+      text = notice .. " Nothing was loaded; your raids are unchanged." }
   else
     sync.box:SetText("")
     sync.box:ClearFocus()
@@ -660,7 +664,7 @@ function UI.RefreshSync()
   for _, piece in ipairs(optional) do
     piece:Hide()
   end
-  for _, b in ipairs(sync.removes) do b:Hide() end
+  for _, b in pairs(sync.removes) do b:Hide() end -- keyed by row, with gaps for raids not pasted
 
   local y = 0
   at(sync.status, y)
