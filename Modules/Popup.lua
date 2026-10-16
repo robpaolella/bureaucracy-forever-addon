@@ -1,7 +1,6 @@
 -- Popup: the loot pop-up's content model (#10). Pure: reads the open loot window, the loaded raid
 -- and the group, and returns what the pop-up shows; nothing is drawn (the frame is #77).
 -- Only the loot master gets a model (design Q3), and none on a run that is not a guild run.
--- luacheck: read globals C_PartyInfo
 local _, ns = ...
 
 local Popup = {}

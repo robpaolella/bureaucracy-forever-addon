@@ -39,7 +39,7 @@ describe("Popup", function()
     wow.state.group = group or { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein",
       "Mirel Stone", "Tovin Hale" }
     wow.state.groupIsRaid = true
-    _G.C_PartyInfo = { GetLootMethod = function() return "master", 0, 0 end }
+    wow.state.lootMethod = { "master", 0, 0 }
     if fields then
       ns.Raids.Load(assert(ns.Snapshot.Validate(tree(fields), "0.1.0")), "pasted")
       assert(ns.Selection.ChooseRaid("raid00001"))
@@ -56,26 +56,22 @@ describe("Popup", function()
     wow.openLoot(items)
   end
 
-  after_each(function() _G.C_PartyInfo = nil end)
-
   it("gives a model only to the loot master", function()
     setup({})
     drop({ { id = 1 } })
     assert.is_table(ns.Popup.Build())
-    _G.C_PartyInfo = { GetLootMethod = function() return "master", 2, 0 end }
+    wow.state.lootMethod = { "master", 2, 0 }
     assert.are.same({ nil, "not loot master" }, { ns.Popup.Build() })
-    _G.C_PartyInfo = { GetLootMethod = function() return "group", 0, 0 end }
-    assert.are.same({ nil, "not loot master" }, { ns.Popup.Build() })
-    _G.C_PartyInfo = nil
+    wow.state.lootMethod = { "group", 0, 0 }
     assert.are.same({ nil, "not loot master" }, { ns.Popup.Build() })
   end)
 
   it("finds the master looter in the raid roster by name", function()
     setup({})
     drop({ { id = 1 } })
-    _G.C_PartyInfo = { GetLootMethod = function() return "master", 1, 1 end }
+    wow.state.lootMethod = { "master", 1, 1 }
     assert.is_table(ns.Popup.Build())
-    _G.C_PartyInfo = { GetLootMethod = function() return "master", 2, 3 end }
+    wow.state.lootMethod = { "master", 2, 3 }
     assert.is_nil((ns.Popup.Build()))
   end)
 
