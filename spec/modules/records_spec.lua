@@ -368,6 +368,14 @@ describe("Records", function()
       assert.are.same({}, Records.Ops(OTHER))
     end)
 
+    it("replays an award already held, whatever raid is named", function()
+      local first = Records.Award(ana({ id = "aw-00000001" }))
+      local op, outcome = Records.Award(ana({ id = "aw-00000001", raid = OTHER }))
+      assert.are.same({ "replayed", RAID }, { outcome, op.raid })
+      assert.are.equal(first, op)
+      assert.are.same({}, Records.Ops(OTHER))
+    end)
+
     it("keeps the not-a-guild-run rule whatever the target", function()
       local key = Records.Award(ana()).id
       ns.Selection.ChooseOff()

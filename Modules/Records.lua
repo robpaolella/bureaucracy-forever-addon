@@ -239,6 +239,11 @@ function Records.Award(fields)
   local reason = refusal(fields, "award")
   if reason then return nil, reason end
   local raidId = fields.raid or current()
+  if fields.raid and fields.id then
+    -- Held already: found by its key wherever it is, so the target is ignored.
+    local held, heldRaid = locate(fields.id)
+    if held then raidId = heldRaid end
+  end
   return record(raidId, awardOp(raidId, envOf(raidId), fields.practice, fields))
 end
 
