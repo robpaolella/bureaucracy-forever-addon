@@ -382,6 +382,74 @@ describe("Records", function()
       assert.is_true(Records.Get("aw-7f3k2m9q").voided)
     end)
 
+    it("saves a pending void in siteVoids, with its raid and environment, and nowhere else", function()
+      merge({}, {
+        { key = "site-key-0001", reason = "wrong winner", at = T + 1 },
+        { key = "site-key-0002", at = T + 2 },
+      })
+      assert.are.same({
+        ["site-key-0001"] = { raid = RAID, env = "staging", reason = "wrong winner", at = T + 1 },
+        ["site-key-0002"] = { raid = RAID, env = "staging", at = T + 2 },
+      }, ns.db.siteVoids)
+      assert.are.same({}, Records.Ops(RAID))
+      assert.is_nil(ns.db.noRaidOps)
+      assert.is_nil(ns.Sync.CopyOut(RAID))
+      Records.Award(ana())
+      assert.is_nil(ns.Sync.CopyOut(RAID):find("site%-key%-000"))
+    end)
+
+    -- An award from another officer is Records.Award with its id (sync's receive path, #20).
+    it("survives a reload and applies when another officer's award arrives, the raid not in the inbox",
+      function()
+      merge({}, { { key = "aw-7f3k2m9q", reason = "wrong winner", at = T + 1 } })
+      ns = wow.start({ saved = { BureaucracyForeverDB = copy(BureaucracyForeverDB) } })
+      Records = ns.Records
+      assert.is_not_nil(ns.db.siteVoids["aw-7f3k2m9q"])
+      ns.Raids.Load(snapshot(ns, RAID), "pasted")
+      assert.is_true(ns.Selection.ChooseRaid(RAID, true))
+      Records.Award(ana({ id = "aw-7f3k2m9q" }))
+      local award = Records.Get("aw-7f3k2m9q")
+      assert.are.same({ true, "wrong winner", T + 1 }, { award.voided, award.voidReason, award.voidedAt })
+      assert.is_nil(ns.db.siteVoids["aw-7f3k2m9q"])
+    end)
+
+    it("loads saved data from before the field as no pending voids", function()
+      local saved = copy(BureaucracyForeverDB)
+      saved.siteVoids = nil
+      ns = wow.start({ saved = { BureaucracyForeverDB = saved } })
+      assert.is_nil(ns.db.siteVoids)
+      assert.has_no.errors(function() ns.Records.Award(ana()) end)
+    end)
+
+    it("leaves the entry when the award has another raid or environment, or no raid", function()
+      local other = catchup({}, { { key = "aw-7f3k2m9q", at = T + 1 } })
+      other.raid = "cm9xr2k4a0002"
+      Records.Merge(other)
+      Records.Award(ana({ id = "aw-7f3k2m9q" }))
+      assert.is_nil(Records.Get("aw-7f3k2m9q").voided)
+      assert.is_not_nil(ns.db.siteVoids["aw-7f3k2m9q"])
+      other = catchup({}, { { key = "aw-3q9k2m7f", at = T + 1 } })
+      other.env = "production"
+      Records.Merge(other)
+      Records.Award(ana({ id = "aw-3q9k2m7f" }))
+      assert.is_nil(Records.Get("aw-3q9k2m7f").voided)
+      assert.is_not_nil(ns.db.siteVoids["aw-3q9k2m7f"])
+      merge({}, { { key = "aw-9k2m7f3q", at = T + 1 } })
+      ns.db.activeRaid = nil
+      Records.Award(ana({ id = "aw-9k2m7f3q" }))
+      assert.is_nil(Records.Get("aw-9k2m7f3q").voided)
+      assert.is_not_nil(ns.db.siteVoids["aw-9k2m7f3q"])
+    end)
+
+    it("doesn't store a void whose award is held or already voided", function()
+      local key = Records.Award(ana()).id
+      Records.Void(key)
+      merge({}, { { key = key, at = T + 1 } })
+      merge({ site("site-key-0001") }, { { key = "site-key-0001", at = T + 1 } })
+      assert.is_nil(ns.db.siteVoids)
+      assert.is_true(Records.Get("site-key-0001").voided)
+    end)
+
     it("applies a void the site holds pending to an award held", function()
       local key = Records.Award(ana()).id
       merge({}, { { key = key, at = T + 1 } })

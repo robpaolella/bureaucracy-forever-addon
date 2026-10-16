@@ -49,7 +49,7 @@ local frameMeta = { __index = frameMethods }
 for _, name in ipairs({
   "SetFrameStrata", "SetMovable", "EnableMouse", "SetClampedToScreen", "RegisterForDrag",
   "RegisterForClicks", "SetTexture", "SetAllPoints", "SetFont", "SetTextColor", "SetJustifyH",
-  "EnableMouseWheel",
+  "EnableMouseWheel", "SetMultiLine", "SetAutoFocus", "SetMaxLetters", "SetTextInsets",
 }) do
   frameMethods[name] = function() end
 end
@@ -62,8 +62,10 @@ function frameMethods.HookScript(self, name, fn)
   self.hooks[name] = self.hooks[name] or {}
   table.insert(self.hooks[name], fn)
 end
--- A line of text is one line high; a scroll frame scrolls as far as its child is taller.
+-- A line of text is one line high and 6 pixels a character wide; a scroll frame scrolls as far
+-- as its child is taller.
 function frameMethods.GetStringHeight() return 12 end
+function frameMethods.GetStringWidth(self) return #(self.text or "") * 6 end
 function frameMethods.SetScrollChild(self, child) self.scrollChild = child end
 function frameMethods.SetVerticalScroll(self, offset) self.verticalScroll = offset end
 function frameMethods.GetVerticalScroll(self) return self.verticalScroll or 0 end
@@ -121,6 +123,14 @@ function frameMethods.CreateFontString(_, _, _, font)
 end
 function frameMethods.CreateTexture() return newFrame() end
 function frameMethods.SetColorTexture(self, r, g, b, a) self.color = { r, g, b, a } end
+-- A button is enabled until Disable.
+function frameMethods.Enable(self) self.disabled = false end
+function frameMethods.Disable(self) self.disabled = true end
+function frameMethods.IsEnabled(self) return not self.disabled end
+-- An edit box keeps whether it has the keyboard and whether its text is selected.
+function frameMethods.SetFocus(self) self.focused = true end
+function frameMethods.ClearFocus(self) self.focused, self.highlighted = false, false end
+function frameMethods.HighlightText(self) self.highlighted = true end
 function frameMethods.StartMoving(self) self.moving = true end
 function frameMethods.StopMovingOrSizing(self) self.moving = false end
 
