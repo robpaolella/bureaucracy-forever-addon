@@ -942,6 +942,11 @@ describe("the Sync tab", function()
     assert.are.equal("Starts " .. at(1792007200), row(4)[2])
     assert.is_table(sync.rows[1].remove)
     for i = 2, 4 do assert.is_nil(sync.rows[i].remove) end
+    -- A choice on every row, the raid pasted last selected, and Not a guild run after them.
+    assert.is_true(sync.rows[1].selected)
+    for i = 2, 4 do assert.is_true(sync.rows[i].pick:IsShown()) end
+    assert.is_true(sync.offPick:IsShown())
+    assert.is_true(sync.rows[1].remove:GetFrameLevel() > sync.rows[1].pick:GetFrameLevel())
     for column, label in pairs({ name = "Raid event", when = "When", instance = "Instance",
       counts = "Players · reserves", awards = "Awards" }) do
       assert.are.equal(label, sync.headings[column]:GetText())
@@ -952,33 +957,251 @@ describe("the Sync tab", function()
   end)
 
   describe("its status bar", function()
-    it("names another officer who chose the raid", function()
+    it("names another officer who chose the raid, marked when they are the loot master", function()
       ns.Raids.Load(assert(ns.Sync.ReadPasted(pasteText("raid00001"))), "pasted")
       ns.Selection.Apply("C00001", 1792000300, "Ashla")
       ns.UI.RefreshSync()
       assert.are.equal("Chosen by Ashla at " .. date("%H:%M", 1792000300) .. ". Awards from this group go to "
         .. "this raid.", select(2, status()):match("\n(.*)$"))
+      wow.state.group, wow.state.groupIsRaid = { "Konvett", "Ashla" }, true
+      wow.state.lootMethod = { "master", 1, 2 }
+      ns.UI.RefreshSync()
+      assert.are.equal("Chosen by Ashla (loot master) at " .. date("%H:%M", 1792000300)
+        .. ". Awards from this group go to this raid.", select(2, status()):match("\n(.*)$"))
     end)
 
     it("says when raids are loaded but none is chosen", function()
       ns.Raids.Load(assert(ns.Sync.ReadPasted(pasteText("raid00001"))), "pasted")
       ns.UI.RefreshSync()
-      assert.are.same({ "warn", "No raid chosen yet. Awards are held as \"no raid\" until one is chosen." },
+      assert.are.same({ "warn", "No raid chosen yet. Awards are held as \"no raid\" until you choose one." },
         { status() })
     end)
 
-    it("says when the run is not a guild run", function()
+    it("says when the run is not a guild run, and who chose it", function()
       ns.Selection.ChooseOff()
       ns.UI.RefreshSync()
       assert.are.equal("Not a guild run. The add-on is off for this group: no loot pop-up, no chat lines, "
-        .. "nothing recorded. It turns back on when you leave the group.", select(2, status()))
+        .. "nothing recorded. It turns back on when you leave the group.\nYou chose this at "
+        .. date("%H:%M", 1792000000) .. ".", select(2, status()))
+      ns.Selection.Apply("-", 1792000300, "Ashla")
+      ns.UI.RefreshSync()
+      assert.are.equal("Ashla chose this at " .. date("%H:%M", 1792000300) .. ".",
+        select(2, status()):match("\n(.*)$"))
     end)
 
-    it("says when the chosen raid isn't loaded here yet", function()
+    it("says when the chosen raid isn't loaded here yet, and that it applies once it loads", function()
       ns.Selection.Apply("C00009", 1792000300, "Ashla")
       ns.UI.RefreshSync()
-      assert.are.equal("The chosen raid (C00009) isn't loaded here yet. Awards are held as \"no raid\" until "
-        .. "it loads.", select(2, status()))
+      assert.are.same({ "warn", "The chosen raid (C00009) isn't loaded here yet. Awards are held as "
+        .. "\"no raid\" until it loads.\nChosen by Ashla at " .. date("%H:%M", 1792000300) .. ". It applies "
+        .. "here once the raid loads: from the helper at login or /reload, or by pasting its reserves "
+        .. "below." },
+        { status() })
+      paste(pasteText("raid00009", { code = "C00009" }))
+      assert.are.equal("raid00009", ns.db.activeRaid)
+      assert.are.equal("good", (status()))
+    end)
+  end)
+
+  describe("choosing the raid", function()
+    local function inbox(...)
+      local raids = {}
+      for i, tree in ipairs({ ... }) do raids[i] = { snapshot = tree } end
+      return { inbox = { formatVersion = 1, written = 1791999000, raids = raids } }
+    end
+    local MC, ONY = raidTree("raid00001"),
+      raidTree("raid00002", { name = "Onyxia's Lair", instance = 249, startsAt = 1792007200 })
+    local RADIO_ON = "|TInterface\\Buttons\\UI-RadioButton:14:14:0:0:64:16:16:32:0:16|t"
+
+    local function pick(i)
+      local b = i == "off" and sync.offPick or sync.rows[i].pick
+      assert.is_true(b:IsShown())
+      wow.click(function() b.scripts.OnClick(b) end)
+    end
+
+    local function radios()
+      local out = {}
+      for i, r in ipairs(sync.rows) do out[i] = r.radio:GetText() == RADIO_ON end
+      out[#out + 1] = sync.offRadio:GetText() == RADIO_ON
+      return out
+    end
+
+    before_each(function()
+      start(inbox(MC, ONY))
+      wow.state.instance = { name = "Molten Core", type = "raid", id = 409 }
+      ns.Selection.ChooseRaid("raid00001")
+      ns.UI.RefreshSync()
+    end)
+
+    it("shows the chosen raid, a choice per row, Not a guild run last, and where you are", function()
+      assert.are.same({ "good", "|cffffffffMolten Core, " .. DAY .. "|r · 2 players · 3 reserves · 0 awards\n"
+        .. "Chosen by you at " .. date("%H:%M", 1792000000) .. ". Awards from this group go to this raid." },
+        { status() })
+      assert.are.same({ true, false, false }, radios())
+      assert.is_false(sync.rows[1].pick:IsShown())
+      assert.is_true(sync.rows[2].pick:IsShown())
+      assert.is_true(sync.rows[2].pick:IsEnabled())
+      assert.is_true(sync.offPick:IsShown())
+      assert.are.equal("Not a guild run |cff808080· the add-on stays off until you leave the group|r",
+        sync.offLabel:GetText())
+      assert.are.equal("You're in Molten Core (instance 409).", sync.where:GetText())
+      assert.are.equal("Choosing another raid changes it for every officer in the group.",
+        sync.whereHint:GetText())
+      wow.state.instance = { name = "Ironforge", type = "none", id = 0 }
+      ns.UI.RefreshSync()
+      assert.are.equal("You're not in an instance.", sync.where:GetText())
+    end)
+
+    it("changes the raid at once when the current raid has no awards (sync-switched)", function()
+      wow.state.time = 1792001640
+      pick(2)
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.are.same({ "chosen", "raid00002", "Konvett" },
+        { ns.db.activeBy, ns.db.activeRaid, ns.db.chosenBy })
+      assert.are.same({ false, true, false }, radios())
+      assert.is_true(sync.rows[2].selected)
+      assert.are.equal("Chosen by you at " .. date("%H:%M", 1792001640) .. ". Awards from this group go to "
+        .. "this raid.", select(2, status()):match("\n(.*)$"))
+    end)
+
+    describe("when the current raid has awards (sync-switch)", function()
+      before_each(function()
+        awards("raid00001", 12)
+        pick(2)
+      end)
+
+      it("asks first, changing nothing yet", function()
+        assert.is_true(ns.UI.dialog:IsShown())
+        assert.are.same({ "Switch the raid to |cffffffffOnyxia's Lair, " .. DAY .. "|r?",
+          "You have 12 awards for Molten Core. They stay with that raid and are still sent to the site. "
+            .. "Every officer in the group switches too.", "Switch", "Keep Molten Core" }, dialog())
+        assert.is_true(ns.UI.dialog.yes:IsShown())
+        assert.is_true(ns.UI.dialog.yes:IsEnabled())
+        assert.is_true(ns.UI.dialog.no:IsEnabled())
+        assert.are.equal("raid00001", ns.db.activeRaid)
+      end)
+
+      it("Keep changes nothing", function()
+        wow.click(function() ns.UI.dialog.no.scripts.OnClick() end)
+        assert.are.equal("raid00001", ns.db.activeRaid)
+        assert.are.same({ true, false, false }, radios())
+      end)
+
+      it("Switch changes the raid and leaves the awards with theirs", function()
+        wow.click(function() ns.UI.dialog.yes.scripts.OnClick() end)
+        assert.are.equal("raid00002", ns.db.activeRaid)
+        assert.are.equal(12, #ns.db.awards.raid00001)
+        assert.are.same({ false, true, false }, radios())
+        assert.are.equal("12", sync.rows[1].awards:GetText())
+      end)
+    end)
+
+    it("marks it not a guild run without asking, even with awards; a raid can follow (sync-off)", function()
+      awards("raid00001", 12)
+      pick("off")
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.are.same({ "off", nil, "Konvett" }, { ns.db.activeBy, ns.db.activeRaid, ns.db.chosenBy })
+      assert.are.equal("warn", (status()))
+      assert.are.same({ false, false, true }, radios())
+      assert.is_false(sync.offPick:IsShown())
+      assert.is_true(sync.rows[1].pick:IsShown())
+      assert.is_nil(sync.rows[1].selected)
+      -- Undoing it is the raid question's (#53); a raid can still be chosen from the table.
+      pick(1)
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.are.same({ "chosen", "raid00001" }, { ns.db.activeBy, ns.db.activeRaid })
+    end)
+
+    it("leaves every row open to choose when the raid is decided later (sync-undecided)", function()
+      ns.Selection.Clear()
+      ns.UI.RefreshSync()
+      assert.are.same({ "warn", "No raid chosen yet. Awards are held as \"no raid\" until you choose one." },
+        { status() })
+      assert.are.same({ false, false, false }, radios())
+      for i = 1, 2 do assert.is_true(sync.rows[i].pick:IsShown()) end
+      assert.is_true(sync.offPick:IsShown())
+      assert.is_false(sync.selected:IsShown())
+    end)
+
+    it("shows another officer's choice to a follower, who can still change it (sync-follower)", function()
+      ns.Selection.Apply("C00002", ns.Selection.Status().at + 60, "Ashla")
+      ns.UI.RefreshSync()
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.are.equal("Chosen by Ashla at " .. date("%H:%M", 1792000060) .. ". Awards from this group go to "
+        .. "this raid.", select(2, status()):match("\n(.*)$"))
+      assert.are.same({ false, true, false }, radios())
+      pick(1)
+      assert.are.same({ "raid00001", "Konvett" }, { ns.db.activeRaid, ns.db.chosenBy })
+    end)
+
+    it("shows the later of two crossing changes, ties by name", function()
+      ns.Selection.Apply("C00002", 1792000500, "Bo")
+      ns.Selection.Apply("C00001", 1792000500, "Ashla")
+      ns.UI.RefreshSync()
+      assert.are.same({ false, true, false }, radios())
+      ns.Selection.Apply("C00001", 1792000500, "Cy")
+      ns.UI.RefreshSync()
+      assert.are.same({ true, false, false }, radios())
+    end)
+  end)
+
+  describe("when the selected raid leaves the helper's list (sync-gone)", function()
+    local ONY = raidTree("raid00002", { name = "Onyxia's Lair", instance = 249, startsAt = 1792007200 })
+    local function saved(count)
+      ns = wow.start({ inbox = { formatVersion = 1, written = 1791999000, raids = {
+        { snapshot = raidTree("raid00001") }, { snapshot = ONY } } } })
+      ns.Selection.ChooseRaid("raid00001")
+      awards("raid00001", count)
+      return copy(ns.db)
+    end
+
+    local function relog(db)
+      ns = wow.start({ saved = { BureaucracyForeverDB = db },
+        inbox = { formatVersion = 1, written = 1792000000, raids = { { snapshot = ONY } } } })
+      sync = ns.UI.sync
+      wow.state.player = "Konvett"
+    end
+
+    it("clears the selection with a notice that names the raid, and keeps its awards", function()
+      relog(saved(12))
+      assert.are.same({ "none", nil, nil }, { ns.db.activeBy, ns.db.activeRaid, ns.db.chosenBy })
+      assert.is_true(ns.UI.dialog:IsShown())
+      assert.are.same({ "|cffffffffMolten Core, " .. DAY .. "|r has left the helper's list: it was cancelled "
+        .. "or has ended.",
+        "Its 12 awards are kept and still sent to the site. Choose the raid in the Sync tab.",
+        "", "OK" }, dialog())
+      -- Choose a raid now opens the raid question (#53); until then the notice has OK alone.
+      assert.is_false(ns.UI.dialog.yes:IsShown())
+      assert.is_true(ns.UI.dialog.no:IsEnabled())
+      wow.click(function() ns.UI.dialog.no.scripts.OnClick() end)
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.are.equal(12, #ns.db.awards.raid00001)
+      open()
+      assert.are.same({ "warn", "No raid chosen. Molten Core, " .. DAY .. " has left the helper's list. "
+        .. "Awards are held as \"no raid\" until a raid is chosen." }, { status() })
+      assert.are.equal(1, #sync.rows)
+      assert.is_true(sync.rows[1].pick:IsShown())
+      assert.is_true(sync.offPick:IsShown())
+    end)
+
+    it("says an award in the singular, and none", function()
+      relog(saved(1))
+      assert.are.equal("Its 1 award is kept and still sent to the site. Choose the raid in the Sync tab.",
+        dialog()[2])
+      relog(saved(0))
+      assert.are.equal("It had no awards. Choose the raid in the Sync tab.", dialog()[2])
+    end)
+
+    it("shows the notice once, keeps the status until a raid is chosen, then drops it", function()
+      relog(saved(0))
+      local db = copy(ns.db)
+      relog(db)
+      assert.is_false(ns.UI.dialog:IsShown())
+      open()
+      assert.is_truthy(select(2, status()):find("has left the helper's list", 1, true))
+      wow.click(function() sync.rows[1].pick.scripts.OnClick(sync.rows[1].pick) end)
+      assert.are.equal("raid00002", ns.db.activeRaid)
+      assert.is_nil(ns.Selection.Gone())
     end)
   end)
 end)
