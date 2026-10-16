@@ -139,3 +139,126 @@ function OpText.Decode(text)
   if not op then return nil, "malformed" end
   return op
 end
+
+-- The raid-chat line (ADDON-SPEC.md 9; wording from the approved design, `design/9-loot-ui`).
+local MAX_LINE = 255
+local MAX_KEY = 24
+local HOW = { HR = "hard reserve", SR = "soft reserve" }
+local DE = "disenchant/bank"
+
+local function isText(value) return type(value) == "string" and value ~= "" end
+
+-- The first problem with the fields every line needs, or nil.
+local function checkCommon(kind, data)
+  if not (isText(data.raid) and data.raid:find("^[PS][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9][A-Z0-9]$")) then
+    return "the raid code is not P or S and five letters or digits"
+  end
+  local names = { "key" }
+  if kind ~= "award" then names[#names + 1] = "id" end
+  if kind == "correction" then names[#names + 1] = "newKey" end
+  for _, name in ipairs(names) do
+    local value = data[name]
+    if not (isText(value) and value:find("^[%w_-]+$")) then
+      return "the " .. name .. " is missing or has odd characters"
+    end
+    if #value > MAX_KEY then
+      return "the " .. name .. " is over " .. MAX_KEY
+        .. " characters: void it on the site or by the helper's upload"
+    end
+  end
+  if kind == "correction" and data.newKey == data.key then return "the new key equals the voided key" end
+  if not isText(data.link) then return "the item link is missing" end
+  for _, name in ipairs({ "winner", "oldWinner" }) do
+    local value = data[name]
+    if value ~= nil and (type(value) ~= "string" or value:find("[<>|]")) then
+      return "the " .. name .. " is not plain text (it has <, > or |)"
+    end
+  end
+end
+
+-- The first problem with an award's or correction's item, boss and method, or nil.
+local function checkAward(data)
+  local item = data.item
+  if not (type(item) == "number" and item >= 1 and item <= 9999999 and item % 1 == 0) then
+    return "the item id is not a whole number of at most 7 digits"
+  end
+  if not data.link:find("|Hitem:" .. string.format("%d", item) .. ":", 1, true) then
+    return "the item link does not match the item id"
+  end
+  if not (isText(data.boss) and #data.boss >= 5) then return "the boss id is missing" end
+  local method, roll = data.method, data.roll
+  if method ~= "HR" and method ~= "SR" and method ~= "OPEN_ROLL" and method ~= "DISENCHANT_BANK" then
+    return "the loot method " .. tostring(method) .. " is not built into chat lines"
+  end
+  if roll ~= nil and not (type(roll) == "number" and roll >= 1 and roll <= 100 and roll % 1 == 0) then
+    return "the roll is not 1 to 100"
+  end
+  if method == "OPEN_ROLL" and roll == nil then return "an open roll needs its roll number" end
+  local winner = data.winner
+  if method == "DISENCHANT_BANK" then
+    if isText(winner) then return "a disenchant/bank line has no winner" end
+  elseif not isText(winner) then
+    return "the winner is missing"
+  end
+end
+
+-- The human part, fullest first: each next one has given way one more step (spec 9.1a).
+local function humanParts(kind, data)
+  local link, winner = data.link, data.winner
+  local to = isText(winner) and winner or nil
+  local how = data.method == "OPEN_ROLL" and ("open roll, " .. tostring(data.roll)) or HOW[data.method]
+  if kind == "undo" then
+    local now = to and ("is no longer awarded to " .. to) or "is no longer going to " .. DE
+    return { "Undo: " .. link .. " " .. now, "Undo: " .. link, link }
+  end
+  local parts, label, old = {}, kind == "correction" and "Correction: " or "", nil
+  if kind == "correction" then old = isText(data.oldWinner) and data.oldWinner or DE end
+  local target = to and (to .. " (" .. how .. ")") or DE
+  local base = label .. link .. " → " .. target
+  parts[1] = old and (base .. ", not " .. old) or base
+  if old then parts[#parts + 1] = base end
+  if to then parts[#parts + 1] = label .. link .. " → " .. to end
+  parts[#parts + 1] = label .. link
+  if label ~= "" then parts[#parts + 1] = link end
+  return parts
+end
+
+-- The chat line for an operation ("award", "undo" or "correction"; the spec's replacement line is
+-- the correction), or nil and the reason it can't be built or won't fit. `data` holds: raid, key
+-- (an award's own key; for undo and correction the key being voided), id (the undo's or
+-- correction's own id), newKey (a correction's new award), item, link, boss (a LootBoss id),
+-- method, roll, winner (nil for DISENCHANT_BANK; for undo, the winner being undone, nil for
+-- disenchant/bank), oldWinner (a correction's previous winner, nil for disenchant/bank) and
+-- practice. The machine part is never shortened.
+function OpText.BuildLine(operation, data)
+  if operation ~= "award" and operation ~= "undo" and operation ~= "correction" then
+    return nil, "unknown operation " .. tostring(operation)
+  end
+  local problem = checkCommon(operation, data) or (operation ~= "undo" and checkAward(data)) or nil
+  if not problem and operation == "undo" and not data.link:find("|Hitem:%d+:") then
+    problem = "the item link is not an item link"
+  end
+  if problem then return nil, problem end
+
+  local boss = operation ~= "undo" and data.boss:sub(-5):lower() or nil
+  local fields, count
+  if operation == "award" then
+    fields = { "A", data.raid, data.key, data.item, boss, data.method, data.roll, data.winner }
+    count = 8
+  elseif operation == "undo" then
+    fields = { "V", data.raid, data.id, data.key }
+    count = 4
+  else
+    fields = { "R", data.raid, data.id, data.key, data.newKey, data.item, boss, data.method, data.roll,
+      data.winner }
+    count = 10
+  end
+  for i = 1, count do fields[i] = OpText.Escape(fields[i]) end
+  local machine = "<" .. (data.practice and "BF1P;" or "BF1;") .. table.concat(fields, ";", 1, count) .. ">"
+  local prefix = data.practice and "[Practice] " or ""
+  for _, human in ipairs(humanParts(operation, data)) do
+    local line = prefix .. human .. " " .. machine
+    if #line <= MAX_LINE then return line end
+  end
+  return nil, "the line is over " .. MAX_LINE .. " bytes even with the shortest wording"
+end
