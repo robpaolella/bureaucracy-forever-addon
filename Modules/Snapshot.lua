@@ -325,7 +325,19 @@ function Snapshot.Validate(tree, mine)
     return nil, notice and message .. " " .. notice or message
   end
   local ok, result = pcall(validate, tree, "")
-  if ok then return result end
+  if ok then
+    -- A boss code is the last five characters of the id, lower-case (spec 9.2).
+    local seen = {}
+    for i, boss in ipairs(result.bosses) do
+      local code = boss.id:sub(-5):lower()
+      if seen[code] then
+        return nil, string.format("The reserves text isn't valid: bosses %d and %d share a code (%s).%s",
+          seen[code], i, code, COPY_AGAIN)
+      end
+      seen[code] = i
+    end
+    return result
+  end
   if type(result) ~= "table" then error(result, 0) end
   return nil, string.format("The reserves text isn't valid: %s %s.%s", result.where, result.why, COPY_AGAIN)
 end
