@@ -889,7 +889,7 @@ describe("the Sync tab", function()
       local button = sync.rows[1].remove
       wow.click(function() button.scripts.OnClick(button) end)
       assert.are.same({ "Remove |cffffffffMolten Core, " .. DAY .. "|r?",
-        "Its 12 awards stay saved and can still be copied.", "Remove", "Cancel" }, dialog())
+        "Its 12 awards stay saved.", "Remove", "Cancel" }, dialog())
       assert.is_true(ns.UI.dialog.yes:IsEnabled())
       assert.is_true(ns.UI.dialog.no:IsEnabled())
       wow.click(function() ns.UI.dialog.no.scripts.OnClick() end)
@@ -917,7 +917,7 @@ describe("the Sync tab", function()
       paste(pasteText("raid00001"))
       awards("raid00001", 1)
       wow.click(function() sync.rows[1].remove.scripts.OnClick(sync.rows[1].remove) end)
-      assert.are.equal("Its 1 award stays saved and can still be copied.", dialog()[2])
+      assert.are.equal("Its 1 award stays saved.", dialog()[2])
     end)
   end)
 

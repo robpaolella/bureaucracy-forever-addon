@@ -596,7 +596,7 @@ local function remove(raidId)
   local _, why = ns.Raids.Remove(raidId)
   if why == "needs confirmation" then
     confirm("Remove " .. WHITE:format(raidName(snapshot)) .. "?",
-      string.format("Its %s %s saved and can still be copied.", plural(n, "award", "awards"),
+      string.format("Its %s %s saved.", plural(n, "award", "awards"),
         agree(n, "stays", "stay")), "Remove", "Cancel",
       function()
         ns.Raids.Remove(raidId, true)
