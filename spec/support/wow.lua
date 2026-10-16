@@ -272,8 +272,8 @@ function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
-  wow.state = { loot = {}, lootThreshold = 2, lootMethod = { "group", 0, 0 }, player = "Masterlooter", chatLog = false,
-    chatLockdown = false,
+  wow.state = { loot = {}, lootThreshold = 2, lootMethod = { "group", 0, 0 }, player = "Masterlooter",
+    chatLog = false, chatLockdown = false,
     items = {}, screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 },
     time = 1792000000, instance = { name = "Eastern Kingdoms", type = "none", id = 0 } }
   local metadata, files = wow.readToc()
