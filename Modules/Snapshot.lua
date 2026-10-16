@@ -308,6 +308,7 @@ local validate = record({
   { "addon", record({ { "version", str }, { "url", str } }) },
   { "bosses", list(record({
     { "id", str }, { "name", str }, { "trash", boolean }, { "items", list(integer) },
+    { "encounter", integer, true },
   })) },
   { "reserves", reserves },
   { "awards", list(award) },

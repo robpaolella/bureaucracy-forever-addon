@@ -33,7 +33,7 @@ describe("Attribution", function()
     ns.Raids.Load(assert(ns.Snapshot.Validate(t, "0.1.0")), "pasted")
     assert(ns.Selection.ChooseRaid("raid00001"))
   end
-  local function kill(name, success) wow.fire("ENCOUNTER_END", 1, name, 0, 5, success or 1) end
+  local function kill(name, success, id) wow.fire("ENCOUNTER_END", id or 1, name, 0, 5, success or 1) end
   local function pull(name) wow.fire("ENCOUNTER_START", 1, name, 0, 5) end
 
   before_each(function()
@@ -101,6 +101,53 @@ describe("Attribution", function()
     assert.is_true(A.Killed("gar"))
     kill("Trash")
     assert.is_false(A.Killed("tra"))
+  end)
+
+  describe("by encounter id", function()
+    local function rows(...)
+      choose({ bosses = { ... } })
+    end
+    local function boss(id, name, encounter)
+      return { id = id, name = name, trash = false, items = { 1 }, encounter = encounter }
+    end
+
+    it("records the row whose encounter is the kill's id, whatever the name given", function()
+      rows(boss("a", "Lucifron", 663), boss("b", "Magmadar", 664))
+      kill("Lucifer (translated)", 1, 664)
+      assert.is_true(A.Killed("b"))
+      assert.is_false(A.Killed("a"))
+    end)
+
+    it("lets the id win over a name matching another row", function()
+      rows(boss("a", "Lucifron", 663), boss("b", "Magmadar", 664))
+      kill("Lucifron", 1, 664)
+      assert.is_true(A.Killed("b"))
+      assert.is_false(A.Killed("a"))
+    end)
+
+    it("falls back to the name among rows without an encounter when no id matches", function()
+      rows(boss("a", "Lucifron", 663), boss("b", "Magmadar"))
+      kill("magmadar", 1, 999)
+      assert.is_true(A.Killed("b"))
+      kill("Lucifron", 1, 999)
+      assert.is_false(A.Killed("a"))
+    end)
+
+    it("records nothing for two rows with the same encounter, or a failed attempt", function()
+      rows(boss("a", "Lucifron", 663), boss("b", "Lucifron", 663))
+      kill("Lucifron", 1, 663)
+      assert.is_false(A.Killed("a"))
+      assert.is_false(A.Killed("b"))
+      rows(boss("a", "Lucifron", 663))
+      kill("Lucifron", 0, 663)
+      assert.is_false(A.Killed("a"))
+    end)
+
+    it("never matches Trash by id", function()
+      rows({ id = "t", name = "Trash", trash = true, items = { 1 }, encounter = 5 })
+      kill("Trash", 1, 5)
+      assert.is_false(A.Killed("t"))
+    end)
   end)
 
   it("records no kill for a name matching no row or two rows, but counts the pull", function()
