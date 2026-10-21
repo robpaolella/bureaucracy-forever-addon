@@ -387,10 +387,16 @@ end
 
 local function itemOf(link) return link and tonumber(link:match("item:(%d+)")) end
 
--- The award, if it is not confirmed and not voided: the only kind the three choices act on.
+-- The award, if it is not confirmed and not voided: the only kind the three choices act on. Or
+-- nil and why: "not unconfirmed", or "handing out" while a hand-out of it waits for the game.
 local function unconfirmedAward(key)
   local award = ns.Records.Get(key)
-  if award and award.state == "not-confirmed" and not award.voided then return award end
+  if not (award and award.state == "not-confirmed" and not award.voided) then
+    return nil, "not unconfirmed"
+  end
+  local attempt = attemptOf(key)
+  if attempt and attempt.status == "pending" then return nil, "handing out" end
+  return award
 end
 
 -- The loot window slot holding the award's item: its last hand-out's slot first, else any slot
@@ -424,8 +430,8 @@ end
 
 -- The checks every hand-out choice shares. Returns the award and the slot, or nil and why.
 local function handoutCheck(key)
-  local award = unconfirmedAward(key)
-  if not award then return nil, "not unconfirmed" end
+  local award, why = unconfirmedAward(key)
+  if not award then return nil, why end
   if not isLootMaster() then return nil, "not loot master" end
   local slot, reason = lootSlot(key, award.item)
   if not slot then return nil, reason end
@@ -436,7 +442,8 @@ end
 -- no new record; the award is confirmed once the game confirms this hand-out. It needs no free
 -- chat, so it works in a boss fight. key is the award's key. Returns the new hand-out (Tracking's
 -- attempt, with awardKey and announced as the first hand-out had it), or nil and why: "not
--- unconfirmed" (no such award, or it isn't waiting as not confirmed), "not loot master",
+-- unconfirmed" (no such award, or it isn't waiting as not confirmed), "handing out" (a hand-out
+-- of it still waits for the game: every choice waits for that), "not loot master",
 -- "window" (the loot window is closed), "changed" (the item isn't in the loot window), "not a
 -- candidate" (the game won't let the winner receive it now) or Tracking.Give's reasons. A refusal
 -- changes nothing and hands nothing out.
@@ -457,10 +464,10 @@ end
 -- it and the site's blocked holders are left out. key is the award's key. Returns a list of
 -- { char, user, method ("HR" or "SR"), available, reason (when not available: "not in raid",
 -- or "cannot receive" when the open loot window's candidates leave them out) }, or nil and "not
--- unconfirmed".
+-- unconfirmed" or "handing out".
 function Popup.GiveElseList(key)
-  local award = unconfirmedAward(key)
-  if not award then return nil, "not unconfirmed" end
+  local award, why = unconfirmedAward(key)
+  if not award then return nil, why end
   local snapshot = ns.Raids.Get(award.raid)
   local reserves = snapshot and snapshot.reserves or {}
   local holders = reserves[award.item] or reserves[tostring(award.item)] or {}
@@ -540,12 +547,12 @@ end
 
 -- Not handed out: voids the award and posts its undo line. It needs no loot window. A line that
 -- can't be built is not posted, and the officer is told; the void stands. key is the award's key.
--- Returns the void operation, or nil and why: "fight" (chat is locked), "not unconfirmed" or
--- Records.Void's reasons. A refusal changes nothing and posts nothing.
+-- Returns the void operation, or nil and why: "fight" (chat is locked), "not unconfirmed",
+-- "handing out" or Records.Void's reasons. A refusal changes nothing and posts nothing.
 function Popup.NotHandedOut(key)
   if Popup.ChatLocked() then return nil, "fight" end
-  local award = unconfirmedAward(key)
-  if not award then return nil, "not unconfirmed" end
+  local award, refused = unconfirmedAward(key)
+  if not award then return nil, refused end
   local op, why = ns.Records.Void(key, { reason = "not handed out" })
   if not op then return nil, why end
   local attempt = attemptOf(key)
