@@ -546,13 +546,15 @@ end
 -- of it still waits for the game: every choice waits for that), "not loot master",
 -- "window" (the loot window is closed), "changed" (the item isn't in the loot window), "not a
 -- candidate" (the game won't let the winner receive it now) or Tracking.Give's reasons. A refusal
--- changes nothing and hands nothing out.
+-- changes nothing and hands nothing out. A Disenchant/bank award names no winner: it goes to whom
+-- its last hand-out went, or after a /reload to the raid's D/B pick.
 function Popup.TryAgain(key)
   local award, slot = handoutCheck(key)
   if not award then return nil, slot end
-  local index = candidateIndex(slot, award.char)
-  if not index then return nil, "not a candidate" end
   local before = attemptOf(key)
+  local recipient = award.char or (before and before.winner) or Popup.DBPick()
+  local index = recipient and candidateIndex(slot, recipient)
+  if not index then return nil, "not a candidate" end
   local attempt, reason = ns.Tracking.Give(slot, index)
   if not attempt then return nil, reason end
   attempt.awardKey, attempt.announced = key, before and before.announced
@@ -640,7 +642,7 @@ function Popup.GiveElse(key, char)
       oldWinner = award.char, practice = op.practice }
   end
   attempt.announced = post("correction", data, why, "Correction line for " .. link,
-    link .. " is being handed to " .. pick.char .. " instead of " .. award.char
+    link .. " is being handed to " .. pick.char .. " instead of " .. (award.char or "disenchant/bank")
       .. ", but its raid chat line couldn't be posted.")
   return attempt
 end
@@ -660,7 +662,8 @@ function Popup.NotHandedOut(key)
   local snapshot = ns.Raids.Get(award.raid)
   post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
     winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
-    link .. " is no longer awarded to " .. award.char .. ", but its raid chat line couldn't be posted.")
+    link .. (award.char and (" is no longer awarded to " .. award.char) or " is no longer going to"
+      .. " disenchant/bank") .. ", but its raid chat line couldn't be posted.")
   return op
 end
 

@@ -726,6 +726,58 @@ describe("Popup", function()
         assert.are.same({ "not-confirmed", nil }, { award.state, award.voided })
       end
 
+      describe("a Disenchant/bank award (#39)", function()
+        -- Gives item 1 to the D/B pick and lets the wait run out. Returns the award key.
+        local function unconfirmedDB(fields)
+          raid(fields)
+          drop({ { id = 1 } })
+          ns.Popup.SetDBPick("Bram Ironvein")
+          local attempt
+          wow.click(function() attempt = assert(ns.Popup.GiveDB(1, 1, "Bram Ironvein")) end)
+          wow.advance(ns.Tracking.confirmWait)
+          assert.are.equal("not-confirmed", ns.Records.Get(attempt.awardKey).state)
+          return attempt.awardKey
+        end
+
+        it("tries again to the same character, even after the pick changed", function()
+          local key = unconfirmedDB()
+          ns.Popup.SetDBPick("Doran Vale")
+          local attempt = assert(click(ns.Popup.TryAgain, key))
+          assert.are.same({ slot = 1, candidate = 4 }, wow.gives[2])
+          assert.are.equal("Bram Ironvein", attempt.winner)
+          assert.are.equal(1, #wow.sent)
+          confirm(1, "Bram Ironvein")
+          assert.are.equal("confirmed", ns.Records.Get(key).state)
+        end)
+
+        it("voids it with the undo line that names no winner", function()
+          local key = unconfirmedDB()
+          local op = assert(click(ns.Popup.NotHandedOut, key))
+          assert.is_true(ns.Records.Get(key).voided)
+          assert.are.same({ channel = "RAID", text = "Undo: " .. link(1) .. " is no longer going to"
+            .. " disenchant/bank <BF1;V;SA0001;" .. op.id .. ";" .. key .. ">" }, wow.sent[2])
+        end)
+
+        it("gives it to a reserve holder instead, correcting disenchant/bank", function()
+          local key = unconfirmedDB()
+          local attempt = assert(click(ns.Popup.GiveElse, key, "Ashla Brightwater"))
+          assert.is_truthy(wow.sent[2].text:find("→ Ashla Brightwater (hard reserve), not disenchant/bank <",
+            1, true))
+          assert.are.equal("HR", ns.Records.Get(attempt.awardKey).method)
+        end)
+
+        it("tells the officer when the undo or correction line can't be built", function()
+          local key = unconfirmedDB({ code = "MC0001" })
+          assert(click(ns.Popup.GiveElse, key, "Ashla Brightwater"))
+          assert.is_truthy(wow.printed[#wow.printed]:find("instead of disenchant/bank, but its raid chat", 1,
+            true))
+          key = unconfirmedDB({ code = "MC0001" })
+          assert(click(ns.Popup.NotHandedOut, key))
+          assert.is_truthy(wow.printed[#wow.printed]:find("is no longer going to disenchant/bank, but", 1,
+            true))
+        end)
+      end)
+
       it("stays not confirmed when the loot window closes with no choice made", function()
         local key = unconfirmed()
         wow.closeLoot()
