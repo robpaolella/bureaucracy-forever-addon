@@ -313,10 +313,11 @@ end
 -- The officer clicked a row's Give button: hands the item to the winner, found by name among
 -- this corpse's candidates (their order changes per corpse), records the award as announced and
 -- posts its line in raid chat. A line that can't be built is not posted, and the officer is
--- told; the hand-out and the award stand. Returns the hand-out (Tracking's attempt, with
--- awardKey and announced), or nil and why: "fight" (chat is locked), "not ready" (no Give
--- enabled for the slot), "not a candidate" or Tracking.Give's reasons.
-function Popup.Give(slot)
+-- told; the hand-out and the award stand. item and winner are what the clicked button showed: if
+-- the row now names another item or winner, nothing happens. Returns the hand-out (Tracking's
+-- attempt, with awardKey and announced), or nil and why: "fight" (chat is locked), "not ready"
+-- (no Give enabled for the slot), "changed", "not a candidate" or Tracking.Give's reasons.
+function Popup.Give(slot, item, winner)
   if Popup.ChatLocked() then return nil, "fight" end
   local model = Popup.Build()
   local row
@@ -326,6 +327,7 @@ function Popup.Give(slot)
   if not (row and row.action == "give" and row.buttons[1] and row.buttons[1].enabled) then
     return nil, "not ready"
   end
+  if row.item ~= item or row.winner ~= winner then return nil, "changed" end
   local index
   for i = 1, MAX_CANDIDATES do
     local name = GetMasterLootCandidate(slot, i)

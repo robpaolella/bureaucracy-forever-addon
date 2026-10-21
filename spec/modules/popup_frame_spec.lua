@@ -270,6 +270,19 @@ describe("PopupFrame", function()
       assert.is_false(shownRows()[1].spinner:IsShown())
     end)
 
+    it("redraws instead of giving when the winner changed since the draw", function()
+      setup({ code = "SA0001",
+        reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = 1 } })
+      assert.are.equal("Give to Ashla Brightwater", shownRows()[1].primary.label:GetText())
+      wow.state.loot[1].candidates = { "Masterlooter", "Doran Vale" }
+      click(shownRows()[1].primary)
+      assert.are.same({}, wow.gives)
+      assert.are.equal("Give to Doran Vale", shownRows()[1].primary.label:GetText())
+    end)
+
     it("gives the buttons back when the game doesn't confirm", function()
       raid()
       drop({ { id = 1 } })

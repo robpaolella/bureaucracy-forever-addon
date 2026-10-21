@@ -160,7 +160,7 @@ local function newRow()
   row.primary:SetScript("OnClick", function()
     local button = row.data and row.data.buttons[1]
     if not (button and button.enabled and button.action == "give") then return end
-    local ok, why = ns.Popup.Give(row.data.slot)
+    local ok, why = ns.Popup.Give(row.data.slot, row.data.item, row.data.winner)
     if not ok then ns.Log("Give for " .. row.data.link .. " refused: " .. tostring(why)) end
     PopupFrame.Refresh()
   end)

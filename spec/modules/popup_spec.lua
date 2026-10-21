@@ -340,9 +340,14 @@ describe("Popup", function()
       setup(t)
     end
 
+    -- Clicks the slot's Give button as it was drawn just now.
     local function give(slot)
+      local shown
+      for _, row in ipairs((ns.Popup.Build() or { rows = {} }).rows) do
+        if row.slot == slot then shown = row end
+      end
       local result
-      wow.click(function() result = { ns.Popup.Give(slot) } end)
+      wow.click(function() result = { ns.Popup.Give(slot, shown and shown.item, shown and shown.winner) } end)
       return result[1], result[2]
     end
 
@@ -394,6 +399,20 @@ describe("Popup", function()
       assert.are.equal(1, #wow.sent)
       confirm(1, "Ashla Brightwater")
       assert.is_nil(ns.Popup.Build().rows[1].handout)
+    end)
+
+    it("does nothing if the winner changed after the button was drawn", function()
+      raid({ reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } } })
+      drop({ { id = 1 } })
+      local shown = ns.Popup.Build().rows[1]
+      assert.are.equal("Ashla Brightwater", shown.winner)
+      wow.state.loot[1].candidates = { "Masterlooter", "Doran Vale" } -- Ashla can't receive it now
+      local result
+      wow.click(function() result = { ns.Popup.Give(1, shown.item, shown.winner) } end)
+      assert.are.same({ nil, "changed" }, result)
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+      assert.is_nil(ns.Records.Ops("raid00001")[1])
     end)
 
     it("leaves the award announced when the game doesn't confirm", function()
