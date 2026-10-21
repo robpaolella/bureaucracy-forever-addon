@@ -9,6 +9,7 @@ ns.PopupFrame = PopupFrame
 
 local WIDTH, TEXT_WIDTH, PAD = 560, 380, 10
 local ROW_MIN, RECHECK_SECONDS = 46, 1
+local BOX_WIDTH = WIDTH - 2 * PAD - 40 -- the hand-out box, from the text column to the row's right
 local BADGE_COLORS = {
   hr = { 0.85, 0.4, 0.1 }, sr = { 0.2, 0.55, 0.85 }, open = { 0.45, 0.45, 0.45 },
 }
@@ -140,11 +141,26 @@ local function newRow()
   row.beside = newText(row, "GameFontHighlightSmall")
   row.detail = newText(row, "GameFontHighlightSmall")
   row.skipped = newText(row, "GameFontDisableSmall")
-  row.handout = newText(row, "GameFontNormal")
-  row.handoutNote = newText(row, "GameFontHighlightSmall")
-  row.spinner = row:CreateTexture(nil, "ARTWORK")
+  -- The hand-out box, as the design draws it: a grey edge round a dark inside.
+  row.box = CreateFrame("Frame", nil, row)
+  row.box.edge = row.box:CreateTexture(nil, "BACKGROUND")
+  row.box.edge:SetAllPoints()
+  row.box.edge:SetColorTexture(0.5, 0.5, 0.5, 1)
+  row.box.inside = row.box:CreateTexture(nil, "BORDER")
+  row.box.inside:SetPoint("TOPLEFT", row.box, "TOPLEFT", 1, -1)
+  row.box.inside:SetPoint("BOTTOMRIGHT", row.box, "BOTTOMRIGHT", -1, 1)
+  row.box.inside:SetColorTexture(0.04, 0.04, 0.04, 1)
+  row.box:Hide()
+  row.spinner = row.box:CreateTexture(nil, "ARTWORK")
   row.spinner:SetSize(14, 14)
+  row.spinner:SetPoint("TOPLEFT", row.box, "TOPLEFT", 6, -6)
   row.spinner:SetTexture(SPINNER)
+  row.handout = newText(row.box, "GameFontNormal")
+  row.handout:SetWidth(BOX_WIDTH - 32)
+  row.handout:SetPoint("TOPLEFT", row.box, "TOPLEFT", 24, -6)
+  row.handout:SetTextColor(unpack(GOLD))
+  row.handoutNote = newText(row.box, "GameFontHighlightSmall")
+  row.handoutNote:SetWidth(BOX_WIDTH - 12)
   row.primary = newButton(row, 150, 20)
   row.primary:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -2)
   -- A greyed button still shows why when hovered.
@@ -203,32 +219,28 @@ local function drawRow(row, data, y)
   local notes = data.skippedText
   if data.unavailable then notes = (notes and (notes .. "\n") or "") .. data.unavailable end
   below = addLine(row, row.skipped, notes, below)
-  -- While the game confirms a hand-out the row says so, with a turning spinner, in place of buttons.
-  local handout = data.handout
-  row.spinner:ClearAllPoints()
+  -- While the game confirms a hand-out the row says so in its box, with a turning spinner, in place
+  -- of buttons.
+  local handout, box = data.handout, row.box
   if handout then
-    row.spinner:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
-    row.spinner:Show()
+    row.handout:SetText(handout.text)
+    local inside = 6 + row.handout:GetStringHeight() + 4
+    row.handoutNote:ClearAllPoints()
+    row.handoutNote:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -inside)
+    row.handoutNote:SetText(handout.note)
+    inside = inside + row.handoutNote:GetStringHeight() + 6
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
+    box:SetSize(BOX_WIDTH, inside)
+    box:Show()
     row:SetScript("OnUpdate", function()
       if row.spinner.SetRotation then row.spinner:SetRotation(-GetTime() * 4) end
     end)
+    below = below + inside + 4
   else
-    row.spinner:Hide()
+    box:Hide()
     row:SetScript("OnUpdate", nil)
   end
-  row.handout:ClearAllPoints()
-  if handout then
-    row.handout:SetWidth(TEXT_WIDTH - 18)
-    row.handout:SetPoint("TOPLEFT", row, "TOPLEFT", 58, -below)
-    row.handout:SetText(handout.text)
-    row.handout:SetTextColor(unpack(GOLD))
-    row.handout:Show()
-    below = below + row.handout:GetStringHeight() + 4
-  else
-    row.handout:SetText("")
-    row.handout:Hide()
-  end
-  below = addLine(row, row.handoutNote, handout and handout.note or nil, below)
   local height = math.max(ROW_MIN, below + 4)
   row:SetHeight(height)
   row.data = data

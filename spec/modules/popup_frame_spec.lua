@@ -256,7 +256,16 @@ describe("PopupFrame", function()
       assert.are.equal("Handing out to Ashla Brightwater…", row.handout:GetText())
       assert.are.equal("Announced in raid chat. Waiting for the game to confirm (a few seconds).",
         row.handoutNote:GetText())
-      assert.is_true(row.spinner:IsShown())
+      -- In the design's bordered box, below the badge, holding the spinner and both lines.
+      local box = row.box
+      assert.is_true(box:IsShown())
+      assert.are.same({ row, 40, -40 }, { box.points[1].relativeTo, box.points[1].x, box.points[1].y })
+      for _, part in ipairs({ row.spinner, row.handout, row.handoutNote }) do
+        assert.are.equal(box, part.points[1].relativeTo)
+      end
+      assert.are.equal(500, box:GetWidth())
+      assert.is_true(box:GetHeight() > -row.handoutNote.points[1].y + 12)
+      assert.is_true(row:GetHeight() >= 40 + box:GetHeight())
       assert.is_false(row.primary:IsShown() or row.db:IsShown())
       assert.are.equal("Ashla Brightwater", row.beside:GetText())
       local other = shownRows()[2] -- the other rows keep their buttons
@@ -267,7 +276,7 @@ describe("PopupFrame", function()
       wow.fire("CHAT_MSG_LOOT", "Ashla Brightwater receives loot: " .. link(1) .. ".")
       assert.are.equal(2, #shownRows())
       assert.are.equal("Give to Doran Vale", shownRows()[1].primary.label:GetText())
-      assert.is_false(shownRows()[1].spinner:IsShown())
+      assert.is_false(shownRows()[1].box:IsShown())
     end)
 
     it("redraws instead of giving when the winner changed since the draw", function()
@@ -289,7 +298,7 @@ describe("PopupFrame", function()
       click(shownRows()[1].primary)
       wow.advance(ns.Tracking.confirmWait)
       local row = shownRows()[1]
-      assert.is_false(row.handout:IsShown() or row.spinner:IsShown())
+      assert.is_false(row.box:IsShown())
       assert.is_true(row.primary:IsShown())
     end)
 
