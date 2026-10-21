@@ -863,6 +863,9 @@ function Popup.GiveElseList(key)
   local snapshot = ns.Raids.Get(award.raid)
   local reserves = snapshot and snapshot.reserves or {}
   local holders = reserves[award.item] or reserves[tostring(award.item)] or {}
+  -- Practice: the window's made-up holders, group and candidates stand in for the real ones.
+  local made = ns.Practice() and madeUp[award.item]
+  if made then holders = made.holders end
   local awards = {}
   for _, a in ipairs(snapshot and snapshot.awards or {}) do awards[#awards + 1] = a end
   for _, a in ipairs(ns.Raids.Awards(award.raid)) do
@@ -873,6 +876,7 @@ function Popup.GiveElseList(key)
   local cands, unknown
   if slot then cands, unknown = candidates(slot) end
   if unknown then cands = nil end
+  if made then cands = made.candidates end
   local list = {}
   for _, kind in ipairs({ "HR", "SR" }) do
     local same = {}
@@ -880,7 +884,7 @@ function Popup.GiveElseList(key)
       if h.kind == kind and h.user ~= award.user then same[#same + 1] = h end
     end
     local resolved = ns.Rules.Resolve({ item = award.item, reserves = { [award.item] = same },
-      awards = awards, roster = roster(), candidates = cands })
+      awards = awards, roster = made and made.roster or roster(), candidates = cands })
     local status = {}
     for _, h in ipairs(resolved.contenders) do status[h.user] = { available = true } end
     for _, s in ipairs(resolved.skipped) do

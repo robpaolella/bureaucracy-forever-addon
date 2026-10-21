@@ -1212,8 +1212,10 @@ describe("Popup", function()
         it("marks a not confirmed practice award's choices practice", function()
           raid({ reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } } })
           practice()
-          drop({ { id = 1 } })
-          local key = assert(give(1)).awardKey
+          -- Item 2 has three made-up hard reserve holders; a D/B award is the one to replace.
+          drop({ { id = 1 }, { id = 2 } })
+          assert.is_true(ns.Popup.SetDBPick("Masterlooter"))
+          local key = assert(click(ns.Popup.GiveDB, 2, 2, "Masterlooter")).awardKey
           wow.advance(ns.Tracking.confirmWait)
           local attempt = assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
           assert.is_true(ns.Records.Get(attempt.awardKey).practice)
@@ -1712,6 +1714,22 @@ describe("Popup", function()
       assert.is_true(ns.Selection.ChooseOff())
       drop({ { id = 1 } })
       assert.are.same({ nil, "not a guild run" }, { ns.Popup.Build() })
+    end)
+
+    it("lists the made-up holders for Give to someone else", function()
+      setup({ code = "SA0001", bosses = tree().bosses, reserves = {} })
+      wow.slash("/bf practice")
+      drop({ { id = 1 }, { id = 2 }, { id = 3 }, { id = 4 } })
+      local row = ns.Popup.Build().rows[4]
+      local attempt
+      wow.click(function() attempt = ns.Popup.Give(row.slot, row.item, row.winner) end)
+      wow.advance(ns.Tracking.confirmWait)
+      assert.are.same({
+        { char = "Bram Ironvein", user = "practice-bram ironvein", method = "HR", available = false,
+          reason = "not in raid" },
+        { char = "Mirel Stone", user = "practice-mirel stone", method = "HR", available = false,
+          reason = "cannot receive" },
+      }, ns.Popup.GiveElseList(attempt.awardKey))
     end)
 
     it("uses the drop's real reserves with practice mode off", function()
