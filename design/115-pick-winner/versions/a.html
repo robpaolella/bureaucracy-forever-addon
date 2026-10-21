@@ -223,7 +223,8 @@ table.list tr.void td { opacity: .55; }
 .pw-name { min-width: 150px; }
 .pw-head { margin: 6px 0 2px 2px; font-family: "Friz", serif; }
 .pw-empty { padding: 4px 8px; }
-.pw-scroll { max-height: 168px; overflow-y: auto; border: 1px solid #ffffff12; }
+.pw-scroll { max-height: 168px; overflow-y: auto; border: 1px solid #ffffff12; scrollbar-color: #a88d3b #120a04; }
+.pw-menu { scrollbar-color: #a88d3b #120a04; }
 .pw-sub { display:flex; align-items:center; gap:10px; margin: 2px 0 4px 34px; flex-wrap: wrap; }
 .pw-menu { left: 0; top: 24px; width: 220px; max-height: 210px; overflow-y: auto; background: rgba(9,9,24,.99); z-index: 40; }
 .pw-menu .mi { cursor: pointer; }
@@ -246,6 +247,8 @@ table.list tr.pw-row-open td:first-child { box-shadow: inset 3px 0 0 var(--gold)
 .notice .btn-row { align-items: center; }
 .pw-side .pw-sub { margin-left: 26px; }
 .pw-side .pw-name { min-width: 120px; }
+.pw-side .pick { flex-wrap: wrap; }
+.pw-side .pw-again { flex-basis: 100%; padding-left: 26px; }
 </style></head>
 <body><div class="proto-bar" id="proto-bar" role="region" aria-label="Prototype controls"></div>
 <div class="viewport" id="viewport"><main class="scene" id="scene" aria-label="Game screen mock-up"></main></div>
@@ -690,12 +693,12 @@ function pwList(m) {
   const none = m.holders.length ? "" : `<div class="hint pw-empty">Nobody else reserved this item.</div>`;
   const tall = m.holders.length > 5 ? "pw-scroll" : "";
   return `<div class="pick-list pw-list" role="radiogroup" aria-label="Who gets it">
-      <div class="gold small pw-head">Reserved it</div><div class="${tall}" ${tall ? 'tabindex="0" aria-label="Reserve holders"' : ""}>${holders}${none}</div>
+      <div class="gold small pw-head">Reserved it</div><div class="${tall}" ${tall ? 'tabindex="0" aria-label="Reserve holders"' : ""}>${holders}${none}</div>${tall ? `<div class="hint small" style="margin:2px 0 0 4px">▼ ${m.holders.length} reserve holders · scroll for more</div>` : ""}
       <div class="gold small pw-head">Anyone else</div>
       ${pwChoice(m, "__other", `<span class="pw-name white">Someone else in the raid</span>${mode("open", "Open roll")}`)}
       ${pwOtherControls(m)}
       ${pwChoice(m, "__db", `<span class="pw-name white">Disenchant/bank</span>${mode("db", "Disenchant/bank")}`)}
-      ${pwChoice(m, PW_PREV, `<span class="pw-name">${who(PW_PREV)}</span>${mode("sr", "Soft reserve")}<span class="hint small">had it before: cancels the undo</span>`)}
+      ${pwChoice(m, PW_PREV, `<span class="pw-name">${who(PW_PREV)}</span>${mode("sr", "Soft reserve")}<span class="hint small pw-again">had it before: cancels the undo</span>`)}
     </div>`;
 }
 function pwNote(m) {
@@ -725,11 +728,13 @@ function pwPanel(m) {
 /* ----- The Awards tab around it (revision 1's rows; the needs-a-winner row changes) ----- */
 function pwRows(m) {
   const done = m.done ? (PW_POSTED.award || { char: "Hollis Grey", method: "SR" }) : null;
-  return AWARDS.map((a) => {
-    if (a.status !== "needswinner") return a;
-    if (done) return Object.assign({}, a, { t: PW_TIME, who: done.char || "", how: PW_METHOD[done.method][1], roll: done.roll, status: "corrected" });
-    return a;
-  });
+  if (!done) return AWARDS;
+  /* The new award is the newest of its boss's awards, so it moves to the end of that group. */
+  const rows = AWARDS.filter((a) => a.status !== "needswinner");
+  const old = AWARDS.find((a) => a.status === "needswinner");
+  const at = rows.map((a) => a.boss).lastIndexOf(old.boss) + 1;
+  rows.splice(at, 0, Object.assign({}, old, { t: PW_TIME, who: done.char || "", how: PW_METHOD[done.method][1], roll: done.roll, status: "corrected" }));
+  return rows;
 }
 function pwRow(a, m, V) {
   if (a.status === "corrected") {
@@ -748,7 +753,16 @@ function pwRow(a, m, V) {
 function pwAwardsBody(m, V) {
   const rows = pwRows(m);
   let html = "", last = "";
-  for (const a of rows) {
+  /* In the game the list scrolls inside the window: with the picker open in the row (A), it is
+     scrolled down to the row, and the bosses above it are out of view. */
+  let shown = rows;
+  if (m.open && V.inRow) {
+    const from = rows.findIndex((a) => a.boss === "Gehennas");
+    const above = [...new Set(rows.slice(0, from).map((a) => a.boss))];
+    shown = rows.slice(from);
+    html += `<tr><td colspan="6" class="hint" style="text-align:center">▲ ${from} more above (${above.join(", ")}) · scroll</td></tr>`;
+  }
+  for (const a of shown) {
     if (a.boss !== last) { last = a.boss; const n = rows.filter((x) => x.boss === a.boss).length; html += `<tr class="group"><td colspan="6">${esc(a.boss)} <span class="grey small narrow">· ${n} item${n > 1 ? "s" : ""}</span></td></tr>`; }
     html += pwRow(a, m, V);
   }

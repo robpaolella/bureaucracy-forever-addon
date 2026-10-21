@@ -10,7 +10,8 @@
 .pw-name { min-width: 150px; }
 .pw-head { margin: 6px 0 2px 2px; font-family: "Friz", serif; }
 .pw-empty { padding: 4px 8px; }
-.pw-scroll { max-height: 168px; overflow-y: auto; border: 1px solid #ffffff12; }
+.pw-scroll { max-height: 168px; overflow-y: auto; border: 1px solid #ffffff12; scrollbar-color: #a88d3b #120a04; }
+.pw-menu { scrollbar-color: #a88d3b #120a04; }
 .pw-sub { display:flex; align-items:center; gap:10px; margin: 2px 0 4px 34px; flex-wrap: wrap; }
 .pw-menu { left: 0; top: 24px; width: 220px; max-height: 210px; overflow-y: auto; background: rgba(9,9,24,.99); z-index: 40; }
 .pw-menu .mi { cursor: pointer; }
@@ -33,3 +34,5 @@ table.list tr.pw-row-open td:first-child { box-shadow: inset 3px 0 0 var(--gold)
 .notice .btn-row { align-items: center; }
 .pw-side .pw-sub { margin-left: 26px; }
 .pw-side .pw-name { min-width: 120px; }
+.pw-side .pick { flex-wrap: wrap; }
+.pw-side .pw-again { flex-basis: 100%; padding-left: 26px; }
