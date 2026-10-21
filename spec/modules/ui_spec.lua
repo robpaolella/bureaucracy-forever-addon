@@ -46,8 +46,9 @@ describe("the officers' window", function()
     assert.is_false(ns.UI.window:IsShown())
   end)
 
-  it("closes with Escape, as does its dialog", function()
-    assert.are.same({ "BureaucracyForeverWindow", "BureaucracyForeverDialog" }, _G.UISpecialFrames)
+  it("closes with Escape, as do its dialog and the raid question", function()
+    assert.are.same({ "BureaucracyForeverWindow", "BureaucracyForeverDialog", "BureaucracyForeverQuestion" },
+      _G.UISpecialFrames)
   end)
 
   it("shows the Awards tab first, then the tab clicked, each with its placeholder", function()
@@ -1561,9 +1562,9 @@ describe("the Sync tab", function()
         .. "or has ended.",
         "Its 12 awards are kept and still sent to the site. You'll be asked which raid it is when you next "
           .. "enter a raid instance.",
-        "", "OK" }, dialog())
-      -- Choose a raid now opens the raid question (#53); until then the notice has OK alone.
-      assert.is_false(ns.UI.dialog.yes:IsShown())
+        "Choose a raid now", "OK" }, dialog())
+      assert.is_true(ns.UI.dialog.yes:IsShown())
+      assert.is_true(ns.UI.dialog.yes:IsEnabled())
       assert.is_true(ns.UI.dialog.no:IsEnabled())
       wow.click(function() ns.UI.dialog.no.scripts.OnClick() end)
       assert.is_false(ns.UI.dialog:IsShown())

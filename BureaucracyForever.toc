@@ -22,4 +22,5 @@ Modules\Rolls.lua
 Modules\PopupFrame.lua
 Modules\UI.lua
 Modules\AwardsTab.lua
+Modules\StartQuestion.lua
 Inbox.lua
