@@ -782,7 +782,7 @@ describe("Popup", function()
             .. " → their name, not Ashla Brightwater.", list.hint)
         end)
 
-        it("says so when nobody else reserved it, and draws no open roll or disenchant line", function()
+        it("says so when nobody else reserved it, and draws no open roll line", function()
           unconfirmed(nil, GROUP)
           local list = row1().notConfirmed.list
           assert.are.same({}, list.people)
@@ -1116,6 +1116,152 @@ describe("Popup", function()
           assert.is_truthy(click(ns.Popup.GiveElse, key, "Doran Vale"))
           assert.is_truthy(wow.sent[2].text:find("^%[Practice%] Correction: "))
           assert.is_truthy(wow.sent[2].text:find("<BF1P;R;", 1, true))
+        end)
+      end)
+
+      describe("the Disenchant/bank line (#96)", function()
+        local RESERVES = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } }
+
+        -- Ashla's award not confirmed, with Bram as the raid's D/B pick. Returns the award key.
+        local function setupDB()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          assert.is_true(ns.Popup.SetDBPick("Bram Ironvein"))
+          return key
+        end
+
+        local function dbLine() return ns.Popup.Build().rows[1].notConfirmed.list.db end
+
+        it("shows the line with the pick's name after the reserve holders", function()
+          setupDB()
+          local list = ns.Popup.Build().rows[1].notConfirmed.list
+          assert.are.equal("Doran Vale", list.people[1].char)
+          assert.are.same({ label = "Disenchant/bank", pick = "Bram Ironvein", enabled = true }, list.db)
+        end)
+
+        it("with no pick, greys the line and gives nothing", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          assert.are.same({ label = "Disenchant/bank: choose first", enabled = false,
+            tooltip = "Disenchant/bank: choose the character to give to." }, dbLine())
+          assert.are.same({ nil, "no pick" }, { click(ns.Popup.GiveElseDB, key, nil) })
+          unchanged(key, 1)
+          -- The pick chosen with another row's D/B button shows at once.
+          assert.is_true(ns.Popup.SetDBPick("Bram Ironvein"))
+          assert.are.same({ "Disenchant/bank", "Bram Ironvein", true },
+            { dbLine().label, dbLine().pick, dbLine().enabled })
+        end)
+
+        it("hands out to the pick, records the replacement and posts the one correction line", function()
+          local key = setupDB()
+          local attempt = assert(click(ns.Popup.GiveElseDB, key, "Bram Ironvein"))
+          assert.are.same({ slot = 1, candidate = 4 }, wow.gives[2])
+          local old, new = ns.Records.Get(key), ns.Records.Get(attempt.awardKey)
+          assert.are.same({ true, attempt.awardKey }, { old.voided, old.replacedBy })
+          assert.are.same({ "announced", "DISENCHANT_BANK", "lb_lucifron", key },
+            { new.state, new.method, new.boss, new.replaces })
+          assert.is_nil(new.char)
+          assert.is_nil(new.user)
+          local replace = ns.Records.Ops("raid00001")[3]
+          assert.are.equal("replace", replace.type)
+          assert.are.equal(2, #wow.sent)
+          assert.are.equal("RAID", wow.sent[2].channel)
+          assert.are.equal("Correction: " .. link(1) .. " → disenchant/bank, not Ashla Brightwater"
+            .. " <BF1;R;SA0001;" .. replace.id .. ";" .. key .. ";" .. attempt.awardKey
+            .. ";1;ifron;DISENCHANT_BANK;;>",
+            wow.sent[2].text)
+          assert.is_true(attempt.announced)
+          confirm(1, "Bram Ironvein")
+          assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+        end)
+
+        it("gives through the row's choice and clears the refusal", function()
+          local key = setupDB()
+          ns.Popup.Refused(key, "window")
+          assert.is_truthy(click(ns.Popup.Choose, key, "givedb", "Bram Ironvein"))
+          assert.is_nil(ns.Popup.Refusal(key))
+          assert.are.equal("DISENCHANT_BANK", ns.Records.Get(ns.Records.Get(key).replacedBy).method)
+        end)
+
+        it("is hidden for a Disenchant/bank award, leaving the reserve holders", function()
+          raid({ reserves = RESERVES })
+          wow.state.group = GROUP
+          drop({ { id = 1 } })
+          assert.is_true(ns.Popup.SetDBPick("Bram Ironvein"))
+          local key
+          wow.click(function() key = assert(ns.Popup.GiveDB(1, 1, "Bram Ironvein")).awardKey end)
+          wow.advance(ns.Tracking.confirmWait)
+          local nc = ns.Popup.Build().rows[1].notConfirmed
+          assert.is_nil(nc.list.db)
+          assert.are.same({ "Ashla Brightwater", "Doran Vale" },
+            { nc.list.people[1].char, nc.list.people[2].char })
+          assert.are.same({ "Try again", "Give to someone else", "Not handed out" },
+            { nc.buttons[1].text, nc.buttons[2].text, nc.buttons[3].text })
+          assert.are.same({ nil, "already db" }, { click(ns.Popup.GiveElseDB, key, "Bram Ironvein") })
+          unchanged(key, 1)
+        end)
+
+        it("waits out a boss fight: the line's Give is greyed with the fight tooltip", function()
+          local key = setupDB()
+          wow.bossFight(true)
+          assert.are.same({ label = "Disenchant/bank", pick = "Bram Ironvein", enabled = false,
+            tooltip = "Posts a line, so it waits until the boss fight ends" }, dbLine())
+          assert.are.same({ nil, "fight" }, { click(ns.Popup.GiveElseDB, key, "Bram Ironvein") })
+          unchanged(key, 1)
+          wow.bossFight(false)
+          assert.is_truthy(click(ns.Popup.GiveElseDB, key, "Bram Ironvein"))
+        end)
+
+        it("refuses with the loot window closed or the item gone, and changes nothing", function()
+          local key = setupDB()
+          wow.closeLoot()
+          assert.are.same({ nil, "window" }, { click(ns.Popup.GiveElseDB, key, "Bram Ironvein") })
+          unchanged(key, 1)
+          drop({ { id = 3 } })
+          assert.are.same({ nil, "changed" }, { click(ns.Popup.GiveElseDB, key, "Bram Ironvein") })
+          unchanged(key, 1)
+        end)
+
+        it("refuses an award confirmed late meanwhile, handing nothing out", function()
+          local key = setupDB()
+          confirm(1, "Ashla Brightwater")
+          drop({ { id = 1 } })
+          assert.are.same({ nil, "not unconfirmed" }, { click(ns.Popup.GiveElseDB, key, "Bram Ironvein") })
+          assert.are.equal(1, #wow.gives)
+          assert.are.equal(1, #wow.sent)
+          assert.is_nil(ns.Records.Get(key).voided)
+        end)
+
+        it("refuses a pick who can't receive it or isn't in the raid, naming them in the row", function()
+          local key = setupDB()
+          wow.state.loot[1].candidates = { "Masterlooter", "Ashla Brightwater", "Doran Vale" }
+          local function choose() return click(ns.Popup.Choose, key, "givedb", "Bram Ironvein") end
+          assert.are.same({ nil, "not a candidate" }, { choose() })
+          assert.are.equal("The game won't let Bram Ironvein receive this item (usually: not nearby when the"
+            .. " boss died). Right-click D/B to choose someone else.",
+            ns.Popup.Build().rows[1].notConfirmed.refusal)
+          wow.state.group = { "Masterlooter", "Ashla Brightwater", "Doran Vale" }
+          assert.are.same({ nil, "not a candidate" }, { choose() })
+          assert.are.equal("Bram Ironvein isn't in the raid. Right-click D/B to choose someone else.",
+            ns.Popup.Refusal(key))
+          unchanged(key, 1)
+        end)
+
+        it("refuses when the pick changed after the line was drawn", function()
+          local key = setupDB()
+          assert.are.same({ nil, "pick changed" }, { click(ns.Popup.GiveElseDB, key, "Doran Vale") })
+          unchanged(key, 1)
+        end)
+
+        it("records the replacement even when the line can't be built, and says so", function()
+          local key = unconfirmed({ code = "MC0001", reserves = RESERVES }, GROUP)
+          assert.is_true(ns.Popup.SetDBPick("Bram Ironvein"))
+          local attempt = assert(click(ns.Popup.GiveElseDB, key, "Bram Ironvein"))
+          assert.are.equal(2, #wow.gives)
+          assert.are.equal(0, #wow.sent)
+          assert.is_nil(attempt.announced)
+          assert.are.same({ true, "DISENCHANT_BANK" }, { ns.Records.Get(key).voided,
+            ns.Records.Get(attempt.awardKey).method })
+          assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Bram Ironvein to disenchant or"
+            .. " bank instead of Ashla Brightwater, but its raid chat line couldn't be posted", 1, true))
         end)
       end)
 

@@ -5,6 +5,8 @@
 -- A hand-out the game doesn't confirm is recorded as not confirmed, and the officer resolves it
 -- with TryAgain, GiveElse (from GiveElseList) or NotHandedOut (#12). Build shows the row of such a
 -- hand-out as not confirmed, with those three choices (#95).
+-- GiveElseDB is the give-else list's Disenchant/bank line (#96): it gives to the raid's D/B pick
+-- instead.
 -- Once a roll is called the row carries the roll list (#90): who rolled what, the winner pre-selected
 -- (the officer may pick another name), and the Give button that follows the pick.
 -- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
@@ -58,6 +60,9 @@ local REFUSALS = {
   unknown = "The game can't name them yet. Try again in a moment.",
   grey = "Grey items can only go to you.",
   empty = "That item is gone from the loot window.",
+  ["already db"] = "It already goes to disenchant/bank. To choose someone else, use Not handed out,"
+    .. " then D/B.",
+  ["pick changed"] = "The disenchant/bank character changed. Check the list and choose again.",
 }
 
 local bare = ns.Rules.Bare
@@ -550,9 +555,10 @@ function Popup.SetDBPick(name)
 end
 
 -- The officer's choice on a not confirmed row was refused for `why` (nil: it worked): the row
--- says so until the next choice or the loot window closes.
-function Popup.Refused(key, why)
-  refusals[key] = why and (REFUSALS[why] or ("It couldn't be done (" .. tostring(why) .. ").")) or nil
+-- says so, in `note`'s words when given, until the next choice or the loot window closes.
+function Popup.Refused(key, why, note)
+  refusals[key] = why and (note or REFUSALS[why] or ("It couldn't be done (" .. tostring(why) .. ")."))
+    or nil
 end
 
 -- Why the last choice on the award was refused, in the row's words, or nil.
@@ -761,6 +767,16 @@ local function candidateIndex(slot, char)
   end
 end
 
+-- Why the D/B pick can't be handed the item: they aren't in the raid, or the game won't let them
+-- receive it. The officer's note, naming the pick.
+local function dbRefusal(pick)
+  local inRaid
+  for _, member in ipairs(roster()) do inRaid = inRaid or bare(member) == bare(pick) end
+  return inRaid and ("The game won't let " .. pick .. " receive this item (usually: not"
+    .. " nearby when the boss died). Right-click D/B to choose someone else.")
+    or (pick .. " isn't in the raid. Right-click D/B to choose someone else.")
+end
+
 -- The officer clicked a row's D/B button: hands the item to the raid's pick, found by name among
 -- this corpse's candidates, records the award as Disenchant/bank with no winner (spec 9.2) and
 -- posts its line. A line that can't be built is not posted, and the officer is told; the hand-out
@@ -781,11 +797,7 @@ function Popup.GiveDB(slot, item, pick)
   if row.item ~= item or button.pick ~= pick then return nil, "changed" end
   local index = candidateIndex(slot, pick)
   if not index then
-    local inRaid
-    for _, member in ipairs(roster()) do inRaid = inRaid or bare(member) == bare(pick) end
-    dbNotes[slot] = inRaid and ("The game won't let " .. pick .. " receive this item (usually: not"
-      .. " nearby when the boss died). Right-click D/B to choose someone else.")
-      or (pick .. " isn't in the raid. Right-click D/B to choose someone else.")
+    dbNotes[slot] = dbRefusal(pick)
     return nil, "not a candidate"
   end
   local attempt, reason = ns.Tracking.Give(slot, index)
@@ -893,6 +905,31 @@ function Popup.GiveElseList(key)
   return list
 end
 
+-- Hands the not confirmed award's item to the slot's candidate at index, records the replacement
+-- (the old award voided, a new one with fields: char, user and method; no char for
+-- Disenchant/bank) and posts the one correction line. A line that can't be built is not posted,
+-- and the officer is told the link then `told`; the hand-out and the records stand. Returns the
+-- new hand-out (with awardKey, the new award's key, and announced), or nil and Tracking.Give's
+-- reasons.
+local function replaceWith(key, award, slot, index, fields, told)
+  local attempt, reason = ns.Tracking.Give(slot, index)
+  if not attempt then return nil, reason end
+  local link = GetLootSlotLink(slot)
+  local op, why = ns.Records.Replace(key, { boss = award.boss, item = award.item, char = fields.char,
+    user = fields.user, method = fields.method })
+  local data
+  if op then
+    attempt.awardKey = op.award.id
+    local snapshot = ns.Raids.Get(award.raid)
+    data = { raid = snapshot and snapshot.code, id = op.id, key = key, newKey = op.award.id,
+      item = award.item, link = link, boss = award.boss, method = fields.method, winner = fields.char,
+      oldWinner = award.char, practice = op.practice }
+  end
+  attempt.announced = post("correction", data, why, "Correction line for " .. link,
+    link .. told .. ", but its raid chat line couldn't be posted.")
+  return attempt
+end
+
 -- Give to someone else: hands the award's item to char, one of GiveElseList's available people,
 -- records the replacement (the old award voided, a new one with the method char holds) and posts
 -- the one correction line. A line that can't be built is not posted, and the officer is told;
@@ -912,23 +949,29 @@ function Popup.GiveElse(key, char)
   if not pick.available then return nil, pick.reason end
   local index = candidateIndex(slot, char)
   if not index then return nil, "not a candidate" end
-  local attempt, reason = ns.Tracking.Give(slot, index)
-  if not attempt then return nil, reason end
-  local link = GetLootSlotLink(slot)
-  local op, why = ns.Records.Replace(key, { boss = award.boss, item = award.item, char = pick.char,
-    user = pick.user, method = pick.method })
-  local data
-  if op then
-    attempt.awardKey = op.award.id
-    local snapshot = ns.Raids.Get(award.raid)
-    data = { raid = snapshot and snapshot.code, id = op.id, key = key, newKey = op.award.id,
-      item = award.item, link = link, boss = award.boss, method = pick.method, winner = pick.char,
-      oldWinner = award.char, practice = op.practice }
-  end
-  attempt.announced = post("correction", data, why, "Correction line for " .. link,
-    link .. " is being handed to " .. pick.char .. " instead of " .. (award.char or "disenchant/bank")
-      .. ", but its raid chat line couldn't be posted.")
-  return attempt
+  return replaceWith(key, award, slot, index, { char = pick.char, user = pick.user, method = pick.method },
+    " is being handed to " .. pick.char .. " instead of " .. (award.char or "disenchant/bank"))
+end
+
+-- Give to someone else, the Disenchant/bank line: hands the award's item to its raid's D/B pick,
+-- records the replacement (the old award voided, a new Disenchant/bank award with no winner) and
+-- posts the one correction line, as GiveElse does. pick is the name the clicked line showed. The
+-- line is hidden for an award that is itself Disenchant/bank. Returns the new hand-out, or nil,
+-- why and, for a pick who can't receive the item, the officer's note naming them: "fight", "already
+-- db", "no pick", "pick changed" (the pick isn't the one shown), "not a candidate" or TryAgain's
+-- reasons. A refusal changes nothing, hands nothing out and posts nothing.
+function Popup.GiveElseDB(key, pick)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local award, slot = handoutCheck(key)
+  if not award then return nil, slot end
+  if award.method == "DISENCHANT_BANK" then return nil, "already db" end
+  local current = Popup.DBPick(award.raid)
+  if not current then return nil, "no pick" end
+  if current ~= pick then return nil, "pick changed" end
+  local index = candidateIndex(slot, pick)
+  if not index then return nil, "not a candidate", dbRefusal(pick) end
+  return replaceWith(key, award, slot, index, { method = "DISENCHANT_BANK" },
+    " is being handed to " .. pick .. " to disenchant or bank instead of " .. tostring(award.char))
 end
 
 -- Not handed out: voids the award and posts its undo line. It needs no loot window. A line that
@@ -954,6 +997,7 @@ end
 -- after a /reload too: { key, refusal (why the last choice was refused), buttons (Try again, Give to
 -- someone else, Not handed out: text, action, enabled, tooltip), list (Give to someone else's, from
 -- GiveElseList: { title, people = { { char, method, kind, available, reason, enabled, tooltip } },
+-- db (the Disenchant/bank line: { label, pick, enabled, tooltip }; nil for a Disenchant/bank award),
 -- empty, hint, back }) }. Buttons that post a line wait in a boss fight; Try again posts none.
 function Popup.Choices(key)
   local award = ns.Records.Get(key)
@@ -969,6 +1013,15 @@ function Popup.Choices(key)
       enabled = c.available and not locked, tooltip = c.available and wait or nil }
   end
   if #list.people == 0 then list.empty = "No one else reserved it." end
+  -- The Disenchant/bank line, but not for an award that is Disenchant/bank already (Robert,
+  -- 2026-10-21): to change who, the officer uses Not handed out, then D/B.
+  if award.method ~= "DISENCHANT_BANK" then
+    local pick = Popup.DBPick(award.raid)
+    list.db = { label = "Disenchant/bank", pick = pick, enabled = not locked, tooltip = wait }
+    if not pick then
+      list.db.label, list.db.enabled, list.db.tooltip = "Disenchant/bank: choose first", false, DB_CHOOSE_TIP
+    end
+  end
   list.hint = "Posts one correction line: Correction: " .. link .. " → their name, not "
     .. (award.char or "disenchant/bank") .. "."
   return { key = key, refusal = refusals[key], list = list,
@@ -980,12 +1033,15 @@ function Popup.Choices(key)
 end
 
 -- The officer's click on a not confirmed award's choice, in the pop-up or the Awards tab: action
--- "tryagain", "nothandedout" or "giveelse" (to char). A refusal is logged and kept for the row
--- (Refused); a choice made clears it. Returns what the choice returns.
+-- "tryagain", "nothandedout", "giveelse" (to char) or "givedb" (to the D/B pick char, the
+-- Disenchant/bank line). A refusal is logged and kept for the row (Refused); a choice made clears it.
+-- Returns what the choice returns.
 function Popup.Choose(key, action, char)
-  local ok, why
+  local ok, why, note
   if action == "giveelse" then
     ok, why = Popup.GiveElse(key, char)
+  elseif action == "givedb" then
+    ok, why, note = Popup.GiveElseDB(key, char)
   elseif action == "tryagain" then
     ok, why = Popup.TryAgain(key)
   else
@@ -994,10 +1050,11 @@ function Popup.Choose(key, action, char)
   if not ok then
     local award = ns.Records.Get(key)
     local link = award and linkOf(key, award) or tostring(key)
-    ns.Log((action == "giveelse" and ("Give to " .. tostring(char) .. " instead")
-      or ("Not confirmed choice " .. action)) .. " for " .. link .. " refused: " .. tostring(why))
+    local what = ({ giveelse = "Give to " .. tostring(char) .. " instead",
+      givedb = "Give to disenchant/bank (" .. tostring(char) .. ") instead" })[action]
+    ns.Log((what or ("Not confirmed choice " .. action)) .. " for " .. link .. " refused: " .. tostring(why))
   end
-  Popup.Refused(key, not ok and why or nil)
+  Popup.Refused(key, not ok and why or nil, note)
   return ok, why
 end
 

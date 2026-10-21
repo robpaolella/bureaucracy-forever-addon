@@ -214,9 +214,10 @@ local function choose(row, action)
   PopupFrame.Refresh()
 end
 
--- The Give button of a name in the Give to someone else list.
-local function giveElse(row, char)
-  if ns.Popup.Choose(row.data.notConfirmed.key, "giveelse", char) then elseOpen = nil end
+-- The Give button of a name, or of the Disenchant/bank line (action "givedb"), in the Give to
+-- someone else list.
+local function giveElse(row, char, action)
+  if ns.Popup.Choose(row.data.notConfirmed.key, action or "giveelse", char) then elseOpen = nil end
   PopupFrame.Refresh()
 end
 
@@ -249,11 +250,20 @@ local function newNotConfirmed(row)
   return box
 end
 
--- The Give to someone else list's box, in parent: onGive(char) is a name's Give, onBack is Back.
--- The Awards tab draws the same list (#101).
+-- The Give to someone else list's box, in parent: onGive(char, action) is a name's Give (action nil)
+-- or the Disenchant/bank line's (action "givedb", char the pick); onBack is Back. The Awards tab
+-- draws the same list (#101).
 local function newList(parent, onGive, onBack)
   local box = newBox(parent)
   box.onGive = onGive
+  -- The Disenchant/bank line (#96): its label, the pick's name and its Give.
+  box.db = { label = newText(box, "GameFontHighlight"), name = newText(box, "GameFontHighlight"),
+    give = tipButton(box, 60), line = box:CreateTexture(nil, "ARTWORK", nil, 0) }
+  box.db.line:SetColorTexture(0.2, 0.2, 0.2, 1)
+  box.db.line:SetSize(BOX_WIDTH - 12, 1)
+  box.db.give:SetScript("OnClick", function()
+    if box.db.enabled then box.onGive(box.db.pick, "givedb") end
+  end)
   box.title = newText(box, "GameFontNormal")
   box.title:SetWidth(BOX_WIDTH - 90)
   box.back = tipButton(box, 60)
@@ -327,7 +337,7 @@ local function newRow()
   -- The hand-out box, as the design draws it.
   row.box = newBox(row)
   row.ncBox = newNotConfirmed(row)
-  row.list = newList(row, function(char) giveElse(row, char) end, function()
+  row.list = newList(row, function(char, action) giveElse(row, char, action) end, function()
     elseOpen = nil
     PopupFrame.Refresh()
   end)
@@ -463,7 +473,8 @@ end
 
 -- The Give to someone else list, in its box at x and below in the box's parent: each other
 -- contender with the method they hold and a Give button; one who can't receive is greyed with the
--- reason and has no button. Returns the new below.
+-- reason and has no button. Then the Disenchant/bank line, when the list has one. Returns the new
+-- below.
 local function drawList(box, list, x, below)
   box.title:ClearAllPoints()
   box.title:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
@@ -537,6 +548,37 @@ local function drawList(box, list, x, below)
   else
     box.empty:SetText("")
     box.empty:Hide()
+  end
+  -- The Disenchant/bank line: with no pick, greyed with its Give unclickable.
+  local db, line = list.db, box.db
+  line.label:ClearAllPoints()
+  line.name:ClearAllPoints()
+  line.give:ClearAllPoints()
+  line.line:ClearAllPoints()
+  if db then
+    line.pick, line.enabled = db.pick, db.enabled
+    line.label:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -(y + 4))
+    line.label:SetText(db.label)
+    line.name:SetPoint("TOPLEFT", box, "TOPLEFT", 170, -(y + 4))
+    line.name:SetText(db.pick or "")
+    local colour = db.pick and 1 or 0.5
+    line.label:SetTextColor(colour, colour, colour)
+    line.name:SetTextColor(1, 1, 1)
+    line.give:SetPoint("TOPRIGHT", box, "TOPRIGHT", -10, -y)
+    setButton(line.give, "Give", db.enabled)
+    line.give.tip = db.tooltip
+    line.line:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -(y + 25))
+    line.label:Show()
+    if db.pick then line.name:Show() else line.name:Hide() end
+    line.give:Show()
+    line.line:Show()
+    y = y + 26
+  else
+    line.pick, line.enabled = nil, false
+    line.label:Hide()
+    line.name:Hide()
+    line.give:Hide()
+    line.line:Hide()
   end
   y = boxLine(box, box.hint, list.hint, y + 2)
   box:ClearAllPoints()

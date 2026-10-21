@@ -380,9 +380,10 @@ local function build()
   tab.scroll:SetScrollChild(tab.child)
   tab.scroll:EnableMouseWheel(true)
   tab.scroll:SetScript("OnMouseWheel", scrollByWheel)
-  -- Give to someone else's list, the pop-up's own: a name's Give hands out and closes it.
-  tab.list = PopupFrame.NewList(tab.child, function(char)
-    if ns.Popup.Choose(tab.listKey, "giveelse", char) then tab.elseOpen = nil end
+  -- Give to someone else's list, the pop-up's own: a name's Give, or the Disenchant/bank line's,
+  -- hands out and closes it.
+  tab.list = PopupFrame.NewList(tab.child, function(char, action)
+    if ns.Popup.Choose(tab.listKey, action or "giveelse", char) then tab.elseOpen = nil end
     UI.RefreshAwards()
   end, function()
     tab.elseOpen = nil

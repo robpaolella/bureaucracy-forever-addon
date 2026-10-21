@@ -491,6 +491,70 @@ describe("PopupFrame", function()
       assert.is_true(row.box:IsShown())
     end)
 
+    it("the list ends with the Disenchant/bank line: the pick's name and Give (give-else, #96)", function()
+      local row = unconfirmed()
+      -- Tovin also holds a soft reserve: the line must still give as Disenchant/bank.
+      assert.is_true(ns.Popup.SetDBPick("Tovin Hale"))
+      click(row.ncBox.buttons[2])
+      local list = shownRows()[1].list
+      local db = list.db
+      assert.are.same({ "Disenchant/bank", "Tovin Hale", true, true, true },
+        { db.label:GetText(), db.name:GetText(), db.name:IsShown(), db.give:IsShown(), db.give:IsEnabled() })
+      assert.are.equal("Give", db.give.label:GetText())
+      -- It sits below the last reserve holder, inside the box, above the hint.
+      local last = list.entries[3].name.points[1].y
+      assert.is_true(db.label.points[1].y < last)
+      assert.is_true(list.hint.points[1].y < db.label.points[1].y)
+      click(db.give)
+      assert.are.same({ slot = 1, candidate = 4 }, wow.gives[2])
+      assert.is_truthy(wow.sent[2].text:find("→ disenchant/bank, not Ashla Brightwater <", 1, true))
+      local key = ns.Records.Ops("raid00001")[3].award.id
+      assert.are.equal("DISENCHANT_BANK", ns.Records.Get(key).method)
+      row = shownRows()[1]
+      assert.is_false(row.list:IsShown() or row.ncBox:IsShown())
+      assert.is_true(row.box:IsShown())
+    end)
+
+    it("with no D/B pick, the line is greyed, \"choose first\", and its Give does nothing", function()
+      local row = unconfirmed()
+      click(row.ncBox.buttons[2])
+      local db = shownRows()[1].list.db
+      assert.are.same({ "Disenchant/bank: choose first", false, true, false },
+        { db.label:GetText(), db.name:IsShown(), db.give:IsShown(), db.give:IsEnabled() })
+      assert.are.equal("Disenchant/bank: choose the character to give to.", db.give.tip)
+      click(db.give)
+      assert.are.equal(1, #wow.gives)
+      assert.are.equal(1, #wow.sent)
+    end)
+
+    it("greys the Disenchant/bank line's Give in a boss fight, with the fight tooltip", function()
+      local row = unconfirmed()
+      assert.is_true(ns.Popup.SetDBPick("Tovin Hale"))
+      click(row.ncBox.buttons[2])
+      wow.bossFight(true)
+      local db = shownRows()[1].list.db
+      assert.are.same({ "Tovin Hale", false }, { db.name:GetText(), db.give:IsEnabled() })
+      assert.are.equal("Posts a line, so it waits until the boss fight ends", db.give.tip)
+      click(db.give)
+      assert.are.equal(1, #wow.gives)
+      wow.bossFight(false)
+    end)
+
+    it("draws no Disenchant/bank line for a Disenchant/bank award", function()
+      setup({ code = "SA0001", reserves = RESERVES,
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } },
+        { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Tovin Hale" })
+      assert.is_true(ns.Popup.SetDBPick("Doran Vale"))
+      drop({ { id = 1 } })
+      click(shownRows()[1].db)
+      wow.advance(ns.Tracking.confirmWait)
+      click(shownRows()[1].ncBox.buttons[2])
+      local list = shownRows()[1].list
+      assert.is_false(list.db.label:IsShown() or list.db.give:IsShown() or list.db.line:IsShown())
+      assert.are.equal("Ashla Brightwater", list.entries[1].name:GetText())
+    end)
+
     it("shows why a choice was refused in the row", function()
       local row = unconfirmed()
       wow.state.loot[1].candidates = { "Masterlooter", "Doran Vale" }

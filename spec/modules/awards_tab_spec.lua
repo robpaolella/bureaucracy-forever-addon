@@ -450,6 +450,25 @@ describe("the Awards tab's not confirmed choices", function()
       assert.are.equal("Bo Marsh", rowOf(tab, "Bo Marsh").winner:GetText())
     end)
 
+  it("the list's Disenchant/bank line gives to the D/B pick as Disenchant/bank (#96)", function()
+    local tab = unconfirmed()
+    local key = keyOf("Ana Vale")
+    -- Bo also holds a soft reserve: the line must still give as Disenchant/bank.
+    assert.is_true(ns.Popup.SetDBPick("Bo Marsh"))
+    drop()
+    click(rowOf(tab, "Ana Vale").choices[2])
+    local db = tab.list.db
+    assert.are.same({ "Disenchant/bank", "Bo Marsh", true }, { db.label:GetText(), db.name:GetText(),
+      db.give:IsEnabled() })
+    click(db.give)
+    assert.are.same({ { slot = 1, candidate = 3 } }, wow.gives)
+    assert.is_truthy(wow.sent[#wow.sent].text:find("→ disenchant/bank, not Ana Vale <", 1, true))
+    local replaced = ns.Records.Get(key)
+    assert.is_true(replaced.voided)
+    assert.are.equal("DISENCHANT_BANK", ns.Records.Get(replaced.replacedBy).method)
+    assert.is_false(tab.list:IsShown())
+  end)
+
   it("only one list is open at a time across two not confirmed rows", function()
     local tab = unconfirmed()
     local second = { key = "k2", raid = RAID, boss = "lb_lucifron", item = 100, char = "Bo Marsh",
