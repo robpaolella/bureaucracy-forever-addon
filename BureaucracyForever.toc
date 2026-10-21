@@ -18,6 +18,7 @@ Modules\Digest.lua
 Modules\Sync.lua
 Modules\Hub.lua
 Modules\Inbox.lua
+Modules\Practice.lua
 Modules\Popup.lua
 Modules\Rolls.lua
 Modules\PopupFrame.lua

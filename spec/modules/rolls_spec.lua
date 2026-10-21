@@ -90,7 +90,9 @@ describe("Rolls", function()
       setup()
       wow.slash("/bf practice")
       assert.is_truthy(call(3))
-      assert.are.equal("[Practice] Open roll for " .. link(3) .. ": everyone /roll", wow.sent[1].text)
+      -- The call itself depends on the made-up reserves; only the marker is fixed.
+      assert.are.equal("[Practice] ", wow.sent[1].text:sub(1, 11))
+      assert.is_truthy(wow.sent[1].text:find(link(3), 1, true))
     end)
 
     it("lists the names that fit, then 'and N more', on one line within 255 bytes", function()

@@ -1179,9 +1179,9 @@ describe("Popup", function()
           drop({ { id = 1 } })
           local attempt = assert(give(1))
           assert.is_true(ns.Records.Get(attempt.awardKey).practice)
-          assert.are.equal("[Practice] " .. link(1) .. " → Ashla Brightwater (hard reserve) <BF1P;A;SA0001;"
-            .. attempt.awardKey .. ";1;ifron;HR;;Ashla Brightwater>", wow.sent[1].text)
-          confirm(1, "Ashla Brightwater")
+          assert.are.equal("[Practice] " .. link(1) .. " → Masterlooter (hard reserve) <BF1P;A;SA0001;"
+            .. attempt.awardKey .. ";1;ifron;HR;;Masterlooter>", wow.sent[1].text)
+          confirm(1, "Masterlooter")
           assert.are.same({ true, true }, practiceOps())
         end)
 
@@ -1212,8 +1212,10 @@ describe("Popup", function()
         it("marks a not confirmed practice award's choices practice", function()
           raid({ reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } } })
           practice()
-          drop({ { id = 1 } })
-          local key = assert(give(1)).awardKey
+          -- Item 2 has three made-up hard reserve holders; a D/B award is the one to replace.
+          drop({ { id = 1 }, { id = 2 } })
+          assert.is_true(ns.Popup.SetDBPick("Masterlooter"))
+          local key = assert(click(ns.Popup.GiveDB, 2, 2, "Masterlooter")).awardKey
           wow.advance(ns.Tracking.confirmWait)
           local attempt = assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
           assert.is_true(ns.Records.Get(attempt.awardKey).practice)
@@ -1644,6 +1646,108 @@ describe("Popup", function()
         assert.are.same({ nil, "fight" }, { giveHidden(1, "Mirel Stone", "5") })
         assert.are.same({}, wow.gives)
       end)
+    end)
+  end)
+  describe("made-up reserves in practice mode (#107)", function()
+    local function rows(model) return model.rows end
+
+    it("gives each drop a case, from the group, like real reserves", function()
+      setup({ code = "SA0001", bosses = tree().bosses, reserves = {} })
+      wow.slash("/bf practice")
+      drop({ { id = 1 }, { id = 2 }, { id = 3 }, { id = 4 }, { id = 5 }, { id = 6 } })
+      local r = rows(ns.Popup.Build())
+      assert.are.same({ "give", "Masterlooter" }, { r[1].action, r[1].winner })
+      assert.are.same({ "roll", "hr" }, { r[2].action, r[2].mode })
+      assert.are.same({ "roll", "sr" }, { r[3].action, r[3].mode })
+      assert.are.same({ "give", "Tovin Hale", "sr" }, { r[4].action, r[4].winner, r[4].mode })
+      assert.are.same({ "roll", "hr" }, { r[5].action, r[5].mode })
+      assert.are.same("openroll", r[6].action)
+    end)
+
+    it("shows the absent and can't-receive holders as skipped, with the rules' reasons", function()
+      setup({ code = "SA0001", bosses = tree().bosses, reserves = {} })
+      wow.slash("/bf practice")
+      drop({ { id = 1 }, { id = 2 }, { id = 3 }, { id = 4 } })
+      local row = rows(ns.Popup.Build())[4]
+      assert.are.same({ { name = "Bram Ironvein", reason = "not in raid" },
+        { name = "Mirel Stone", reason = "the game won't let them receive this item (usually: not nearby"
+          .. " when the boss died)" } }, row.skipped)
+    end)
+
+    it("keeps a window's made-up reserves on every redraw, and moves on with the next window", function()
+      setup({ code = "SA0001", bosses = tree().bosses, reserves = {} })
+      wow.slash("/bf practice")
+      drop({ { id = 1 }, { id = 2 } })
+      local first = rows(ns.Popup.Build())
+      assert.are.same(first, rows(ns.Popup.Build()))
+      wow.closeLoot()
+      drop({ { id = 1 } })
+      -- Item 1 was drop 0 in the first window; in the second it is drop 2.
+      assert.are.equal("sr", rows(ns.Popup.Build())[1].mode)
+    end)
+
+    it("works with no raid loaded and hides the no reserves notice", function()
+      setup()
+      wow.slash("/bf practice")
+      drop({ { id = 1 }, { id = 6 } })
+      local model = ns.Popup.Build()
+      assert.is_nil(model.notice)
+      assert.is_nil(model.syncLink)
+      assert.are.equal("give", model.rows[1].action)
+      assert.are_not.equal("No reserves loaded", model.rows[2].note)
+    end)
+
+    it("can hand out with no raid loaded", function()
+      setup()
+      wow.slash("/bf practice")
+      drop({ { id = 1 } })
+      local row = ns.Popup.Build().rows[1]
+      local attempt
+      wow.click(function() attempt = ns.Popup.Give(row.slot, row.item, row.winner) end)
+      assert.is_truthy(attempt)
+      assert.is_true(ns.Records.Get(attempt.awardKey).practice)
+    end)
+
+    it("stays silent on a group chosen as not a guild run", function()
+      setup({ code = "SA0001", bosses = tree().bosses, reserves = {} })
+      wow.slash("/bf practice")
+      assert.is_true(ns.Selection.ChooseOff())
+      drop({ { id = 1 } })
+      assert.are.same({ nil, "not a guild run" }, { ns.Popup.Build() })
+    end)
+
+    it("lists the made-up holders for Give to someone else", function()
+      setup({ code = "SA0001", bosses = tree().bosses, reserves = {} })
+      wow.slash("/bf practice")
+      drop({ { id = 1 }, { id = 2 }, { id = 3 }, { id = 4 } })
+      local row = ns.Popup.Build().rows[4]
+      local attempt
+      wow.click(function() attempt = ns.Popup.Give(row.slot, row.item, row.winner) end)
+      wow.advance(ns.Tracking.confirmWait)
+      assert.are.same({
+        { char = "Bram Ironvein", user = "practice-bram ironvein", method = "HR", available = false,
+          reason = "not in raid" },
+        { char = "Mirel Stone", user = "practice-mirel stone", method = "HR", available = false,
+          reason = "cannot receive" },
+      }, ns.Popup.GiveElseList(attempt.awardKey))
+    end)
+
+    it("uses the drop's real reserves with practice mode off", function()
+      setup({ code = "SA0001", bosses = tree().bosses,
+        reserves = { [1] = { holder("Ashla Brightwater", "HR") } } })
+      drop({ { id = 1 } })
+      local row = ns.Popup.Build().rows[1]
+      assert.are.same({ "give", "Ashla Brightwater" }, { row.action, row.winner })
+    end)
+
+    it("gives a solo player the open roll", function()
+      setup({}, { "Masterlooter" })
+      wow.slash("/bf practice")
+      drop({ { id = 1, candidates = { "Masterlooter" } }, { id = 2, candidates = { "Masterlooter" } },
+        { id = 3, candidates = { "Masterlooter" } }, { id = 4, candidates = { "Masterlooter" } },
+        { id = 5, candidates = { "Masterlooter" } } })
+      for _, row in ipairs(rows(ns.Popup.Build())) do assert.is_truthy(row.action) end
+      assert.are.equal("openroll", rows(ns.Popup.Build())[4].action)
     end)
   end)
 end)
