@@ -209,7 +209,10 @@ local function installGlobals(metadata)
         { prefix = prefix, text = text, channel = channel, target = target }
       return 0 -- Enum.SendAddonMessageResult.Success
     end,
-    RegisterAddonMessagePrefix = function() return 0 end,
+    RegisterAddonMessagePrefix = function(prefix)
+      wow.prefixes[#wow.prefixes + 1] = prefix
+      return 0
+    end,
     InChatMessagingLockdown = function() return wow.state.chatLockdown end,
   }
   _G.LoggingChat = function(on)
@@ -274,6 +277,7 @@ function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
+  wow.prefixes = {}
   wow.state = { loot = {}, lootThreshold = 2, lootMethod = { "group", 0, 0 }, player = "Masterlooter",
     chatLog = false, chatLockdown = false,
     items = {}, screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 },
