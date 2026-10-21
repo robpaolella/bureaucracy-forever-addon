@@ -968,7 +968,8 @@ local function drawNoRaid(y, raids, status)
   for i, award in ipairs(held) do
     local values = {
       at = GREY:format(clock(award.at)), boss = bossName(raids, award.boss), item = itemText(award.item),
-      char = award.char and plain(award.char) or "", method = METHODS[award.method] or plain(tostring(award.method)),
+      char = award.char and plain(award.char) or "",
+      method = METHODS[award.method] or plain(tostring(award.method)),
       roll = award.roll and tostring(award.roll) or "",
     }
     for column, value in pairs(values) do
