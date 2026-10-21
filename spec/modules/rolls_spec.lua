@@ -255,6 +255,14 @@ describe("Rolls", function()
       assert.are.equal(1, ns.Rolls.Result(2, 2).rolled)
     end)
 
+    it("frees the next call when the game gives up on a hand-out", function()
+      setup()
+      call(1)
+      ns.Tracking.Give(1, 3)
+      wow.advance(ns.Tracking.confirmWait) -- never confirmed
+      assert.is_truthy(call(2))
+    end)
+
     it("clears with the loot window", function()
       setup()
       call(1)
