@@ -25,12 +25,26 @@ local function set(activeBy, raidId, code, at, by)
   d.gone = nil
 end
 
+-- True when name a comes before b byte by byte, whatever the game's locale (spec 2.1, 10.4).
+function Selection.NameBefore(a, b)
+  for i = 1, math.min(#a, #b) do
+    local x, y = a:byte(i), b:byte(i)
+    if x ~= y then return x < y end
+  end
+  return #a < #b
+end
+
 -- True when (at, by) is later than the held choice: at first, then by byte by byte.
 local function isLater(at, by)
   local d = db()
   if not d.selectionAt then return true end
   if at ~= d.selectionAt then return at > d.selectionAt end
-  return by > (d.selectionBy or "")
+  return Selection.NameBefore(d.selectionBy or "", by)
+end
+
+-- Hub sets it to share this officer's own choices with the group (an S message, #62).
+local function chosen()
+  if Selection.onChoose then Selection.onChoose() end
 end
 
 -- This officer's name and a time later than the held choice's, so the change wins everywhere.
@@ -79,6 +93,7 @@ function Selection.ChooseRaid(raidId, confirmed)
   if leavingAwards(raidId) and not confirmed then return nil, NEEDS_CONFIRMATION end
   local at, by = mine()
   set("chosen", raidId, snapshot.code:upper(), at, by)
+  chosen()
   return true
 end
 
@@ -88,6 +103,7 @@ function Selection.ChooseOff()
   if Selection.ActiveBy() == "off" then return true end
   local at, by = mine()
   set("off", nil, nil, at, by)
+  chosen()
   return true
 end
 

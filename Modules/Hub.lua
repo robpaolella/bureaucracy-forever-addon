@@ -1,7 +1,8 @@
 -- Hub: officers' hidden sync messages in and out (ADDON-SPEC.md 10, 10.2 to 10.4; #71, #25).
 -- Checks each message's prefix and sender, hands its body to the handler for its type, and
 -- rebuilds O messages from their chunks before applying the operation through Records. Sends
--- this add-on's own operations, and Q requests and resends, through one paced queue.
+-- this add-on's own operations, and Q requests and resends, through one paced queue. Keeps who in
+-- the group runs the add-on (P), shares the group's raid selection (S) and names the chooser (#62).
 local _, ns = ...
 
 local Hub = {}
@@ -223,13 +224,18 @@ local function succeeded(result)
   return result == true or result == ((results and results.Success) or 0)
 end
 
+-- Out of the group: nothing more is sent, and catch-up covers what was waiting.
+local function dropQueue()
+  if #queue == 0 then return end
+  ns.Log("Sync: not in a group, so " .. #queue .. " messages weren't sent; catch-up covers them.")
+  queue = {}
+end
+
 -- Sends the message at the head of the queue, and says how long to wait before the next.
 local function sendHead()
   local channel = groupChannel()
   if not channel then
-    -- Out of the group: nothing more is sent, and catch-up covers what was waiting.
-    ns.Log("Sync: not in a group, so " .. #queue .. " messages weren't sent; catch-up covers them.")
-    queue = {}
+    dropQueue()
     return 0
   end
   local message = queue[1]
@@ -261,10 +267,10 @@ pump = function()
 end
 
 -- Queues messages (a list of { body, target }), all or none. Returns false and why not: "not in
--- a group" or "the sending queue is full".
-local function enqueue(messages)
+-- a group" or "the sending queue is full"; uncapped ones are never refused for a full queue.
+local function enqueue(messages, uncapped)
   if not groupChannel() then return false, "not in a group" end
-  if #queue + #messages > QUEUE_SIZE then return false, "the sending queue is full" end
+  if not uncapped and #queue + #messages > QUEUE_SIZE then return false, "the sending queue is full" end
   for _, message in ipairs(messages) do queue[#queue + 1] = message end
   if not waiting then pump() end
   return true
@@ -319,6 +325,152 @@ function Hub.onRequest(sender, msgid, chunks)
     ns.Log("Sync: " .. why .. ", so " .. msgid .. " wasn't sent again to " .. sender .. ".")
   end
 end
+
+-- Who runs the add-on (P) and the group's selection (S), spec 2.1 and 10.4 (#62). Neither needs a
+-- loaded raid, and both keep flowing while not a guild run. The roster, the bare names seen sending
+-- P, lives only in this session.
+local roster = {}
+-- Whether the player was in a group at the last look; nil until the first PLAYER_ENTERING_WORLD.
+local grouped
+
+-- Queues a P or S body to the group, or as a whisper to target, paced with the rest. A full queue
+-- never refuses one: no catch-up covers a lost selection, and each is a single short message.
+local function sendBody(body, target)
+  local queued, why = enqueue({ { body = body, target = target } }, true)
+  if not queued then ns.Log("Sync: " .. why .. ", so " .. body .. " wasn't sent.") end
+end
+
+-- The held selection as an S body ("S;choice;at;by"), or nil when it is none.
+function Hub.SelectionBody()
+  local status = ns.Selection.Status()
+  if status.activeBy == "none" then return nil end
+  local choice = status.activeBy == "off" and "-" or status.code
+  return "S;" .. choice .. ";" .. status.at .. ";" .. ns.OpText.Escape(status.chosenBy)
+end
+
+-- This officer's own choice (the question, the Sync tab, a paste) goes to the group.
+ns.Selection.onChoose = function()
+  local body = Hub.SelectionBody()
+  if body and groupChannel() then sendBody(body) end
+end
+
+-- Every P;1 is answered, not only one from a name not yet seen: an officer who reloads or logs in
+-- again has lost their roster, and a P;0 is never answered, so nothing loops.
+Hub.Register("P", function(body, sender)
+  local reply = body:match("^P;([01])$")
+  if not reply then return ns.Log("Sync: dropped a malformed P message from " .. sender .. ".") end
+  roster[sender] = true
+  if reply == "0" then return end
+  sendBody("P;0", sender)
+  local selection = Hub.SelectionBody()
+  if selection then sendBody(selection, sender) end
+end)
+
+Hub.Register("S", function(body, sender)
+  local choice, at, by = body:match("^S;([^;]*);(%d%d?%d?%d?%d?%d?%d?%d?%d?%d?);([^;]+)$")
+  by = by and ns.OpText.Unescape(by)
+  if not (by and by ~= "" and (choice == "-" or choice:find("^[PS][%u%d][%u%d][%u%d][%u%d][%u%d]$"))) then
+    return ns.Log("Sync: dropped a malformed S message from " .. sender .. ".")
+  end
+  local applied, notice = ns.Selection.Apply(choice, tonumber(at), by)
+  if not applied then return end
+  if notice then ns.Print(notice) end
+  ns.UI.RefreshSync()
+end)
+
+-- The bare names of the other group members seen running the add-on, sorted.
+function Hub.Roster()
+  local list = {}
+  for name in pairs(roster) do list[#list + 1] = name end
+  table.sort(list, ns.Selection.NameBefore)
+  return list
+end
+
+-- The loot master's bare name, or nil when master loot is off.
+local function lootMaster()
+  if not (C_PartyInfo and C_PartyInfo.GetLootMethod) then return nil end
+  local method, partyIndex, raidIndex = C_PartyInfo.GetLootMethod()
+  if method ~= "master" and not (Enum and Enum.LootMethod and method == Enum.LootMethod.Masterlooter) then
+    return nil
+  end
+  local name
+  if partyIndex == 0 then
+    name = UnitName("player")
+  elseif IsInRaid() then
+    name = raidIndex and raidIndex > 0 and (GetRaidRosterInfo(raidIndex))
+  else
+    name = partyIndex and UnitName("party" .. partyIndex)
+  end
+  return name and bare(name) or nil
+end
+
+-- The group leader's bare name, or nil.
+local function leader()
+  if IsInRaid() then
+    for i = 1, GetNumGroupMembers() do
+      local name, rank = GetRaidRosterInfo(i)
+      if name and rank == 2 then return bare(name) end
+    end
+    return nil
+  end
+  if UnitIsGroupLeader("player") then return bare(UnitName("player")) end
+  for i = 1, GetNumGroupMembers() - 1 do
+    local name = UnitName("party" .. i)
+    if name and UnitIsGroupLeader("party" .. i) then return bare(name) end
+  end
+end
+
+-- Who asks the raid question (spec 2.1): the loot master if master loot is on and they run the
+-- add-on, else the raid leader if they run it, else the add-on user who comes first by name, byte
+-- by byte. It runs on the P roster and the game's loot master and leader, so every add-on with the
+-- same roster gives the same name.
+function Hub.Chooser()
+  local users = { [bare(UnitName("player"))] = true }
+  for name in pairs(roster) do users[name] = true end
+  local master, lead = lootMaster(), leader()
+  if master and users[master] then return master end
+  if lead and users[lead] then return lead end
+  local first
+  for name in pairs(users) do
+    if not first or ns.Selection.NameBefore(name, first) then first = name end
+  end
+  return first
+end
+
+-- True when this player is the chooser (#53 asks the question then).
+function Hub.IsChooser()
+  return Hub.Chooser() == bare(UnitName("player"))
+end
+
+-- The first PLAYER_ENTERING_WORLD of a session is the login or the /reload: in a group, the
+-- add-on says it runs; out of one, a login clears the saved selection and a /reload keeps it.
+ns.On("PLAYER_ENTERING_WORLD", function(isInitialLogin)
+  if grouped ~= nil then return end
+  grouped = groupChannel() ~= nil
+  if grouped then return sendBody("P;1") end
+  if isInitialLogin then ns.Selection.Clear() end
+end)
+
+-- Joining a group says the add-on runs; leaving it clears the roster and the selection, so a new
+-- group asks fresh; a name that leaves the group leaves the roster.
+ns.On("GROUP_ROSTER_UPDATE", function()
+  if grouped == nil then return end
+  local now = groupChannel() ~= nil
+  if now and not grouped then
+    sendBody("P;1")
+  elseif now then
+    for name in pairs(roster) do
+      if not inGroup(name) then roster[name] = nil end
+    end
+  elseif grouped then
+    -- What was queued for the old group, a selection included, never reaches the next one.
+    dropQueue()
+    roster = {}
+    ns.Selection.Clear()
+    ns.UI.RefreshSync()
+  end
+  grouped = now
+end)
 
 ns.On("ENCOUNTER_START", function() fighting = true end)
 ns.On("ENCOUNTER_END", function()
