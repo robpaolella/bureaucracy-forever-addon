@@ -246,6 +246,36 @@ describe("PopupFrame", function()
       wow.click(function() button.scripts.OnClick(button) end)
     end
 
+    it("starts a roll-off on a Call roll or Call open roll click", function()
+      setup({ code = "SA0001", reserves = { [1] = { holder("Ashla Brightwater", "HR"),
+        holder("Doran Vale", "HR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = 1 }, { id = 3 } })
+      local rows = shownRows()
+      assert.are.equal("Call roll (2)", rows[1].primary.label:GetText())
+      click(rows[1].primary)
+      assert.are.equal(1, #wow.sent)
+      assert.is_truthy(wow.sent[1].text:find("Ashla Brightwater and Doran Vale (hard reserve)", 1, true))
+      assert.is_truthy(ns.Rolls.Result(1, 1))
+      click(shownRows()[2].primary)
+      assert.is_truthy(wow.sent[2].text:find("everyone /roll", 1, true))
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("posts no roll call in a boss fight", function()
+      setup({ code = "SA0001", reserves = { [1] = { holder("Ashla Brightwater", "HR"),
+        holder("Doran Vale", "HR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = 1 } })
+      local button = shownRows()[1].primary
+      wow.bossFight(true)
+      click(button)
+      assert.are.same({}, wow.sent)
+      assert.is_nil(ns.Rolls.Result(1, 1))
+    end)
+
     it("hands out on a click and shows the row waiting for the game (handout-waiting)", function()
       raid()
       drop({ { id = 1 }, { id = 2 }, { id = 3 } })
