@@ -1524,7 +1524,7 @@ describe("Hub catch-up", function()
           assert.are.same({ { held(mine), "WHISPER", ZOE } }, rest)
         end)
 
-      it("with nothing, logged, when not even one operation and the D fit the queue", function()
+      it("with nothing but an H, logged, when not even one operation and the D fit the queue", function()
         hold()
         wow.bossFight(true)
         local ids = { "aw-zoe00001", "aw-bo000001", "vd-bo000001", "cf-rae00001" }
@@ -1538,7 +1538,14 @@ describe("Hub catch-up", function()
         assert.is_true(logged("the sending queue is full, so the catch-up reply to Zoé Brûlé wasn't sent."))
         wow.bossFight(false)
         for _ = 1, 110 do wow.advance(1) end
-        assert.are.equal(99, #wow.addonMessages)
+        -- An H follows the queue, so Zoé asks again once it has drained, and gets the award.
+        local list = sent()
+        local mine = {}
+        for n, op in ipairs(ns.Records.Ops(RAID)) do mine[n] = op.id end
+        assert.are.same({ 100, { held(mine), "WHISPER", ZOE } }, { #list, list[100] })
+        for _, body in ipairs(request(ids, "r00002")) do receive(body, ZOE, "WHISPER") end
+        local ops, done, rest = reply({ unpack(sent(), 101) }, ZOE)
+        assert.are.same({ "aw-rae00001", "D;r00002;1", {} }, { ops[1][1], done, rest })
       end)
     end)
 

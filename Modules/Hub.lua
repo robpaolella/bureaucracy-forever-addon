@@ -436,7 +436,8 @@ end)
 -- sender's list doesn't have, in the order made or received. Whispers sender each such operation
 -- as O messages with its author, then "D;reqid;count"; nothing at all when it lacks none. Only
 -- whole operations that fit the queue, the D counted, go; when some don't, it logs them and
--- whispers an H after the D, so sender asks again for the rest: rounds repeat until both match.
+-- whispers an H, queued after the rest, so sender asks again for them once the queue has drained:
+-- rounds repeat until both match.
 function Hub.onCatchUp(sender, reqid, raidId, lacking)
   ns.Log("Sync: " .. sender .. " asked to catch up (" .. reqid .. ") on raid " .. raidId .. "; they lack "
     .. #lacking .. (#lacking > 0 and (": " .. table.concat(lacking, ", ")) or "") .. ".")
@@ -461,14 +462,15 @@ function Hub.onCatchUp(sender, reqid, raidId, lacking)
     queued, why = enqueue(messages)
   end
   if not queued then
-    return ns.Log("Sync: " .. why .. ", so the catch-up reply to " .. sender .. " wasn't sent.")
-  end
-  for _, reply in ipairs(replies) do remember(reply[1], reply[2]) end
-  if #replies < #lacking then
+    ns.Log("Sync: " .. why .. ", so the catch-up reply to " .. sender .. " wasn't sent.")
+    if not groupChannel() then return end
+  else
+    for _, reply in ipairs(replies) do remember(reply[1], reply[2]) end
+    if #replies == #lacking then return end
     ns.Log("Sync: the sending queue is full, so " .. (#lacking - #replies) .. " of " .. #lacking
       .. " operations weren't sent to " .. sender .. "; they are sent when " .. sender .. " asks again.")
-    sendHeld(sender, { raidId })
   end
+  sendHeld(sender, { raidId })
 end
 
 -- The held selection as an S body ("S;choice;at;by"), or nil when it is none.

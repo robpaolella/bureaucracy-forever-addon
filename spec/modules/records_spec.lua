@@ -520,11 +520,16 @@ describe("Records", function()
       assert.is_nil(assert(ns.Sync.CopyOut(RAID)):find("Dee Holt", 1, true))
     end)
 
-    it("is this officer for an operation made here", function()
+    it("is this officer for an operation made here, kept when another character logs in", function()
       local award = Records.Award(ana())
-      assert.are.same({ "Rae Quill", "Rae Quill" },
-        { Records.Author(award), Records.Author(Records.Confirm(award.id)) })
-      assert.is_nil(ns.db.authors)
+      local confirm = Records.Confirm(award.id)
+      assert.are.same({ "Rae Quill", "Rae Quill" }, { Records.Author(award), Records.Author(confirm) })
+      assert.are.same({ [confirm.id] = "Rae Quill" }, ns.db.authors)
+      -- The saved data is the account's: Bo Marsh, on the same account, didn't make them.
+      ns = wow.start({ saved = { BureaucracyForeverDB = copy(BureaucracyForeverDB) } })
+      wow.state.player = "Bo Marsh"
+      local ops = ns.Records.Ops(RAID)
+      assert.are.same({ "Rae Quill", "Rae Quill" }, { ns.Records.Author(ops[1]), ns.Records.Author(ops[2]) })
     end)
 
     it("is dropped with a discarded no-raid operation", function()

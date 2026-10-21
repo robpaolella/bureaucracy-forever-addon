@@ -8,8 +8,8 @@
 -- voids for awards not held yet wait in .siteVoids[key] = { raid, env, reason, at } (spec 4.4),
 -- never as operations. An operation another officer forwarded keeps the forwarder's bare name in
 -- .via[id] (spec 10.2): apart from the operation, so it is never uploaded or copied out. The author
--- of a received confirm, not-confirmed or void, whose text names none, is kept the same way in
--- .authors[id], for catch-up replies.
+-- of a confirm, not-confirmed or void, whose text names none, is kept the same way in .authors[id],
+-- for catch-up replies: the saved data is the account's, shared by its characters.
 local _, ns = ...
 
 local Records = {}
@@ -194,17 +194,18 @@ local function record(raidId, op)
   return op, effect(awards, ops, op) and "recorded" or "pending"
 end
 
--- Keeps fields.via, the bare name of whoever forwarded a newly saved operation, and fields.author,
--- who made it, when its text names no sender; a copy already held keeps what it had.
+-- Keeps fields.via, the bare name of whoever forwarded a newly saved operation, and who made it
+-- (fields.author, else this officer) when its text names no sender; a copy already held keeps what
+-- it had.
 local function keepVia(fields, op, outcome)
   if op and outcome ~= "replayed" then
     if fields.via then
       ns.db.via = ns.db.via or {}
       ns.db.via[op.id] = fields.via
     end
-    if fields.author and not (op.sender or op.award) then
+    if not (op.sender or op.award) then
       ns.db.authors = ns.db.authors or {}
-      ns.db.authors[op.id] = fields.author
+      ns.db.authors[op.id] = fields.author or ns.Rules.Bare(UnitName("player"))
     end
   end
   return op, outcome
@@ -429,7 +430,7 @@ function Records.Via(id)
 end
 
 -- The bare name of the officer who made op (spec 10.2's author): an award's or replacement's
--- sender, else the author kept for it, else this officer.
+-- sender, else the author kept for it, else this officer (an operation saved before authors were).
 function Records.Author(op)
   local sender = op.sender or (op.award and op.award.sender)
   return sender or (ns.db.authors or {})[op.id] or ns.Rules.Bare(UnitName("player"))
