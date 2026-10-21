@@ -318,6 +318,51 @@ describe("the raid question", function()
       assert.are.equal("Is this a guild run?", view().title)
     end)
 
+    describe("when the one asked goes offline", function()
+      local function setup()
+        start({ group = { "Konvett", ZOE, BO }, users = { ZOE }, leader = ZOE,
+          lootMethod = { "group", 0, 0 } })
+        enter(MC)
+        assert.is_nil(view())
+      end
+
+      it("asks the next chooser after the wait, on either event", function()
+        for _, event in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_MEMBER_DISABLE" }) do
+          setup()
+          wow.state.offline = { [ZOE] = true }
+          wow.fire(event, "raid1")
+          assert.is_nil(view())
+          wow.advance(5)
+          assert.are.equal("Is this a guild run?", view().title)
+        end
+      end)
+
+      it("asks only once when they are back within the wait", function()
+        setup()
+        wow.state.offline = { [ZOE] = true }
+        wow.fire("PARTY_MEMBER_DISABLE", "raid1")
+        wow.advance(2)
+        wow.state.offline = nil
+        wow.fire("PARTY_MEMBER_ENABLE", "raid1")
+        wow.advance(5)
+        assert.is_nil(view())
+      end)
+
+      it("doesn't ask again for an answered run when they come back", function()
+        setup()
+        wow.state.offline = { [ZOE] = true }
+        wow.fire("PARTY_MEMBER_DISABLE", "raid1")
+        wow.advance(5)
+        pick(3)
+        press("Start")
+        assert.are.equal("off", ns.Selection.ActiveBy())
+        wow.state.offline = nil
+        wow.fire("PARTY_MEMBER_ENABLE", "raid1")
+        wow.advance(5)
+        assert.is_nil(view())
+      end)
+    end)
+
     it("asks after the wait on joining a raid group inside the instance", function()
       start({ groupIsRaid = false })
       wow.state.group = nil
