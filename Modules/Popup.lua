@@ -998,7 +998,8 @@ end
 -- someone else, Not handed out: text, action, enabled, tooltip), list (Give to someone else's, from
 -- GiveElseList: { title, people = { { char, method, kind, available, reason, enabled, tooltip } },
 -- db (the Disenchant/bank line: { label, pick, enabled, tooltip }; nil for a Disenchant/bank award),
--- empty, hint, back }) }. Buttons that post a line wait in a boss fight; Try again posts none.
+-- empty, refusal (as above, shown while the list is open), hint, back }) }. Buttons that post a
+-- line wait in a boss fight; Try again posts none.
 function Popup.Choices(key)
   local award = ns.Records.Get(key)
   local link = linkOf(key, award)
@@ -1022,6 +1023,7 @@ function Popup.Choices(key)
       list.db.label, list.db.enabled, list.db.tooltip = "Disenchant/bank: choose first", false, DB_CHOOSE_TIP
     end
   end
+  list.refusal = refusals[key]
   list.hint = "Posts one correction line: Correction: " .. link .. " → their name, not "
     .. (award.char or "disenchant/bank") .. "."
   return { key = key, refusal = refusals[key], list = list,

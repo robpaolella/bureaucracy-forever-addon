@@ -527,6 +527,23 @@ describe("PopupFrame", function()
       assert.are.equal(1, #wow.sent)
     end)
 
+    it("keeps the list open on a refused Give and shows why, naming the pick", function()
+      local row = unconfirmed()
+      assert.is_true(ns.Popup.SetDBPick("Tovin Hale"))
+      click(row.ncBox.buttons[2])
+      assert.is_false(shownRows()[1].list.refusal:IsShown())
+      wow.state.loot[1].candidates = { "Masterlooter", "Ashla Brightwater", "Doran Vale" }
+      click(shownRows()[1].list.db.give)
+      local list = shownRows()[1].list
+      assert.is_true(list:IsShown())
+      assert.are.equal("The game won't let Tovin Hale receive this item (usually: not nearby when the boss"
+        .. " died). Right-click D/B to choose someone else.", list.refusal:GetText())
+      assert.is_true(list.refusal:IsShown())
+      assert.is_true(list.hint.points[1].y < list.refusal.points[1].y)
+      assert.are.equal(1, #wow.gives)
+      assert.are.equal(1, #wow.sent)
+    end)
+
     it("greys the Disenchant/bank line's Give in a boss fight, with the fight tooltip", function()
       local row = unconfirmed()
       assert.is_true(ns.Popup.SetDBPick("Tovin Hale"))

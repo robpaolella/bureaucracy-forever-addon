@@ -269,6 +269,9 @@ local function newList(parent, onGive, onBack)
   box.back = tipButton(box, 60)
   box.back:SetScript("OnClick", onBack)
   box.empty = newText(box, "GameFontHighlightSmall")
+  box.refusal = newText(box, "GameFontHighlightSmall")
+  box.refusal:SetWidth(BOX_WIDTH - 12)
+  box.refusal:SetTextColor(1, 0.35, 0.35)
   box.hint = newText(box, "GameFontDisableSmall")
   box.hint:SetWidth(BOX_WIDTH - 12)
   box.entries = {}
@@ -473,8 +476,8 @@ end
 
 -- The Give to someone else list, in its box at x and below in the box's parent: each other
 -- contender with the method they hold and a Give button; one who can't receive is greyed with the
--- reason and has no button. Then the Disenchant/bank line, when the list has one. Returns the new
--- below.
+-- reason and has no button. Then the Disenchant/bank line, when the list has one, and why the last
+-- choice was refused. Returns the new below.
 local function drawList(box, list, x, below)
   box.title:ClearAllPoints()
   box.title:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
@@ -580,7 +583,8 @@ local function drawList(box, list, x, below)
     line.give:Hide()
     line.line:Hide()
   end
-  y = boxLine(box, box.hint, list.hint, y + 2)
+  y = boxLine(box, box.refusal, list.refusal, y + 2)
+  y = boxLine(box, box.hint, list.hint, y + (list.refusal and 0 or 2))
   box:ClearAllPoints()
   box:SetPoint("TOPLEFT", box:GetParent(), "TOPLEFT", x, -below)
   box:SetSize(BOX_WIDTH, y + 4)
