@@ -77,6 +77,7 @@ function UI.Select(name)
     if on then tab.label:SetTextColor(1, 0.82, 0) else tab.label:SetTextColor(0.6, 0.6, 0.6) end
   end
   UI.selected = name
+  if name == "Awards" then UI.RefreshAwards() end
   if name == "Reserves" then UI.RefreshReserves() end
   if name == "Sync" then UI.RefreshSync() end
 end
@@ -91,6 +92,7 @@ local function newButton(parent, label, width, height)
   b.label = newText(b, "GameFontNormal")
   b.label:SetPoint("CENTER")
   b.label:SetText(label)
+  b.background = background
   return b
 end
 
@@ -453,6 +455,9 @@ local function lootMaster()
   if IsInRaid() then return raidIndex and raidIndex > 0 and (GetRaidRosterInfo(raidIndex)) or nil end
   return partyIndex and UnitName("party" .. partyIndex)
 end
+
+-- The pieces the Awards tab (AwardsTab.lua) draws with.
+UI.parts = { newText = newText, newButton = newButton, itemText = itemText, lootMaster = lootMaster }
 
 -- Who chose: "you", or the officer's name, marked when they are the loot master.
 local function chooser(name)
@@ -1318,6 +1323,7 @@ local function build()
   end)
   window:SetScript("OnShow", function()
     saved().shown = true
+    UI.RefreshAwards()
     UI.RefreshReserves()
     UI.RefreshSync()
   end)
