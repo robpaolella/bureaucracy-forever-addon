@@ -166,7 +166,7 @@ describe("Hub", function()
       ["a sender outside the group"] = function() send(award(), nil, "Stranger") end,
       ["a raid not loaded"] = function() send(award(), "SZZZZZ") end,
       ["an author who isn't the sender"] = function() send(award(), nil, ZOE, BO) end,
-      ["a type with no handler yet"] = function() receive("P;SA0001;x") end,
+      ["a type with no handler"] = function() receive("Z;SA0001;x") end,
     }
     for name, act in pairs(cases) do
       it(name, function()
@@ -313,9 +313,10 @@ describe("Hub sending", function()
     ns = wow.start()
     Records, Hub = ns.Records, ns.Hub
     wow.state.player = "Rae Quill"
-    wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
+    -- Chosen before joining the group, so no S message is queued.
     ns.Raids.Load(assert(ns.Snapshot.Validate(snapshot(RAID), "0.1.0")), "pasted")
     assert.is_true(ns.Selection.ChooseRaid(RAID, true))
+    wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
   end)
 
   it("sends a burst of operations as BFLOOT1 messages to the raid, one a second", function()
@@ -497,6 +498,385 @@ describe("Hub sending", function()
       assert.are.equal(102, #wow.addonMessages)
       assert.is_true(logged("Bo Marsh asked again for zzzzzz, which is no longer held"))
       assert.is_true(logged("Bo Marsh asked again for " .. msgid .. ", which is no longer held"))
+    end)
+  end)
+end)
+
+describe("Hub officers and the selection", function()
+  local ns, Hub, Selection
+  local CY = "Cy Dunn"
+
+  local function logged(text)
+    for _, entry in ipairs(ns.log) do
+      if entry.text:find(text, 1, true) then return true end
+    end
+    return false
+  end
+
+  local function receive(body, sender, channel, prefix)
+    wow.fire("CHAT_MSG_ADDON", prefix or "BFLOOT1", body, channel or "RAID", sender)
+  end
+
+  -- What the add-on sent, once the paced queue has run: { text, channel, target } each.
+  local function sent()
+    for _ = 1, 10 do wow.advance(1) end
+    local list = {}
+    for _, m in ipairs(wow.addonMessages) do list[#list + 1] = { m.text, m.channel, m.target } end
+    return list
+  end
+
+  -- The game writes saved data to disk and reads it back: a copy, not the same table.
+  local function copy(value)
+    if type(value) ~= "table" then return value end
+    local out = {}
+    for k, v in pairs(value) do out[copy(k)] = copy(v) end
+    return out
+  end
+
+  -- A fresh session for player in a raid group of group (the player first), with raid loaded.
+  local function start(player, group, saved)
+    ns = wow.start({ saved = saved })
+    Hub, Selection = ns.Hub, ns.Selection
+    wow.state.player = player or "Rae Quill"
+    if not saved then ns.Raids.Load(assert(ns.Snapshot.Validate(snapshot(RAID), "0.1.0")), "pasted") end
+    wow.state.group, wow.state.groupIsRaid = group, group ~= nil
+  end
+
+  local function status()
+    local s = Selection.Status()
+    return { s.activeBy, s.activeRaid, s.code, s.at, s.chosenBy }
+  end
+
+  before_each(function()
+    start("Rae Quill", { "Rae Quill", ZOE, BO, CY })
+  end)
+
+  describe("P", function()
+    it("is broadcast at login in a group", function()
+      wow.fire("PLAYER_ENTERING_WORLD", true, false)
+      assert.are.same({ { "P;1", "RAID" } }, sent())
+    end)
+
+    it("is broadcast on a /reload in a group, to a party in a party", function()
+      wow.state.groupIsRaid = false
+      wow.fire("PLAYER_ENTERING_WORLD", false, true)
+      assert.are.same({ { "P;1", "PARTY" } }, sent())
+    end)
+
+    it("is broadcast on joining a group, once, and not on zoning", function()
+      wow.state.group, wow.state.groupIsRaid = nil, false
+      wow.fire("PLAYER_ENTERING_WORLD", true, false)
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same({}, sent())
+      wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE }, false
+      wow.fire("GROUP_ROSTER_UPDATE")
+      wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
+      wow.fire("GROUP_ROSTER_UPDATE")
+      wow.fire("PLAYER_ENTERING_WORLD", false, false)
+      assert.are.same({ { "P;1", "PARTY" } }, sent())
+    end)
+
+    it("from a new name is answered with a whispered P;0 and the held selection, as it was made", function()
+      assert.is_true(Selection.Apply("SA0001", 1792000100, BO))
+      receive("P;1", ZOE)
+      assert.are.same({ { "P;0", "WHISPER", ZOE }, { "S;SA0001;1792000100;Bo Marsh", "WHISPER", ZOE } },
+        sent())
+      assert.are.same({ ZOE }, Hub.Roster())
+    end)
+
+    it("is answered with P;0 alone when no raid is chosen yet", function()
+      receive("P;1", ZOE .. "-Realm")
+      assert.are.same({ { "P;0", "WHISPER", ZOE } }, sent())
+    end)
+
+    it("from a name already seen is answered again, for an officer who reloaded", function()
+      receive("P;1", ZOE)
+      receive("P;1", ZOE)
+      assert.are.equal(2, #sent())
+      assert.are.same({ ZOE }, Hub.Roster())
+    end)
+
+    it("P;0 adds the name and is never answered", function()
+      receive("P;0", BO, "WHISPER")
+      assert.are.same({}, sent())
+      assert.are.same({ BO }, Hub.Roster())
+    end)
+
+    it("is logged and dropped when malformed, or from outside the group", function()
+      for _, body in ipairs({ "P;2", "P;", "P;1;x", "P" }) do receive(body, ZOE) end
+      receive("P;1", "Stranger")
+      assert.are.same({}, sent())
+      assert.are.same({}, Hub.Roster())
+      assert.is_true(logged("dropped a malformed P message from Zoé Brûlé"))
+      assert.is_true(logged("Stranger, who isn't in the group"))
+    end)
+
+    it("a name that leaves the group leaves the roster", function()
+      wow.fire("PLAYER_ENTERING_WORLD", false, true)
+      receive("P;0", ZOE)
+      receive("P;0", BO)
+      wow.state.group = { "Rae Quill", BO, CY }
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same({ BO }, Hub.Roster())
+    end)
+  end)
+
+  describe("the chooser", function()
+    -- Each add-on in the group, as the players in users, hears P from the others and names the chooser.
+    local function everyone(users, setup)
+      local names = {}
+      for _, player in ipairs(users) do
+        start(player, { "Rae Quill", ZOE, BO, CY })
+        setup()
+        for _, other in ipairs(users) do
+          if other ~= player then receive("P;0", other) end
+        end
+        names[#names + 1] = Hub.Chooser()
+        assert.are.equal(Hub.Chooser() == player, Hub.IsChooser())
+      end
+      return names
+    end
+
+    it("is the loot master when master loot is on and they run the add-on", function()
+      assert.are.same({ BO, BO, BO }, everyone({ "Rae Quill", ZOE, BO }, function()
+        wow.state.lootMethod = { "master", 2, 3 }
+        wow.state.groupLeader = ZOE
+      end))
+    end)
+
+    it("is the raid leader when the loot master doesn't run the add-on", function()
+      assert.are.same({ ZOE, ZOE, ZOE }, everyone({ "Rae Quill", ZOE, BO }, function()
+        wow.state.lootMethod = { "master", 3, 4 }
+        wow.state.groupLeader = ZOE
+      end))
+    end)
+
+    it("is the raid leader when master loot is off", function()
+      assert.are.same({ ZOE, ZOE }, everyone({ ZOE, BO }, function()
+        wow.state.lootMethod = { "group", 0, 0 }
+        wow.state.groupLeader = ZOE
+      end))
+    end)
+
+    it("is the first add-on user by name, byte by byte, when neither runs it", function()
+      assert.are.same({ BO, BO, BO }, everyone({ "Rae Quill", ZOE, BO }, function()
+        wow.state.lootMethod = { "master", 3, 4 }
+        wow.state.groupLeader = CY
+      end))
+      -- Byte order, not alphabetical: "Z" (0x5A) comes before "Å" (0xC3 0x85) and before "a".
+      start("Ånne Holt", { "Ånne Holt", "Zed Ash", "abe Moss" })
+      receive("P;0", "abe Moss")
+      receive("P;0", "Zed Ash")
+      assert.are.equal("Zed Ash", Hub.Chooser())
+    end)
+
+    it("is this player alone when no one else runs the add-on", function()
+      wow.state.groupLeader = ZOE
+      assert.are.equal("Rae Quill", Hub.Chooser())
+      assert.is_true(Hub.IsChooser())
+    end)
+
+    it("reads the loot master and leader of a party", function()
+      wow.state.groupIsRaid = false
+      receive("P;0", ZOE)
+      receive("P;0", BO)
+      wow.state.groupLeader = ZOE
+      assert.are.equal(ZOE, Hub.Chooser())
+      wow.state.lootMethod = { "master", 2, 0 }
+      assert.are.equal(BO, Hub.Chooser())
+      wow.state.lootMethod = { "master", 0, 0 }
+      assert.are.equal("Rae Quill", Hub.Chooser())
+    end)
+  end)
+
+  describe("S", function()
+    it("is broadcast when this officer chooses a raid, not a guild run, or pastes", function()
+      wow.state.time = 1792000100
+      assert.is_true(Selection.ChooseRaid(RAID))
+      assert.is_true(Selection.ChooseRaid(RAID))
+      Selection.ChooseOff()
+      assert.are.same({ { "S;SA0001;1792000100;Rae Quill", "RAID" }, { "S;-;1792000101;Rae Quill", "RAID" } },
+        sent())
+    end)
+
+    it("is broadcast for a pasted raid", function()
+      local text = "BFSNAP1:1/1:{ formatVersion = 1, raid = \"" .. OTHER .. "\", code = \"SA0002\", "
+        .. "env = \"staging\", name = \"Onyxia\", startsAt = 1792000000, durationMin = 120, "
+        .. "generated = 1791990000, addon = { version = \"0.0.1\", url = \"u\" }, bosses = {}, "
+        .. "reserves = {}, awards = {} }"
+      assert.are.equal(OTHER, (Selection.Paste(text)))
+      assert.are.same({ { "S;SA0002;1792000000;Rae Quill", "RAID" } }, sent())
+    end)
+
+    it("sends nothing when the choice is made outside a group", function()
+      wow.state.group, wow.state.groupIsRaid = nil, false
+      Selection.ChooseRaid(RAID)
+      assert.are.same({}, sent())
+      assert.are.same({}, ns.log)
+    end)
+
+    for _, case in ipairs({ { "a raid code", RAID }, { "not a guild run", "off" } }) do
+      it("round-trips " .. case[1] .. " with an accented name", function()
+        start(ZOE, { ZOE, "Rae Quill" })
+        if case[2] == "off" then Selection.ChooseOff() else Selection.ChooseRaid(RAID) end
+        local body = sent()[1][1]
+        local held = status()
+        start("Rae Quill", { "Rae Quill", ZOE })
+        receive(body, ZOE)
+        assert.are.same(held, status())
+        assert.are.equal(ZOE, Selection.Status().chosenBy)
+      end)
+    end
+
+    it("fits 255 bytes and round-trips with the longest escaped name", function()
+      local longest = string.rep(";", 24)
+      assert.is_true(Selection.Apply("SA0001", 9999999999, longest))
+      local body = Hub.SelectionBody()
+      assert.are.equal("S;SA0001;9999999999;" .. string.rep("%3B", 24), body)
+      assert.is_true(#"BFLOOT1" + 1 + #body <= 255)
+      start("Rae Quill", { "Rae Quill", ZOE })
+      receive(body, ZOE)
+      assert.are.equal(longest, Selection.Status().chosenBy)
+    end)
+
+    it("received goes through Selection.Apply and is never sent again", function()
+      local calls = {}
+      local real = Selection.Apply
+      Selection.Apply = function(...)
+        calls[#calls + 1] = { ... }
+        return real(...)
+      end
+      receive("S;SA0001;1792000100;Bo Marsh", BO)
+      assert.are.same({ { "SA0001", 1792000100, BO } }, calls)
+      assert.are.same({ "chosen", RAID, "SA0001", 1792000100, BO }, status())
+      assert.are.same({}, sent())
+    end)
+
+    it("ends the same on two add-ons that get two crossing choices in opposite orders", function()
+      local pairsOf = {
+        { "S;SA0001;1792000200;Bo Marsh", "S;-;1792000100;Zoé Brûlé" },     -- the later at wins
+        { "S;SA0001;1792000100;Bo Marsh", "S;-;1792000100;Zoé Brûlé" },     -- a tie: the later name
+      }
+      for _, crossing in ipairs(pairsOf) do
+        local results = {}
+        for _, order in ipairs({ { 1, 2 }, { 2, 1 } }) do
+          start()
+          wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
+          for _, i in ipairs(order) do
+            receive(crossing[i], crossing[i]:match(";([^;]+)$"))
+          end
+          results[#results + 1] = status()
+        end
+        assert.are.same(results[1], results[2])
+      end
+      assert.are.same({ "off", nil, nil, 1792000100, ZOE }, status())
+    end)
+
+    it("repeated changes nothing", function()
+      receive("S;SA0001;1792000100;Bo Marsh", BO)
+      local held = copy(ns.db)
+      receive("S;SA0001;1792000100;Bo Marsh", BO)
+      assert.are.same(held, ns.db)
+    end)
+
+    it("for a raid not loaded is held, and a code two raids share is shown", function()
+      receive("S;SZZZZZ;1792000100;Bo Marsh", BO)
+      assert.are.same({ "chosen", nil, "SZZZZZ", 1792000100, BO }, status())
+      local twin = snapshot(OTHER)
+      twin.code = "SA0001"
+      ns.Raids.Load(assert(ns.Snapshot.Validate(twin, "0.1.0")), "pasted")
+      receive("S;SA0001;1792000200;Bo Marsh", BO)
+      assert.are.same({ "chosen", nil, "SA0001" }, { status()[1], status()[2], status()[3] })
+      assert.is_truthy(wow.printed[1]:find("Two loaded raids have the code SA0001", 1, true))
+    end)
+
+    describe("changes nothing", function()
+      local cases = {
+        ["from outside the group"] = { "S;SA0001;1792000100;Bo Marsh", "Stranger" },
+        ["with a higher prefix number"] = { "S;SA0001;1792000100;Bo Marsh", BO, "BFLOOT2" },
+      }
+      for _, body in ipairs({ "S;SA0001;soon;Bo Marsh", "S;sa0001;1792000100;Bo Marsh", "S;SA001;1;Bo Marsh",
+        "S;SA0001;1792000100;", "S;SA0001;1792000100;Bo%ZZ", "S;SA0001;1792000100;Bo;x", "S;;1;Bo Marsh",
+        "S;SA0001;17920001000;Bo Marsh", "S;SA0001;1792000100;Bo>Marsh" }) do
+        cases["for " .. body] = { body, BO, nil, "dropped a malformed S message from Bo Marsh" }
+      end
+      for name, case in pairs(cases) do
+        it(name, function()
+          receive(case[1], case[2], nil, case[3])
+          assert.are.same({ "none" }, status())
+          if case[4] then assert.is_true(logged(case[4])) end
+          if case[3] then
+            assert.are.equal(1, #wow.printed)
+            assert.is_truthy(wow.printed[1]:find("update Bureaucracy Forever", 1, true))
+          else
+            assert.are.same({}, wow.printed)
+          end
+        end)
+      end
+    end)
+
+    it("this officer's waits through a boss fight in the queue, then is sent", function()
+      wow.bossFight(true)
+      Selection.ChooseRaid(RAID)
+      assert.are.same({}, sent())
+      wow.bossFight(false)
+      assert.are.equal("S;SA0001;", sent()[1][1]:sub(1, 9))
+    end)
+
+    it("and P keep flowing while not a guild run", function()
+      wow.state.time = 1792000100
+      Selection.ChooseOff()
+      assert.is_true(Selection.IsQuiet())
+      receive("P;1", ZOE)
+      assert.are.same({ { "S;-;1792000100;Rae Quill", "RAID" }, { "P;0", "WHISPER", ZOE },
+        { "S;-;1792000100;Rae Quill", "WHISPER", ZOE } }, sent())
+      receive("S;SA0001;1792000200;Zoé Brûlé", ZOE)
+      assert.are.same({ "chosen", RAID }, { status()[1], status()[2] })
+    end)
+  end)
+
+  describe("the group", function()
+    it("left clears the roster and the selection, and a new group starts fresh", function()
+      wow.fire("PLAYER_ENTERING_WORLD", false, true)
+      receive("P;0", ZOE)
+      Selection.ChooseRaid(RAID)
+      sent()
+      wow.state.group, wow.state.groupIsRaid = nil, false
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same({}, Hub.Roster())
+      assert.are.same({ "none" }, status())
+      wow.state.group, wow.state.groupIsRaid = { "Rae Quill", BO }, false
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same({ "P;1", "PARTY" }, sent()[3])
+      assert.are.same({ "none" }, status())
+    end)
+
+    it("clears a saved selection at login outside a group", function()
+      Selection.ChooseRaid(RAID)
+      start("Rae Quill", nil, { BureaucracyForeverDB = copy(ns.db) })
+      assert.are.equal("chosen", Selection.ActiveBy())
+      wow.fire("PLAYER_ENTERING_WORLD", true, false)
+      assert.are.same({ "none" }, status())
+    end)
+
+    for _, case in ipairs({ { "in the same group", { "Rae Quill", ZOE } }, { "outside a group", nil } }) do
+      it("keeps a saved selection on a /reload " .. case[1], function()
+        Selection.ChooseRaid(RAID)
+        local held = status()
+        start("Rae Quill", case[2], { BureaucracyForeverDB = copy(ns.db) })
+        wow.fire("PLAYER_ENTERING_WORLD", false, true)
+        wow.fire("GROUP_ROSTER_UPDATE")
+        assert.are.same(held, status())
+      end)
+    end
+
+    it("keeps a saved selection at login in a group", function()
+      Selection.ChooseRaid(RAID)
+      local held = status()
+      start("Rae Quill", { "Rae Quill", ZOE }, { BureaucracyForeverDB = copy(ns.db) })
+      wow.fire("PLAYER_ENTERING_WORLD", true, false)
+      assert.are.same(held, status())
+      assert.are.same({ { "P;1", "RAID" } }, sent())
     end)
   end)
 end)

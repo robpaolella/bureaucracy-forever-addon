@@ -303,4 +303,23 @@ describe("Selection", function()
     Selection.Apply("S00003", Selection.Status().at + 1, "Bo Marsh")
     assert.is_false(Selection.IsQuiet())
   end)
+
+  it("orders names byte by byte, whatever the locale", function()
+    assert.is_true(Selection.NameBefore("Zed Ash", "abe Moss"))
+    assert.is_true(Selection.NameBefore("Zoe", "Ånne"))
+    assert.is_true(Selection.NameBefore("Bo", "Bo Marsh"))
+    assert.is_false(Selection.NameBefore("Bo Marsh", "Bo Marsh"))
+  end)
+
+  it("tells the hub of this officer's own choices only", function()
+    local told = 0
+    Selection.onChoose = function() told = told + 1 end
+    Selection.ChooseRaid("raid00001")
+    Selection.ChooseRaid("raid00001")
+    Selection.ChooseOff()
+    Selection.ChooseOff()
+    Selection.Apply("S00002", Selection.Status().at + 1, "Bo Marsh")
+    Selection.Clear()
+    assert.are.equal(2, told)
+  end)
 end)
