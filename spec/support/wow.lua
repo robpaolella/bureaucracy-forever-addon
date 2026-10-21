@@ -267,6 +267,12 @@ local function installGlobals(metadata)
   end
   -- The group: wow.state.group lists its names, the player first; groupIsRaid says if it is a raid.
   _G.IsInRaid = function() return wow.state.groupIsRaid or false end
+  -- Raid rights, as wow.state.leader and wow.state.assistant (the player's own).
+  _G.UnitIsGroupLeader = function() return wow.state.leader or false end
+  _G.UnitIsGroupAssistant = function() return wow.state.assistant or false end
+  -- A hidden value, as the game gives add-ons in a boss fight: pass wow.secret as an event argument.
+  wow.secret = {}
+  _G.issecretvalue = function(value) return value == wow.secret end
   _G.GetNumGroupMembers = function() return #(wow.state.group or {}) end
   _G.GetRaidRosterInfo = function(i) return (wow.state.group or {})[i] end
   -- Item facts the game knows, as wow.state.items[id] = { name, link, icon }.

@@ -18,6 +18,7 @@ Modules\Sync.lua
 Modules\Hub.lua
 Modules\Inbox.lua
 Modules\Popup.lua
+Modules\Rolls.lua
 Modules\PopupFrame.lua
 Modules\UI.lua
 Inbox.lua

@@ -1,7 +1,8 @@
 -- PopupFrame: draws the loot pop-up (#77) from the content model Popup.Build() makes (#10).
 -- It opens on LOOT_OPENED for the loot master, closes on LOOT_CLOSED, and redraws when the officer
 -- picks a boss, while a candidate's name is still loading, when a boss fight starts or ends and when
--- the game confirms a hand-out. Give hands out (#38); rolling and D/B belong to #13 and #39.
+-- the game confirms a hand-out. Give hands out (#38) and Call roll starts a roll-off (#13); D/B is
+-- #39's.
 local _, ns = ...
 
 local PopupFrame = {}
@@ -175,7 +176,14 @@ local function newRow()
   row.primary:SetScript("OnLeave", function() GameTooltip:Hide() end)
   row.primary:SetScript("OnClick", function()
     local button = row.data and row.data.buttons[1]
-    if not (button and button.enabled and button.action == "give") then return end
+    if not (button and button.enabled) then return end
+    if button.action == "roll" or button.action == "openroll" then
+      local result, why = ns.Rolls.Start(row.data.slot, row.data.item)
+      if not result then ns.Log("Roll call for " .. row.data.link .. " refused: " .. tostring(why)) end
+      PopupFrame.Refresh()
+      return
+    end
+    if button.action ~= "give" then return end
     local ok, why = ns.Popup.Give(row.data.slot, row.data.item, row.data.winner)
     if not ok then ns.Log("Give for " .. row.data.link .. " refused: " .. tostring(why)) end
     PopupFrame.Refresh()
