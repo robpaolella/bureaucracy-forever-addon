@@ -64,13 +64,15 @@ local sessionPick -- the D/B pick while no raid is loaded: kept until the game c
 local dbNotes = {} -- per slot, why the last D/B click handed nothing out
 local refusals = {} -- per award key, why the last not-confirmed choice was refused
 local picks = {} -- per slot, the name the officer clicked in the roll list: { item, name }
+local rollNotes = {} -- per slot, why the last hidden-roll click handed nothing out: { item, text }
 local METHODS = { hr = "HR", sr = "SR", open = "OPEN_ROLL" }
 local ROLL_HEADINGS = { hr = "Rolls (hard reserve holders only)", sr = "Rolls (soft reserve holders only)",
   open = "Rolls (everyone)" }
+local HIDDEN_WARNING = "The game is hiding rolls from add-ons right now. Watch chat, then click the winner."
 local NOT_RECEIVE = " can't be given it: the game won't let them receive it (usually: not nearby when"
   .. " the boss died)."
 
-ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes, refusals, picks = nil, {}, {}, {} end)
+ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes, refusals, picks, rollNotes = nil, {}, {}, {}, {} end)
 
 -- Whether the game locks chat for add-ons now (a boss fight). A call that fails counts as no lock.
 function Popup.ChatLocked()
@@ -261,16 +263,34 @@ local function resolveRow(it, ctx, earlier, copyNote, pendingKey)
   return row
 end
 
+-- "A", "A and B", "A, B and C".
+local function nameList(names)
+  if #names <= 1 then return names[1] or "" end
+  return table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names]
+end
+
+-- Whether the name may be handed the item: the corpse lists them (or its list is unknown).
+local function listedFor(slot, name)
+  local cands = candidates(slot)
+  local listed = not cands
+  for _, n in ipairs(cands or {}) do
+    listed = listed or n == "Unknown" or bare(n) == bare(name)
+  end
+  return listed
+end
+
 -- The roll list of a row whose roll is called (result: Rolls.Result): the entries by roll, highest
 -- first, then those still waiting; the ignored rolls; and the Give button for the picked name, or
--- for the highest roller when none is picked (nobody on a tie or a hidden roll). Returns the list and
--- the Give button.
+-- for the highest roller when none is picked (nobody on a tie or a hidden roll). A tie adds a warning
+-- and the Re-roll button; hidden rolls (#102) a warning, the roll box and name buttons that award
+-- at once, with no Give button. Returns the list and the Give button.
 local function rollList(row, result, boss, locked)
-  local entries = {}
-  for _, e in ipairs(result.entries) do entries[#entries + 1] = e end
+  local entries, order = {}, {}
+  for i, e in ipairs(result.entries) do entries[i], order[e] = e, i end
   table.sort(entries, function(a, b)
     if (a.roll ~= nil) ~= (b.roll ~= nil) then return a.roll ~= nil end
-    return (a.roll or 0) > (b.roll or 0)
+    if (a.roll or 0) ~= (b.roll or 0) then return (a.roll or 0) > (b.roll or 0) end
+    return order[a] < order[b] -- equal rolls keep their order: the sort alone isn't stable
   end)
   local picked = picks[row.slot]
   picked = picked and picked.item == row.item and picked.name or result.winner
@@ -278,25 +298,41 @@ local function rollList(row, result, boss, locked)
     hint = "or click another name" }
   list.count = result.total and (result.rolled .. " of " .. result.total .. " rolled")
     or (result.rolled .. " rolled")
+  local tied = {}
+  for _, name in ipairs(result.tie or {}) do tied[bare(name)] = true end
   local chosen
   for _, e in ipairs(entries) do
     local selected = picked ~= nil and bare(e.name) == bare(picked)
     if selected then chosen = e end
     list.entries[#list.entries + 1] = { name = e.name, roll = e.roll, waiting = e.roll == nil,
-      selected = selected }
+      selected = selected, tied = tied[bare(e.name)] or nil }
   end
   for _, i in ipairs(result.ignored) do
     list.ignored[#list.ignored + 1] = { name = i.name, roll = i.roll, reason = i.reason }
+  end
+  if result.hidden then
+    list.hidden = { warning = HIDDEN_WARNING, label = "Their roll (optional):" }
+    if row.mode == "open" then list.hidden.label = "Their roll (needed for an open roll):" end
+    for _, e in ipairs(list.entries) do
+      e.enabled = boss.resolved and listedFor(row.slot, e.name) and not locked
+      if locked then e.tooltip = FIGHT_TOOLTIP end
+    end
+    local note = rollNotes[row.slot]
+    list.hidden.note = note and note.item == row.item and note.text or nil
+    list.hint = nil
+    return list, { text = "", action = "rollhidden", enabled = false, hidden = true }
+  end
+  if result.tie then
+    list.warning = "Tie at " .. result.top .. ": " .. nameList(result.tie)
+    local line = ns.Rolls.RerollLine(row.slot, row.item)
+    list.reroll = { text = "Re-roll the tie", action = "reroll", enabled = not locked,
+      tooltip = locked and FIGHT_TOOLTIP or nil, hint = line and ("Posts: " .. line) or nil }
   end
   local button = { text = "Give", action = "rollgive", enabled = false }
   if chosen then
     button.winner, button.roll = chosen.name, chosen.roll
     button.text = "Give to " .. chosen.name .. (chosen.roll and (" (" .. chosen.roll .. ")") or "")
-    local cands = candidates(row.slot)
-    local listed = not cands
-    for _, name in ipairs(cands or {}) do
-      listed = listed or name == "Unknown" or bare(name) == bare(chosen.name)
-    end
+    local listed = listedFor(row.slot, chosen.name)
     button.enabled = boss.resolved and listed
     if not listed then list.unavailable = chosen.name .. NOT_RECEIVE end
   end
@@ -404,8 +440,11 @@ end
 -- selected, killed } } }), notice (no reserves), fight (the boss fight note, while chat is locked),
 -- syncLink, rows (every item of every loot-window page; each: slot, item, link, copy, mode, label,
 -- contenders, users, winner, user, rolls (once a roll is called: { heading, count, entries = { { name,
--- roll, waiting, selected } }, ignored = { { name, roll, reason } }, hint, unavailable }, whose Give
--- button is buttons[1], action "rollgive", with winner and roll), skipped, skippedText, note, text,
+-- roll, waiting, selected, tied } }, ignored = { { name, roll, reason } }, hint, unavailable, and for a
+-- tie warning and reroll ({ text, action, enabled, tooltip, hint }), for hidden rolls hidden ({ warning,
+-- label, note }) with enabled and tooltip on each entry), whose Give button is buttons[1], action
+-- "rollgive", with winner and roll (hidden rolls: hidden = true, no Give button)),
+-- skipped, skippedText, note, text,
 -- action, unavailable, dbNote (why the last D/B click handed nothing out), handout (while the game
 -- confirms a hand-out: { text, note }),
 -- notConfirmed (once the game gave up on its hand-out: { key, text, hint, refusal (why the last
@@ -530,6 +569,37 @@ local function post(operation, data, why, what, told)
   ns.Print(told .. " Type /bf log for why.")
 end
 
+-- Hands the item to chosen (by name among the corpse's candidates), records the award and posts its
+-- line. Returns the hand-out, or nil and why: "not a candidate" or Tracking.Give's reasons.
+local function handOut(model, row, chosen, roll, fromRolls)
+  local index
+  for i = 1, MAX_CANDIDATES do
+    local name = GetMasterLootCandidate(row.slot, i)
+    if not name then break end
+    if bare(name) == bare(chosen) then
+      index = i
+      break
+    end
+  end
+  if not index then return nil, "not a candidate" end
+  local attempt, reason = ns.Tracking.Give(row.slot, index)
+  if not attempt then return nil, reason end
+  local method = fromRolls and METHODS[row.mode] or (row.mode == "hr" and "HR" or "SR")
+  local user = fromRolls and row.users[bare(chosen)] or row.user
+  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = chosen,
+    user = user, method = method, roll = roll, practice = ns.Practice() })
+  local data
+  if op then
+    attempt.awardKey = op.id
+    local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
+    data = { raid = snapshot.code, key = op.id, item = row.item, link = row.link, boss = model.boss.id,
+      method = method, roll = roll, winner = chosen, practice = op.practice }
+  end
+  attempt.announced = post("award", data, why, "Award line for " .. row.link,
+    row.link .. " is being handed to " .. chosen .. ", but its raid chat line couldn't be posted.")
+  return attempt
+end
+
 -- The officer clicked a row's Give button: hands the item to the winner, found by name among
 -- this corpse's candidates (their order changes per corpse), records the award as announced and
 -- posts its line in raid chat. A line that can't be built is not posted, and the officer is
@@ -557,32 +627,54 @@ function Popup.Give(slot, item, winner, roll)
     if row.item ~= item or row.winner ~= winner then return nil, "changed" end
     roll = nil
   end
-  local chosen = fromRolls and winner or row.winner
-  local index
-  for i = 1, MAX_CANDIDATES do
-    local name = GetMasterLootCandidate(slot, i)
-    if not name then break end
-    if bare(name) == bare(chosen) then
-      index = i
-      break
-    end
+  return handOut(model, row, fromRolls and winner or row.winner, roll, fromRolls)
+end
+
+local ROLL_NOTES = {
+  ["roll needed"] = "Type their roll first: an open roll needs it.",
+  ["bad roll"] = "Their roll must be a whole number from 1 to 100.",
+}
+
+-- The officer clicked a name while the game hides the rolls (#102): hands the item to that player
+-- and records the award with the roll typed in the box (rollText, as typed; empty for none). The
+-- roll is checked before anything is handed out: it must be a whole number from 1 to 100, and an
+-- open roll needs one. A refusal changes nothing and leaves a note for the row. Returns the
+-- hand-out, or nil and why: "fight", "not ready" (no hidden roll list, or the name's button is off),
+-- "not listed", "changed", "roll needed", "bad roll", "not a candidate" or Tracking.Give's reasons.
+function Popup.GiveHidden(slot, item, winner, rollText)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local model = Popup.Build()
+  local row
+  for _, r in ipairs(model and model.rows or {}) do
+    if r.slot == slot then row = r end
   end
-  if not index then return nil, "not a candidate" end
-  local attempt, reason = ns.Tracking.Give(slot, index)
-  if not attempt then return nil, reason end
-  local method = fromRolls and METHODS[row.mode] or (row.mode == "hr" and "HR" or "SR")
-  local user = fromRolls and row.users[bare(chosen)] or row.user
-  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = chosen,
-    user = user, method = method, roll = roll, practice = ns.Practice() })
-  local data
-  if op then
-    attempt.awardKey = op.id
-    local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
-    data = { raid = snapshot.code, key = op.id, item = row.item, link = row.link, boss = model.boss.id,
-      method = method, roll = roll, winner = chosen, practice = op.practice }
+  if not (row and row.rolls and row.rolls.hidden) then return nil, "not ready" end
+  if row.item ~= item then return nil, "changed" end
+  local entry
+  for _, e in ipairs(row.rolls.entries) do
+    if bare(e.name) == bare(winner) then entry = e end
   end
-  attempt.announced = post("award", data, why, "Award line for " .. row.link,
-    row.link .. " is being handed to " .. chosen .. ", but its raid chat line couldn't be posted.")
+  if not entry then return nil, "not listed" end
+  if not entry.enabled then return nil, "not ready" end
+  local text = strtrim(rollText or "")
+  local roll, why
+  if text ~= "" then
+    roll = text:match("^%d+$") and tonumber(text)
+    if not (roll and roll >= 1 and roll <= 100) then why = "bad roll" end
+  elseif row.mode == "open" then
+    why = "roll needed"
+  end
+  local attempt, reason
+  if not why then
+    attempt, reason = handOut(model, row, entry.name, roll, true)
+    why = reason
+  end
+  rollNotes[slot] = nil
+  if not attempt then
+    local note = ROLL_NOTES[why] or ("It couldn't be given (" .. tostring(why) .. ").")
+    rollNotes[slot] = { item = item, text = note }
+    return nil, why
+  end
   return attempt
 end
 

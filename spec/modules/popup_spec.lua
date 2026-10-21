@@ -1375,7 +1375,8 @@ describe("Popup", function()
       ns.Rolls.End(1, 1)
       call(2)
       wow.fire("CHAT_MSG_SYSTEM", wow.secret)
-      assert.are.same({ "Give", false }, { row(2).buttons[1].text, row(2).buttons[1].enabled })
+      assert.are.same({ nil, "not ready" }, { give(2) })
+      assert.is_true(row(2).buttons[1].hidden) -- hidden rolls have no Give button (#102)
     end)
 
     it("gives to the winner, recording the roll and the method in the award and its line", function()
@@ -1466,6 +1467,183 @@ describe("Popup", function()
       roll("Doran Vale", 30)
       roll("Mirel Stone", 70)
       assert.are.equal("Give to Mirel Stone (70)", row(1).buttons[1].text)
+    end)
+
+    describe("ties and hidden rolls (#102)", function()
+      local function tie()
+        raid()
+        call(1)
+        roll("Doran Vale", 87)
+        roll("Mirel Stone", 87)
+        roll("Tovin Hale", 20)
+      end
+
+      local function hide(slot)
+        call(slot)
+        wow.fire("CHAT_MSG_SYSTEM", wow.secret)
+      end
+
+      local function giveHidden(slot, name, text)
+        local result
+        wow.click(function()
+          result = { ns.Popup.GiveHidden(slot, row(slot).item, name, text) }
+        end)
+        return result[1], result[2]
+      end
+
+      it("shows a tie with the tied names marked and the line a re-roll posts", function()
+        tie()
+        local list = row(1).rolls
+        assert.are.equal("Tie at 87: Doran Vale and Mirel Stone", list.warning)
+        assert.are.same({ true, true, nil, nil },
+          { list.entries[1].tied, list.entries[2].tied, list.entries[3].tied, list.entries[4].tied })
+        assert.are.same({ "Re-roll the tie", "reroll", true,
+          "Posts: Tie for " .. row(1).link .. ": Doran Vale and Mirel Stone, roll again" },
+          { list.reroll.text, list.reroll.action, list.reroll.enabled, list.reroll.hint })
+        assert.is_nil(list.hidden)
+      end)
+
+      it("shortens the posted line when many players tie, as the re-roll does", function()
+        raid()
+        call(3)
+        for i = 1, 40 do roll("Playerwithalongname" .. string.char(64 + i % 26 + 1) .. i, 50) end
+        local list = row(3).rolls
+        local posted = ns.Rolls.RerollLine(3, 3)
+        assert.is_truthy(posted:find("more", 1, true))
+        assert.are.equal("Posts: " .. posted, list.reroll.hint)
+      end)
+
+      it("has no tie warning without a tie", function()
+        raid()
+        call(1)
+        roll("Doran Vale", 87)
+        roll("Mirel Stone", 50)
+        assert.is_nil(row(1).rolls.warning)
+        assert.is_nil(row(1).rolls.reroll)
+      end)
+
+      it("keeps tied names clickable, and Give follows a click", function()
+        tie()
+        assert.is_false(row(1).buttons[1].enabled)
+        assert.is_true(ns.Popup.PickWinner(1, 1, "Doran Vale"))
+        assert.are.same({ "Give to Doran Vale (87)", true },
+          { row(1).buttons[1].text, row(1).buttons[1].enabled })
+      end)
+
+      it("disables the re-roll button in a boss fight, with the tooltip", function()
+        tie()
+        wow.bossFight(true)
+        local reroll = row(1).rolls.reroll
+        assert.are.same({ false, "Chat is locked until the fight ends" }, { reroll.enabled, reroll.tooltip })
+      end)
+
+      it("shows hidden rolls with a warning, the names, and no Give button", function()
+        raid()
+        hide(1)
+        local list = row(1).rolls
+        assert.are.equal("The game is hiding rolls from add-ons right now."
+          .. " Watch chat, then click the winner.", list.hidden.warning)
+        assert.are.equal("Their roll (optional):", list.hidden.label)
+        local shown = {}
+        for i, e in ipairs(list.entries) do shown[i] = e.name end
+        assert.are.same({ "Ashla Brightwater", "Doran Vale", "Mirel Stone", "Tovin Hale" }, shown)
+        assert.is_true(row(1).buttons[1].hidden)
+        assert.is_false(row(1).buttons[1].enabled)
+        assert.is_true(row(1).buttons[2].enabled) -- Disenchant/bank stays
+        assert.is_nil(list.reroll)
+      end)
+
+      it("names the players in the loot window for a hidden open roll, and needs their roll", function()
+        raid()
+        hide(3)
+        local shown = {}
+        for i, e in ipairs(row(3).rolls.entries) do shown[i] = e.name end
+        assert.are.same({ "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein", "Mirel Stone",
+          "Tovin Hale" }, shown)
+        assert.are.equal("Their roll (needed for an open roll):", row(3).rolls.hidden.label)
+      end)
+
+      it("awards to the clicked name with the typed roll", function()
+        raid()
+        hide(1)
+        local attempt = assert(giveHidden(1, "Mirel Stone", " 64 "))
+        local award = ns.Records.Get(attempt.awardKey)
+        assert.are.same({ "Mirel Stone", "HR", 64 }, { award.char, award.method, award.roll })
+        assert.are.same({ { slot = 1, candidate = 5 } }, wow.gives)
+        assert.is_truthy(wow.sent[#wow.sent].text:find(";HR;64;Mirel Stone>", 1, true))
+      end)
+
+      it("awards with no roll for a hard or soft reserve roll", function()
+        raid()
+        hide(2)
+        local attempt = assert(giveHidden(2, "Bram Ironvein", ""))
+        local award = ns.Records.Get(attempt.awardKey)
+        assert.are.same({ "SR", nil }, { award.method, award.roll })
+      end)
+
+      it("awards an open roll with its number", function()
+        raid()
+        hide(3)
+        local attempt = assert(giveHidden(3, "Bram Ironvein", "91"))
+        local award = ns.Records.Get(attempt.awardKey)
+        assert.are.same({ "OPEN_ROLL", 91 }, { award.method, award.roll })
+        assert.are.equal(1, #ns.Records.Ops(ns.Selection.Status().activeRaid))
+      end)
+
+      it("refuses an open roll with no number, handing out, recording and posting nothing", function()
+        raid()
+        hide(3)
+        local sent = #wow.sent
+        assert.are.same({ nil, "roll needed" }, { giveHidden(3, "Bram Ironvein", "") })
+        assert.are.same({}, wow.gives)
+        assert.are.equal(sent, #wow.sent)
+        assert.are.same({}, ns.Records.Ops(ns.Selection.Status().activeRaid))
+        assert.are.equal("Type their roll first: an open roll needs it.", row(3).rolls.hidden.note)
+      end)
+
+      it("refuses a roll that isn't a whole number from 1 to 100", function()
+        raid()
+        hide(1)
+        local sent = #wow.sent
+        for _, text in ipairs({ "0", "101", "-5", "12.5", "abc", "1e2" }) do
+          assert.are.same({ nil, "bad roll" }, { giveHidden(1, "Mirel Stone", text) })
+        end
+        assert.are.same({}, wow.gives)
+        assert.are.equal(sent, #wow.sent)
+        assert.are.equal("Their roll must be a whole number from 1 to 100.", row(1).rolls.hidden.note)
+        assert(giveHidden(1, "Mirel Stone", "100"))
+      end)
+
+      it("clears the refusal note once an award goes through", function()
+        raid()
+        hide(1)
+        giveHidden(1, "Mirel Stone", "0")
+        assert(giveHidden(1, "Mirel Stone", "5"))
+        wow.closeLoot()
+        raid()
+        hide(1)
+        assert.is_nil(row(1).rolls.hidden.note)
+      end)
+
+      it("refuses a name that isn't listed, and when the rolls aren't hidden", function()
+        raid()
+        hide(1)
+        assert.are.same({ nil, "not listed" }, { giveHidden(1, "Nobody", "5") })
+        assert.are.same({ nil, "not ready" }, { giveHidden(2, "Bram Ironvein", "5") })
+        tie()
+        assert.are.same({ nil, "not ready" }, { giveHidden(1, "Doran Vale", "5") })
+      end)
+
+      it("disables the name buttons in a boss fight", function()
+        raid()
+        hide(1)
+        wow.bossFight(true)
+        for _, e in ipairs(row(1).rolls.entries) do
+          assert.are.same({ false, "Chat is locked until the fight ends" }, { e.enabled, e.tooltip })
+        end
+        assert.are.same({ nil, "fight" }, { giveHidden(1, "Mirel Stone", "5") })
+        assert.are.same({}, wow.gives)
+      end)
     end)
   end)
 end)

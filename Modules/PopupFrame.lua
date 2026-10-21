@@ -285,7 +285,38 @@ local function newRollBox(row)
   box.unavailable:SetTextColor(1, 0.6, 0.2)
   box.unavailable:SetWidth(BOX_WIDTH - 12)
   box.hint = newText(box, "GameFontDisableSmall")
-  box.names, box.ignored = {}, {}
+  box.names, box.ignored, box.hiddenNames = {}, {}, {}
+  -- The warning bar of a tie or hidden rolls, as the design draws it: amber text on a dark amber bar.
+  box.warnBar = box:CreateTexture(nil, "ARTWORK")
+  box.warnBar:SetColorTexture(0.2, 0.15, 0.02, 1)
+  box.warn = newText(box, "GameFontNormal")
+  box.warn:SetTextColor(1, 0.6, 0.2)
+  -- The Re-roll the tie button with the line it posts, and the hidden rolls' roll box.
+  box.reroll = tipButton(box, 130)
+  box.reroll:SetScript("OnClick", function()
+    local data = row.data
+    local button = data and data.rolls and data.rolls.reroll
+    if not (button and button.enabled) then return end
+    local result, why = ns.Rolls.Reroll(data.slot, data.item)
+    if not result then ns.Log("Re-roll for " .. data.link .. " refused: " .. tostring(why)) end
+    PopupFrame.Refresh()
+  end)
+  box.rerollHint = newText(box, "GameFontHighlightSmall")
+  box.rerollHint:SetWidth(BOX_WIDTH - 12)
+  box.rollLabel = newText(box, "GameFontHighlightSmall")
+  box.rollEdit = CreateFrame("EditBox", nil, box)
+  box.rollEdit:SetSize(50, 20)
+  box.rollEdit:SetAutoFocus(false)
+  box.rollEdit:SetMaxLetters(3)
+  box.rollEdit:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+  box.rollEdit:SetTextInsets(4, 4, 0, 0)
+  box.rollEdit:SetScript("OnEscapePressed", box.rollEdit.ClearFocus)
+  box.rollEdit.background = box.rollEdit:CreateTexture(nil, "BACKGROUND")
+  box.rollEdit.background:SetAllPoints()
+  box.rollEdit.background:SetColorTexture(0, 0, 0, 0.8)
+  box.note = newText(box, "GameFontHighlightSmall")
+  box.note:SetTextColor(1, 0.6, 0.2)
+  box.note:SetWidth(BOX_WIDTH - 12)
   return box
 end
 
@@ -523,18 +554,75 @@ local function drawList(row, list, below)
   return below + y + 8
 end
 
+-- The hidden rolls' name buttons, flowing across the box; a click awards to that player with the
+-- roll typed in the box (#102). Returns the new y.
+local function drawHiddenNames(row, box, names, y)
+  local x, lineY = 6, y
+  for i, e in ipairs(names) do
+    local b = box.hiddenNames[i]
+    if not b then
+      b = tipButton(box, 100)
+      b:SetScript("OnClick", function(self)
+        local data = row.data
+        local ok, why = ns.Popup.GiveHidden(data.slot, data.item, self.pick, box.rollEdit:GetText())
+        if not ok then
+          ns.Log("Give for " .. data.link .. " to " .. self.pick .. " refused: " .. tostring(why))
+        end
+        if ok then box.rollEdit:SetText("") end
+        PopupFrame.Refresh()
+      end)
+      box.hiddenNames[i] = b
+    end
+    b.pick = e.name
+    b.tip = e.tooltip
+    setButton(b, e.name, e.enabled)
+    local width = b.label:GetStringWidth() + 20
+    if x > 6 and x + width > BOX_WIDTH - 6 then x, lineY = 6, lineY + 24 end
+    b:SetWidth(width)
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT", box, "TOPLEFT", x, -lineY)
+    b:Show()
+    x = x + width + 6
+  end
+  for i = #names + 1, #box.hiddenNames do box.hiddenNames[i]:Hide() end
+  return lineY + 28
+end
+
 -- The roll list box: heading and "N of M rolled", one clickable line per name (the picked one gold
--- with a dot), then the ignored rolls in grey, struck through. Returns the new y.
+-- with a dot), then the ignored rolls in grey, struck through. A tie (#102) puts a warning bar on
+-- top, highlights the tied names and ends with the Re-roll button and the line it posts; hidden
+-- rolls put a warning bar on top, then the names as buttons and the roll box, instead of the list.
+-- Returns the new y.
 local function drawRolls(row, rolls, below)
   local box = row.rollBox
+  local hidden = rolls.hidden
+  local warning = rolls.warning or (hidden and hidden.warning)
+  local y
   box.heading:ClearAllPoints()
-  box.heading:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
-  box.heading:SetText(rolls.heading)
   box.count:ClearAllPoints()
-  box.count:SetPoint("TOPRIGHT", box, "TOPRIGHT", -6, -7)
-  box.count:SetText(rolls.count)
-  local y = 26
-  for i, e in ipairs(rolls.entries) do
+  if warning then
+    box.heading:SetText("")
+    box.count:SetText("")
+    box.warnBar:ClearAllPoints()
+    box.warnBar:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
+    box.warnBar:SetSize(BOX_WIDTH - 12, 22)
+    box.warnBar:Show()
+    box.warn:ClearAllPoints()
+    box.warn:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -10)
+    box.warn:SetText(warning)
+    box.warn:Show()
+    y = 34
+  else
+    box.warnBar:Hide()
+    box.warn:Hide()
+    box.heading:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
+    box.heading:SetText(rolls.heading)
+    box.count:SetPoint("TOPRIGHT", box, "TOPRIGHT", -6, -7)
+    box.count:SetText(rolls.count)
+    y = 26
+  end
+  local listed = hidden and {} or rolls.entries
+  for i, e in ipairs(listed) do
     local line = box.names[i]
     if not line then
       line = tipButton(box, BOX_WIDTH - 12)
@@ -556,6 +644,7 @@ local function drawRolls(row, rolls, below)
     line:ClearAllPoints()
     line:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -y)
     line.background:SetColorTexture(0.04, 0.04, 0.04, 1)
+    if e.tied then line.background:SetColorTexture(0.12, 0.09, 0.02, 1) end
     if e.selected then line.background:SetColorTexture(0.2, 0.15, 0.02, 1) end
     line.dot:SetText(e.selected and "●" or "○")
     line.name:SetText(e.name)
@@ -568,7 +657,7 @@ local function drawRolls(row, rolls, below)
     line:Show()
     y = y + 20
   end
-  for i = #rolls.entries + 1, #box.names do box.names[i]:Hide() end
+  for i = #listed + 1, #box.names do box.names[i]:Hide() end
   for i, ig in ipairs(rolls.ignored) do
     local line = box.ignored[i]
     if not line then
@@ -599,6 +688,35 @@ local function drawRolls(row, rolls, below)
     line.strike:Hide()
   end
   y = boxLine(box, box.unavailable, rolls.unavailable, y + 2)
+  local reroll = rolls.reroll
+  box.reroll:ClearAllPoints()
+  box.rerollHint:ClearAllPoints()
+  if reroll then
+    box.reroll:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -(y + 4))
+    box.reroll.tip = reroll.tooltip
+    setButton(box.reroll, reroll.text, reroll.enabled)
+    box.reroll:Show()
+    y = boxLine(box, box.rerollHint, reroll.hint, y + 30)
+  else
+    box.reroll:Hide()
+    boxLine(box, box.rerollHint, nil, y)
+  end
+  box.rollLabel:ClearAllPoints()
+  box.rollEdit:ClearAllPoints()
+  if hidden then
+    y = drawHiddenNames(row, box, rolls.entries, y)
+    box.rollLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -(y + 4))
+    box.rollLabel:SetText(hidden.label)
+    box.rollLabel:Show()
+    box.rollEdit:SetPoint("TOPLEFT", box, "TOPLEFT", 12 + box.rollLabel:GetStringWidth(), -y)
+    box.rollEdit:Show()
+    y = boxLine(box, box.note, hidden.note, y + 26)
+  else
+    for _, b in ipairs(box.hiddenNames) do b:Hide() end
+    box.rollLabel:Hide()
+    box.rollEdit:Hide()
+    boxLine(box, box.note, nil, y)
+  end
   box:ClearAllPoints()
   box:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
   box:SetSize(BOX_WIDTH, y + 4)
@@ -652,16 +770,22 @@ local function drawRow(row, data, y)
   row.rollHint:Hide()
   row.primary:ClearAllPoints()
   if data.rolls then
+    -- The roll box belongs to one row's item: a new item starts it empty.
+    if row.rollItem ~= data.item then row.rollBox.rollEdit:SetText("") end
+    row.rollItem = data.item
     below = drawRolls(row, data.rolls, below)
-    -- The Give button sits under the list, as the design draws it, with its hint beside it.
+    -- The Give button sits under the list, as the design draws it, with its hint beside it. Hidden
+    -- rolls have none: a name click awards.
     row.primary:SetWidth(240)
     row.primary:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
     row.rollHint:ClearAllPoints()
     row.rollHint:SetPoint("LEFT", row.primary, "RIGHT", 8, 0)
-    row.rollHint:SetText(data.rolls.hint)
-    row.rollHint:Show()
-    below = below + 26
+    row.rollHint:SetText(data.rolls.hint or "")
+    if data.rolls.hint then row.rollHint:Show() else row.rollHint:Hide() end
+    if not data.rolls.hidden then below = below + 26 end
   else
+    row.rollItem = nil
+    row.rollBox.rollEdit:SetText("")
     row.primary:SetWidth(150)
     row.primary:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -2)
   end
@@ -678,7 +802,7 @@ local function drawRow(row, data, y)
   row.data = data
   for i, button in ipairs({ row.primary, row.db }) do
     local b = data.buttons[i]
-    if b then
+    if b and not b.hidden then
       setButton(button, b.text, b.enabled)
       button:Show()
     else
