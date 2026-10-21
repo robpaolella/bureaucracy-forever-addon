@@ -526,6 +526,17 @@ describe("the Awards tab's not confirmed choices", function()
       assert.are.same({ true, false, false }, enabled(row.choices))
     end)
 
+    it("for a player no longer the loot master, the row then greyed", function()
+      local tab = unconfirmed()
+      drop()
+      wow.state.lootMethod = { "master", nil, 2 }
+      unchanged(function() click(rowOf(tab, "Ana Vale").choices[1]) end)
+      local row = rowOf(tab, "Ana Vale")
+      assert.is_nil(row.choices)
+      assert.are.equal(3, #shownButtons(tab))
+      assert.are.equal("Only the loot master can hand items out.", row.refusal:GetText())
+    end)
+
     it("for an award settled meanwhile, and the row redraws as settled", function()
       local tab = unconfirmed()
       local key = keyOf("Ana Vale")

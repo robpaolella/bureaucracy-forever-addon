@@ -555,6 +555,9 @@ function Popup.Refused(key, why)
   refusals[key] = why and (REFUSALS[why] or ("It couldn't be done (" .. tostring(why) .. ").")) or nil
 end
 
+-- Why the last choice on the award was refused, in the row's words, or nil.
+function Popup.Refusal(key) return refusals[key] end
+
 -- Posts the operation's chat line, built from data, in raid (or party) chat. With no data (the
 -- record wasn't saved; why says why) or a line that can't be built, nothing is posted: the log
 -- says why under `what`, and the officer is told `told`. Returns true once posted.

@@ -69,8 +69,9 @@ local function byTime(a, b) return a.at < b.at end
 
 -- What the tab shows: { empty = true } with nothing to list; otherwise { summary, banner (for
 -- another officer), readOnly, groups = { { heading, rows } }, practice = { heading, rows } or nil }.
--- A row has its award's `key`. A not confirmed row has `notConfirmed`, and for the loot master
--- `choices` (Popup.Choices); a voided one `voided` and its `note`.
+-- A row has its award's `key`. A not confirmed row has `notConfirmed`, `refusal` (why the last
+-- choice was refused, even for a player no longer loot master), and for the loot master `choices`
+-- (Popup.Choices); a voided one `voided` and its `note`.
 function UI.AwardsView()
   local raidId = ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
@@ -79,6 +80,7 @@ function UI.AwardsView()
   for _, award in ipairs(ns.Raids.Awards(raidId)) do
     local r = row(snapshot, award)
     if me and r.notConfirmed then r.choices = ns.Popup.Choices(r.key) end
+    if r.notConfirmed then r.refusal = ns.Popup.Refusal(r.key) end
     if award.practice then practice[#practice + 1] = r else rows[#rows + 1] = r end
   end
   local view = { readOnly = not me, banner = name and not me and BANNER:format(plain(name)) or nil }
@@ -263,9 +265,9 @@ local function drawRow(r, y, used, practice)
     end
     y = y + BUTTON_HEIGHT + ROW_GAP
   end
-  if choices and choices.refusal then
+  if r.refusal then
     used.refusals = used.refusals + 1
-    y = refusal(used.refusals, y, choices.refusal)
+    y = refusal(used.refusals, y, r.refusal)
     line.refusal = tab.refusals[used.refusals]
   end
   return y
