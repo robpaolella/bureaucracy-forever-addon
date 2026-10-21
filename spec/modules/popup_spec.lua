@@ -1164,6 +1164,112 @@ describe("Popup", function()
           assert.is_truthy(wow.printed[#wow.printed]:find("got " .. link(1) .. " after all", 1, true))
         end)
       end)
+
+      describe("in practice mode (#17)", function()
+        local function practice() wow.slash("/bf practice") end
+        local function practiceOps()
+          local marks = {}
+          for i, op in ipairs(ns.Records.Ops("raid00001")) do marks[i] = op.practice or false end
+          return marks
+        end
+
+        it("marks the award and its follow-ups practice, and its line [Practice]", function()
+          raid()
+          practice()
+          drop({ { id = 1 } })
+          local attempt = assert(give(1))
+          assert.is_true(ns.Records.Get(attempt.awardKey).practice)
+          assert.are.equal("[Practice] " .. link(1) .. " → Ashla Brightwater (hard reserve) <BF1P;A;SA0001;"
+            .. attempt.awardKey .. ";1;ifron;HR;;Ashla Brightwater>", wow.sent[1].text)
+          confirm(1, "Ashla Brightwater")
+          assert.are.same({ true, true }, practiceOps())
+        end)
+
+        it("marks a D/B award practice", function()
+          raid()
+          practice()
+          drop({ { id = 1 } })
+          assert.is_true(ns.Popup.SetDBPick("Doran Vale"))
+          local attempt = assert(click(ns.Popup.GiveDB, 1, 1, "Doran Vale"))
+          assert.is_true(ns.Records.Get(attempt.awardKey).practice)
+          assert.is_truthy(wow.sent[1].text:find("^%[Practice%] .*<BF1P;A;SA0001;"))
+        end)
+
+        it("marks nothing and posts no [Practice] with it off", function()
+          raid()
+          drop({ { id = 1 }, { id = 2 } })
+          assert.is_false(ns.Popup.Build().practice)
+          assert.is_truthy(give(1))
+          assert.is_true(ns.Popup.SetDBPick("Doran Vale"))
+          assert.is_truthy(click(ns.Popup.GiveDB, 2, 2, "Doran Vale"))
+          assert.are.same({ false, false }, practiceOps())
+          for _, sent in ipairs(wow.sent) do
+            assert.is_nil(sent.text:find("Practice", 1, true))
+            assert.is_nil(sent.text:find("BF1P", 1, true))
+          end
+        end)
+
+        it("marks a not confirmed practice award's choices practice", function()
+          raid({ reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } } })
+          practice()
+          drop({ { id = 1 } })
+          local key = assert(give(1)).awardKey
+          wow.advance(ns.Tracking.confirmWait)
+          local attempt = assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
+          assert.is_true(ns.Records.Get(attempt.awardKey).practice)
+          assert.is_truthy(wow.sent[2].text:find("^%[Practice%] Correction: .*<BF1P;R;"))
+          wow.advance(ns.Tracking.confirmWait)
+          assert.is_truthy(click(ns.Popup.NotHandedOut, attempt.awardKey))
+          assert.is_truthy(wow.sent[3].text:find("^%[Practice%] Undo: .*<BF1P;V;"))
+          assert.are.same({ true, true, true, true, true }, practiceOps())
+        end)
+
+        it("applies a switch to the next hand-out only: an award made keeps its mark", function()
+          raid()
+          practice()
+          drop({ { id = 1 }, { id = 2 } })
+          local first = assert(give(1))
+          practice() -- off, with the pop-up open
+          assert.is_false(ns.Popup.Build().practice)
+          local second = assert(give(2))
+          assert.is_true(ns.Records.Get(first.awardKey).practice)
+          assert.is_nil(ns.Records.Get(second.awardKey).practice)
+          assert.is_nil(wow.sent[2].text:find("Practice", 1, true))
+          -- The practice award's undo stays practice, and the real one's real, whichever way it is now.
+          wow.advance(ns.Tracking.confirmWait)
+          practice() -- on again
+          assert.is_truthy(click(ns.Popup.NotHandedOut, second.awardKey))
+          assert.is_truthy(wow.sent[3].text:find("^Undo: .*<BF1;V;"))
+          practice() -- off
+          assert.is_truthy(click(ns.Popup.NotHandedOut, first.awardKey))
+          assert.is_truthy(wow.sent[4].text:find("^%[Practice%] Undo: .*<BF1P;V;"))
+        end)
+
+        it("leaves its awards out of the copy-out for the site", function()
+          raid()
+          practice()
+          drop({ { id = 1 }, { id = 2 } })
+          local first = assert(give(1))
+          confirm(1, "Ashla Brightwater")
+          assert.are.same({ nil, "Nothing to copy: this raid has no awards to send." },
+            { ns.Sync.CopyOut("raid00001") })
+          practice()
+          local second = assert(give(2))
+          local text, count = ns.Sync.CopyOut("raid00001")
+          assert.are.equal(1, count)
+          assert.is_truthy(text:find(second.awardKey, 1, true))
+          assert.is_nil(text:find(first.awardKey, 1, true))
+        end)
+
+        it("puts [Practice] in the title", function()
+          raid()
+          drop({ { id = 1 } })
+          assert.are.equal("Loot · Lucifron", ns.Popup.Build().title)
+          practice()
+          local m = ns.Popup.Build()
+          assert.are.same({ true, "[Practice] Loot · Lucifron" }, { m.practice, m.title })
+        end)
+      end)
     end)
   end)
 

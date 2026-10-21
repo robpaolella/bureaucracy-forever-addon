@@ -23,8 +23,8 @@ local early = {} -- rolls seen while none was reading, kept to show with the nex
 
 local function keyOf(slot, item) return slot .. ":" .. tostring(item) end
 
--- The practice-mode hook for #17: it replaces this function. Until then there is no practice mode.
-function Rolls.IsPractice() return false end
+-- Whether practice mode is on (#17): the calls then start with "[Practice] ".
+function Rolls.IsPractice() return ns.Practice() end
 
 local function contains(list, name)
   for _, n in ipairs(list) do
