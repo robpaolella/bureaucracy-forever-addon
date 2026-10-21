@@ -762,4 +762,160 @@ describe("PopupFrame", function()
       assert.are.equal("Call roll (2)", shownRows()[1].primary.label:GetText())
     end)
   end)
+  describe("ties and hidden rolls (#102)", function()
+    local function click(button)
+      wow.click(function() button.scripts.OnClick(button) end)
+    end
+
+    local function roll(name, n)
+      wow.fire("CHAT_MSG_SYSTEM", name .. " rolls " .. n .. " (1-100)")
+    end
+
+    local function called(id)
+      setup({ code = "SA0001", reserves = { [1] = { holder("Ashla Brightwater", "HR"),
+        holder("Doran Vale", "HR"), holder("Mirel Stone", "HR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = id or 1 } })
+      click(shownRows()[1].primary)
+    end
+
+    local function tie()
+      called()
+      roll("Doran Vale", 87)
+      roll("Mirel Stone", 87)
+      roll("Ashla Brightwater", 40)
+    end
+
+    local function hidden(id)
+      called(id)
+      wow.fire("CHAT_MSG_SYSTEM", wow.secret)
+      return shownRows()[1].rollBox
+    end
+
+    it("draws a tie: the warning bar, the tied names, Re-roll the tie and its line (roll-tie)", function()
+      tie()
+      local box = shownRows()[1].rollBox
+      assert.are.equal("Tie at 87: Doran Vale and Mirel Stone", box.warn:GetText())
+      assert.is_true(box.warn:IsShown())
+      assert.are.same({ "Doran Vale", "Mirel Stone", "Ashla Brightwater" },
+        { box.names[1].name:GetText(), box.names[2].name:GetText(), box.names[3].name:GetText() })
+      assert.are.same({ "Re-roll the tie", true }, { box.reroll.label:GetText(), box.reroll:IsEnabled() })
+      local hint = box.rerollHint:GetText()
+      assert.is_truthy(hint:find("Doran Vale and Mirel Stone, roll again", 1, true))
+      assert.are.equal("Posts: Tie for", hint:sub(1, 14))
+      assert.are.same({ "Give", false },
+        { shownRows()[1].primary.label:GetText(), shownRows()[1].primary:IsEnabled() })
+    end)
+
+    it("re-rolls the tie on a click, and the list returns to the roll-called list", function()
+      tie()
+      local sent = #wow.sent
+      click(shownRows()[1].rollBox.reroll)
+      assert.are.equal(sent + 1, #wow.sent)
+      assert.is_truthy(wow.sent[#wow.sent].text:find("Tie for", 1, true))
+      local box = shownRows()[1].rollBox
+      assert.is_false(box.warn:IsShown())
+      assert.is_false(box.reroll:IsShown())
+      assert.are.equal("Rolls (hard reserve holders only)", box.heading:GetText())
+      assert.are.same({ "Doran Vale", "waiting" },
+        { box.names[1].name:GetText(), box.names[1].roll:GetText() })
+      roll("Doran Vale", 70)
+      roll("Mirel Stone", 20)
+      assert.are.equal("Give to Doran Vale (70)", shownRows()[1].primary.label:GetText())
+    end)
+
+    it("keeps the list as it was when Rolls refuses the re-roll, and logs it", function()
+      tie()
+      local reroll = ns.Rolls.Reroll
+      ns.Rolls.Reroll = function() return nil, "no tie" end
+      local before, sent = shownRows()[1].rollBox.warn:GetText(), #wow.sent
+      click(shownRows()[1].rollBox.reroll)
+      ns.Rolls.Reroll = reroll
+      assert.are.equal(sent, #wow.sent)
+      assert.are.equal(before, shownRows()[1].rollBox.warn:GetText())
+      assert.is_true(shownRows()[1].rollBox.reroll:IsShown())
+      assert.is_truthy(ns.log[#ns.log].text:find(" refused: no tie", 1, true))
+      assert.is_truthy(ns.log[#ns.log].text:find("Re-roll for", 1, true))
+    end)
+
+    it("disables Re-roll the tie in a boss fight, with the tooltip", function()
+      tie()
+      wow.bossFight(true)
+      local reroll = shownRows()[1].rollBox.reroll
+      assert.is_false(reroll:IsEnabled())
+      assert.are.equal("Chat is locked until the fight ends", reroll.tip)
+      local sent = #wow.sent
+      click(reroll)
+      assert.are.equal(sent, #wow.sent)
+    end)
+
+    it("draws hidden rolls: the warning, the names as buttons and the roll box (roll-hidden)", function()
+      local box = hidden()
+      assert.are.equal("The game is hiding rolls from add-ons right now."
+        .. " Watch chat, then click the winner.", box.warn:GetText())
+      assert.are.same({ "Ashla Brightwater", "Doran Vale", "Mirel Stone" },
+        { box.hiddenNames[1].label:GetText(), box.hiddenNames[2].label:GetText(),
+          box.hiddenNames[3].label:GetText() })
+      assert.is_true(box.hiddenNames[1]:IsEnabled())
+      assert.are.equal("Their roll (optional):", box.rollLabel:GetText())
+      assert.is_true(box.rollEdit:IsShown())
+      local row = shownRows()[1]
+      assert.is_false(row.primary:IsShown()) -- no Give button
+      assert.is_true(row.db:IsShown())
+      assert.is_false(box.names[1] and box.names[1]:IsShown() or false)
+      assert.is_false(row.rollHint:IsShown())
+    end)
+
+    it("awards to a clicked name with the typed roll, and empties the box", function()
+      local box = hidden()
+      box.rollEdit:SetText("64")
+      click(box.hiddenNames[3])
+      assert.are.equal(1, #wow.gives)
+      local award = ns.Records.Ops("raid00001")[1]
+      assert.are.same({ "Mirel Stone", 64, "HR" }, { award.char, award.roll, award.method })
+      assert.are.equal("", shownRows()[1].rollBox.rollEdit:GetText())
+    end)
+
+    it("refuses a bad roll with a message in the row and nothing handed out", function()
+      local box = hidden()
+      box.rollEdit:SetText("101")
+      local sent = #wow.sent
+      click(box.hiddenNames[1])
+      assert.are.same({}, wow.gives)
+      assert.are.equal(sent, #wow.sent)
+      assert.are.equal("Their roll must be a whole number from 1 to 100.",
+        shownRows()[1].rollBox.note:GetText())
+      assert.are.equal("101", shownRows()[1].rollBox.rollEdit:GetText())
+    end)
+
+    it("refuses an open roll with the box empty, and says so", function()
+      local box = hidden(3)
+      assert.are.equal("Their roll (needed for an open roll):", box.rollLabel:GetText())
+      click(box.hiddenNames[1])
+      assert.are.same({}, wow.gives)
+      assert.are.equal("Type their roll first: an open roll needs it.",
+        shownRows()[1].rollBox.note:GetText())
+    end)
+
+    it("disables the name buttons in a boss fight", function()
+      local box = hidden()
+      wow.bossFight(true)
+      for i = 1, 3 do
+        assert.is_false(box.hiddenNames[i]:IsEnabled())
+        assert.are.equal("Chat is locked until the fight ends", box.hiddenNames[i].tip)
+      end
+      click(box.hiddenNames[1])
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("starts another item's roll box empty", function()
+      local box = hidden()
+      box.rollEdit:SetText("77")
+      wow.closeLoot()
+      called(2)
+      wow.fire("CHAT_MSG_SYSTEM", wow.secret)
+      assert.are.equal("", shownRows()[1].rollBox.rollEdit:GetText())
+    end)
+  end)
 end)
