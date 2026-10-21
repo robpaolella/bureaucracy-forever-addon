@@ -947,6 +947,11 @@ local function discard()
   confirm("Discard " .. WHITE:format(plural(n, "award", "awards")) .. " that "
     .. agree(n, "isn't", "aren't") .. " linked to a raid?",
     "They were never sent to the site. This can't be undone.", "Discard", "Cancel", function()
+      -- An award made while the question was open was not asked about: ask again.
+      if #ns.Raids.NoRaidAwards() ~= n then
+        UI.RefreshSync()
+        return discard()
+      end
       ns.Records.Discard()
       UI.RefreshSync()
     end)
@@ -963,7 +968,7 @@ local function drawNoRaid(y, raids, status)
   for i, award in ipairs(held) do
     local values = {
       at = GREY:format(clock(award.at)), boss = bossName(raids, award.boss), item = itemText(award.item),
-      char = plain(award.char), method = METHODS[award.method] or plain(tostring(award.method)),
+      char = award.char and plain(award.char) or "", method = METHODS[award.method] or plain(tostring(award.method)),
       roll = award.roll and tostring(award.roll) or "",
     }
     for column, value in pairs(values) do
