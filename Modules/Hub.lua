@@ -69,7 +69,7 @@ end
 
 -- Incomplete O messages, by sender and msgid, and each sender's in the order they started.
 -- An entry: { sender, msgid, total, raid, author, pieces = { [n] = piece }, count }.
-local partials, started, done = {}, {}, {}
+local partials, started = {}, {}
 
 local function forget(entry)
   partials[entry.sender .. ";" .. entry.msgid] = nil
@@ -149,15 +149,11 @@ local function apply(op, raidId, author)
   end
 end
 
--- A whole message is kept for 40 seconds, so a late copy of one of its chunks (a resend
--- crossing in flight) changes nothing; a different chunk under its msgid is a new message.
+-- A whole message is forgotten: a late copy of one of its chunks starts a new message, which
+-- Records replays once whole (an id held with the same payload changes nothing), so a msgid used
+-- again for another operation still arrives.
 local function complete(entry, raidId)
   forget(entry)
-  local key = entry.sender .. ";" .. entry.msgid
-  done[key] = entry
-  C_Timer.After(RETRY_EVERY * (RETRIES + 1), function()
-    if done[key] == entry then done[key] = nil end
-  end)
   local op = ns.OpText.Decode(table.concat(entry.pieces, "", 1, entry.total))
   if not op then
     return ns.Log("Sync: dropped " .. entry.sender .. "'s message " .. entry.msgid .. " (malformed).")
@@ -178,11 +174,6 @@ Hub.Register("O", function(body, sender)
       .. (notice or "not loaded."))
   end
   local key = sender .. ";" .. chunk.msgid
-  local whole = done[key]
-  if whole and whole.total == chunk.total and whole.raid == chunk.raid
-    and whole.pieces[chunk.n] == chunk.piece then
-    return
-  end
   local entry = partials[key]
   if not entry then
     entry = { sender = sender, msgid = chunk.msgid, total = chunk.total, raid = chunk.raid,
