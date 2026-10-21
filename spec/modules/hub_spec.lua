@@ -926,3 +926,145 @@ describe("Hub officers and the selection", function()
     end)
   end)
 end)
+
+-- Three officers' add-ons in one 40-player raid. The stand-in runs one add-on at a time, so each
+-- officer's turn is a session on their own saved data: it takes in what the others sent, every
+-- message twice (all in reverse order, then in order), then makes its own operations and sends them.
+describe("Hub across a whole raid", function()
+  local OFFICERS = { ZOE, "Rae Quill", BO }
+  local FIRST = { "Ana", "Søren", "Ægir", "Chloë", "Íñigo", "Maël", "Åsa", "Björk", "José", "Ðana" }
+  local LAST = { "Vale", "Brûlé", "Østby", "Straße" }
+  local players, dbs, inbox, ns
+
+  local function turn(officer, make)
+    ns = wow.start({ saved = { BureaucracyForeverDB = dbs[officer] } })
+    wow.state.player = officer
+    if not dbs[officer] then
+      ns.Raids.Load(assert(ns.Snapshot.Validate(snapshot(RAID), "0.1.0")), "pasted")
+      assert.is_true(ns.Selection.ChooseRaid(RAID, true))
+    end
+    wow.state.group, wow.state.groupIsRaid = players, true
+    local messages = inbox[officer]
+    local function deliver(m) wow.fire("CHAT_MSG_ADDON", "BFLOOT1", m[2], "RAID", m[1]) end
+    for i = #messages, 1, -1 do deliver(messages[i]) end
+    for _, m in ipairs(messages) do deliver(m) end
+    inbox[officer] = {}
+    for _, op in ipairs(make and make(ns.Records) or {}) do assert.is_true(ns.Hub.SendOp(op, RAID)) end
+    for _ = 1, 120 do wow.advance(1) end
+    for _, message in ipairs(wow.addonMessages) do
+      -- Nothing was missing, so no one asked again; every message went to the whole raid.
+      assert.are.same({ "BFLOOT1", "RAID" }, { message.prefix, message.channel })
+      for _, other in ipairs(OFFICERS) do
+        if other ~= officer then table.insert(inbox[other], { officer, message.text }) end
+      end
+    end
+    -- No officer saw a conflict or a notice.
+    assert.are.same({}, wow.printed)
+    dbs[officer] = BureaucracyForeverDB
+    return ns
+  end
+
+  -- Awards to players first to last, through 40, by the officer whose turn it is.
+  local function awards(from, to)
+    return function(Records)
+      local ops = {}
+      for i = from, to do
+        -- Every fifth award has a note long enough to need two messages.
+        local note = i % 5 == 0 and string.rep("Trés bien; ", 14) or nil
+        ops[#ops + 1] = assert(Records.Award({ boss = "lb_lucifron", item = 16800 + i, char = players[i],
+          user = "u_" .. i, method = i % 2 == 0 and "SR" or "HR", roll = i, note = note }))
+      end
+      return ops
+    end
+  end
+
+  local function keyOf(Records, char)
+    for _, op in ipairs(Records.Ops(RAID)) do
+      if op.type == "award" and op.char == char then return op.id end
+    end
+  end
+
+  -- What an add-on holds, by id, in no particular order.
+  local function held(addon)
+    local ops, records = {}, {}
+    for _, op in ipairs(addon.Records.Ops(RAID)) do
+      assert.is_nil(ops[op.id], "held twice: " .. op.id)
+      ops[op.id] = op
+    end
+    for _, record in ipairs(addon.Raids.Awards(RAID)) do
+      assert.is_nil(records[record.key], "held twice: " .. record.key)
+      records[record.key] = record
+    end
+    return ops, records
+  end
+
+  before_each(function()
+    players, dbs, inbox = {}, {}, {}
+    for _, officer in ipairs(OFFICERS) do inbox[officer] = {} end
+    for i = 1, 40 - #OFFICERS do
+      players[i] = FIRST[(i - 1) % #FIRST + 1] .. " " .. LAST[math.floor((i - 1) / #FIRST) + 1]
+    end
+    for _, officer in ipairs(OFFICERS) do players[#players + 1] = officer end
+  end)
+
+  it("syncs every award and void between three add-ons, with nothing lost or doubled", function()
+    assert.are.equal(40, #players)
+    turn(ZOE, awards(1, 14))
+    turn("Rae Quill", awards(15, 27))
+    -- A name outside the group sends too, among the officers' messages.
+    local stranger = turn(BO, awards(28, 40))
+    for _, body in ipairs(stranger.Sync.EncodeOp({ type = "void", id = "vd-stranger1",
+      key = keyOf(stranger.Records, players[1]), at = 1792001300 }, "SA0001", "Stray Wolf")) do
+      table.insert(inbox[ZOE], { "Stray Wolf", body })
+    end
+    -- Then each officer voids, replaces or confirms awards the others made.
+    local zoe = turn(ZOE, function(Records)
+      return {
+        assert(Records.Void(keyOf(Records, players[15]), { reason = "wrong winner" })),
+        assert(Records.Confirm(keyOf(Records, players[28]))),
+        (assert(Records.Replace(keyOf(Records, players[29]), { boss = "lb_lucifron", item = 16829,
+          char = players[30], user = "u_30", method = "SR", roll = 77 }))),
+      }
+    end)
+    local logged = false
+    for _, entry in ipairs(zoe.log) do
+      logged = logged or entry.text:find("Stray Wolf, who isn't in the group", 1, true) ~= nil
+    end
+    assert.is_true(logged)
+    turn("Rae Quill", function(Records)
+      return {
+        assert(Records.Void(keyOf(Records, players[2]), { reason = "traded back" })),
+        (assert(Records.NotConfirmed(keyOf(Records, players[3])))),
+      }
+    end)
+    turn(BO, function(Records)
+      return { (assert(Records.Void(keyOf(Records, players[16])))) }
+    end)
+    -- Last turns take in what is still waiting.
+    local addons = { turn(ZOE), turn("Rae Quill"), turn(BO) }
+
+    local ops, records = held(addons[1])
+    local count = 0
+    for _ in pairs(ops) do count = count + 1 end
+    -- 40 awards, 3 voids, a confirm, a not-confirmed and a replace (its new award inside it).
+    assert.are.equal(46, count)
+    for i = 2, 3 do
+      local others, otherRecords = held(addons[i])
+      assert.are.same(ops, others)
+      assert.are.same(records, otherRecords)
+    end
+
+    local Records = addons[1].Records
+    local function record(i) return records[keyOf(Records, players[i])] end
+    for i = 1, 40 do
+      assert.are.equal(i <= 14 and ZOE or i <= 27 and "Rae Quill" or BO, record(i).sender)
+    end
+    assert.is_nil(record(1).voided)
+    assert.are.same({ true, true, true }, { record(2).voided, record(15).voided, record(16).voided })
+    assert.are.same({ "not-confirmed", "confirmed" }, { record(3).state, record(28).state })
+    assert.is_true(record(29).voided)
+    local replacement = records[record(29).replacedBy]
+    assert.are.same({ players[30], ZOE }, { replacement.char, replacement.sender })
+    assert.is_nil(ops["vd-stranger1"])
+  end)
+end)
