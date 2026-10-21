@@ -329,6 +329,18 @@ function Records.Attach(raidId)
   return #movedAwards
 end
 
+-- Throws away every no-raid award and operation, and the site voids waiting for those awards'
+-- keys (spec 4.4). They were never sent, so nothing reaches the site; it works while not a guild
+-- run too. Returns how many awards were discarded.
+function Records.Discard()
+  local awards = lists(nil)
+  for _, award in ipairs(awards) do
+    if ns.db.siteVoids then ns.db.siteVoids[award.key] = nil end
+  end
+  ns.db.noRaid, ns.db.noRaidOps = nil, nil
+  return #awards
+end
+
 local SITE_FIELDS = { "boss", "item", "char", "user", "method", "roll" }
 local SITE_STATES = { confirmed = true, ["not-confirmed"] = true }
 
