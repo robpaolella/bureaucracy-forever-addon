@@ -54,6 +54,8 @@ describe("the raid question", function()
     end
     wow.fire("PLAYER_ENTERING_WORLD", true, false)
     for _, name in ipairs(options.users or {}) do receive("P;0", name) end
+    -- The login's P and H messages go out, paced, before the session goes on.
+    for _ = 1, 3 do wow.advance(1) end
   end
 
   -- A loading screen into instance, then the wait (5 seconds unless given).

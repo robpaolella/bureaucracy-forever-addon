@@ -525,6 +525,8 @@ end)
 describe("Hub officers and the selection", function()
   local ns, Hub, Selection
   local CY = "Cy Dunn"
+  -- What this add-on holds for the loaded raid: nothing yet (#20).
+  local HELD = "H;SA0001;1;0;00000000"
 
   local function logged(text)
     for _, entry in ipairs(ns.log) do
@@ -574,13 +576,13 @@ describe("Hub officers and the selection", function()
   describe("P", function()
     it("is broadcast at login in a group", function()
       wow.fire("PLAYER_ENTERING_WORLD", true, false)
-      assert.are.same({ { "P;1", "RAID" } }, sent())
+      assert.are.same({ { "P;1", "RAID" }, { HELD, "RAID" } }, sent())
     end)
 
     it("is broadcast on a /reload in a group, to a party in a party", function()
       wow.state.groupIsRaid = false
       wow.fire("PLAYER_ENTERING_WORLD", false, true)
-      assert.are.same({ { "P;1", "PARTY" } }, sent())
+      assert.are.same({ { "P;1", "PARTY" }, { HELD, "PARTY" } }, sent())
     end)
 
     it("is broadcast on joining a group, once, and not on zoning", function()
@@ -593,26 +595,28 @@ describe("Hub officers and the selection", function()
       wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
       wow.fire("GROUP_ROSTER_UPDATE")
       wow.fire("PLAYER_ENTERING_WORLD", false, false)
-      assert.are.same({ { "P;1", "PARTY" } }, sent())
+      -- The H waits its turn in the queue, and goes to the raid the party has become by then.
+      assert.are.same({ { "P;1", "PARTY" }, { HELD, "RAID" } }, sent())
     end)
 
-    it("from a new name is answered with a whispered P;0 and the held selection, as it was made", function()
+    it("from a new name is answered with a whispered P;0, the held selection, as it was made, and an H",
+      function()
       assert.is_true(Selection.Apply("SA0001", 1792000100, BO))
       receive("P;1", ZOE)
-      assert.are.same({ { "P;0", "WHISPER", ZOE }, { "S;SA0001;1792000100;Bo Marsh", "WHISPER", ZOE } },
-        sent())
+      assert.are.same({ { "P;0", "WHISPER", ZOE }, { "S;SA0001;1792000100;Bo Marsh", "WHISPER", ZOE },
+        { HELD, "WHISPER", ZOE } }, sent())
       assert.are.same({ ZOE }, Hub.Roster())
     end)
 
-    it("is answered with P;0 alone when no raid is chosen yet", function()
+    it("is answered with no selection when no raid is chosen yet", function()
       receive("P;1", ZOE .. "-Realm")
-      assert.are.same({ { "P;0", "WHISPER", ZOE } }, sent())
+      assert.are.same({ { "P;0", "WHISPER", ZOE }, { HELD, "WHISPER", ZOE } }, sent())
     end)
 
     it("from a name already seen is answered again, for an officer who reloaded", function()
       receive("P;1", ZOE)
       receive("P;1", ZOE)
-      assert.are.equal(2, #sent())
+      assert.are.equal(4, #sent())
       assert.are.same({ ZOE }, Hub.Roster())
     end)
 
@@ -854,8 +858,9 @@ describe("Hub officers and the selection", function()
       wow.bossFight(false)
       for _ = 1, 110 do wow.advance(1) end
       local last = {}
-      for i = #wow.addonMessages - 2, #wow.addonMessages do last[#last + 1] = wow.addonMessages[i].text end
-      assert.are.same({ "S;-;1792000000;Rae Quill", "P;0", "S;-;1792000000;Rae Quill" }, last)
+      for i = #wow.addonMessages - 3, #wow.addonMessages do last[#last + 1] = wow.addonMessages[i].text end
+      assert.are.same({ "S;-;1792000000;Rae Quill", "P;0", "S;-;1792000000;Rae Quill",
+        HELD }, last)
     end)
 
     it("and P keep flowing while not a guild run", function()
@@ -864,7 +869,7 @@ describe("Hub officers and the selection", function()
       assert.is_true(Selection.IsQuiet())
       receive("P;1", ZOE)
       assert.are.same({ { "S;-;1792000100;Rae Quill", "RAID" }, { "P;0", "WHISPER", ZOE },
-        { "S;-;1792000100;Rae Quill", "WHISPER", ZOE } }, sent())
+        { "S;-;1792000100;Rae Quill", "WHISPER", ZOE }, { HELD, "WHISPER", ZOE } }, sent())
       receive("S;SA0001;1792000200;Zoé Brûlé", ZOE)
       assert.are.same({ "chosen", RAID }, { status()[1], status()[2] })
     end)
@@ -882,7 +887,8 @@ describe("Hub officers and the selection", function()
       assert.are.same({ "none" }, status())
       wow.state.group, wow.state.groupIsRaid = { "Rae Quill", BO }, false
       wow.fire("GROUP_ROSTER_UPDATE")
-      assert.are.same({ "P;1", "PARTY" }, sent()[3])
+      local list = sent()
+      assert.are.same({ { "P;1", "PARTY" }, { HELD, "PARTY" } }, { list[4], list[5] })
       assert.are.same({ "none" }, status())
     end)
 
@@ -893,8 +899,8 @@ describe("Hub officers and the selection", function()
       wow.fire("GROUP_ROSTER_UPDATE")
       wow.state.group, wow.state.groupIsRaid = { "Rae Quill", BO }, true
       wow.fire("GROUP_ROSTER_UPDATE")
-      assert.are.same({ { "P;1", "RAID" }, { "P;1", "RAID" } }, sent())
-      assert.is_true(logged("not in a group, so 1 messages weren't sent"))
+      assert.are.same({ { "P;1", "RAID" }, { "P;1", "RAID" }, { HELD, "RAID" } }, sent())
+      assert.is_true(logged("not in a group, so 2 messages weren't sent"))
     end)
 
     it("clears a saved selection at login outside a group", function()
@@ -922,7 +928,7 @@ describe("Hub officers and the selection", function()
       start("Rae Quill", { "Rae Quill", ZOE }, { BureaucracyForeverDB = copy(ns.db) })
       wow.fire("PLAYER_ENTERING_WORLD", true, false)
       assert.are.same(held, status())
-      assert.are.same({ { "P;1", "RAID" } }, sent())
+      assert.are.same({ { "P;1", "RAID" }, { HELD, "RAID" } }, sent())
     end)
   end)
 end)
@@ -1074,5 +1080,301 @@ describe("Hub across a whole raid", function()
     local replacement = records[record(29).replacedBy]
     assert.are.same({ players[30], ZOE }, { replacement.char, replacement.sender })
     assert.is_nil(ops["vd-stranger1"])
+  end)
+end)
+
+-- Catch-up (spec 10.2, 10.4; #20): H says what an add-on holds, a differing H is answered with a C
+-- of every id held, and a whole C is handed to Hub.onCatchUp with the ids its sender lacks.
+describe("Hub catch-up", function()
+  local ns, Hub, Sync
+
+  local function receive(body, sender, channel)
+    wow.fire("CHAT_MSG_ADDON", "BFLOOT1", body, channel or "RAID", sender)
+  end
+
+  -- What the add-on sent, once the paced queue has run: { text, channel, target } each.
+  local function sent()
+    for _ = 1, 20 do wow.advance(1) end
+    local list = {}
+    for _, m in ipairs(wow.addonMessages) do list[#list + 1] = { m.text, m.channel, m.target } end
+    return list
+  end
+
+  local function logged(text)
+    for _, entry in ipairs(ns.log) do
+      if entry.text:find(text, 1, true) then return true end
+    end
+    return false
+  end
+
+  local function load(id)
+    ns.Raids.Load(assert(ns.Snapshot.Validate(snapshot(id), "0.1.0")), "pasted")
+  end
+
+  -- An award held for the raid, made on this add-on.
+  local function award(id, raidId)
+    assert(ns.Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale", user = "u_ana",
+      method = "HR", id = id, raid = raidId or RAID }))
+  end
+
+  local function held(ids, code)
+    return "H;" .. (code or "SA0001") .. ";1;" .. #ids .. ";" .. ns.Digest.Of(ids)
+  end
+
+  -- The ids of the C bodies in list, joined, after checking they make one whole request to target.
+  local function requested(list, target)
+    local pieces, reqid = {}, nil
+    for n, m in ipairs(list) do
+      assert.are.same({ "WHISPER", target }, { m[2], m[3] })
+      local chunk = assert(Sync.ParseRequest(m[1]))
+      reqid = reqid or chunk.msgid
+      assert.are.same({ reqid, n, #list, "SA0001" }, { chunk.msgid, chunk.n, chunk.total, chunk.raid })
+      pieces[n] = chunk.piece
+    end
+    return assert(Sync.ParseIds(table.concat(pieces))), reqid
+  end
+
+  local calls
+  before_each(function()
+    ns = wow.start()
+    Hub, Sync = ns.Hub, ns.Sync
+    wow.state.player = "Rae Quill"
+    wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
+    load(RAID)
+    calls = {}
+    local onCatchUp = Hub.onCatchUp
+    Hub.onCatchUp = function(...)
+      calls[#calls + 1] = { ... }
+      return onCatchUp(...)
+    end
+  end)
+
+  describe("H", function()
+    it("is sent at login and on a /reload for every loaded raid, with the count and digest held", function()
+      load(OTHER)
+      award("aw-00000001")
+      award("aw-00000002")
+      wow.fire("PLAYER_ENTERING_WORLD", false, true)
+      assert.are.same({ { "P;1", "RAID" }, { held({ "aw-00000001", "aw-00000002" }), "RAID" },
+        { held({}, "SA0002"), "RAID" } }, sent())
+      assert.are.equal("H;SA0001;1;2;26ad9244", sent()[2][1])
+    end)
+
+    it("is sent on loading a snapshot in a group", function()
+      wow.fire("PLAYER_ENTERING_WORLD", true, false)
+      sent()
+      load(OTHER)
+      assert.are.same({ held({}, "SA0002"), "RAID" }, sent()[3])
+      assert.are.equal(3, #sent())
+    end)
+
+    it("isn't sent on loading a snapshot outside a group, or before login, which sends it once", function()
+      wow.state.group, wow.state.groupIsRaid = nil, false
+      wow.fire("PLAYER_ENTERING_WORLD", true, false)
+      load(OTHER)
+      assert.are.same({}, sent())
+      ns = wow.start({ saved = { BureaucracyForeverDB = BureaucracyForeverDB } })
+      wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE }, false
+      load(OTHER)
+      assert.are.same({}, sent())
+      wow.fire("PLAYER_ENTERING_WORLD", false, true)
+      assert.are.same({ { "P;1", "PARTY" }, { held({}), "PARTY" }, { held({}, "SA0002"), "PARTY" } }, sent())
+    end)
+
+    it("is sent on joining a group", function()
+      wow.state.group, wow.state.groupIsRaid = nil, false
+      wow.fire("PLAYER_ENTERING_WORLD", true, false)
+      wow.state.group = { "Rae Quill", ZOE }
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same({ { "P;1", "PARTY" }, { held({}), "PARTY" } }, sent())
+    end)
+
+    it("that differs is answered with a whispered C of every id held, chunked", function()
+      local ids = {}
+      for i = 1, 30 do
+        ids[i] = string.format("aw-%08d", i)
+        award(ids[i])
+      end
+      load(OTHER)
+      award("aw-elsewher", OTHER)
+      receive(held({ "aw-00000001" }), ZOE)
+      local list = sent()
+      assert.are.equal(3, #list) -- 30 ids of 11 bytes and 29 commas: 359 bytes
+      assert.are.same(ids, (requested(list, ZOE)))
+    end)
+
+    it("that differs is answered with a C of no ids by an add-on holding none", function()
+      receive(held({ "aw-00000001" }), ZOE)
+      local list = sent()
+      assert.are.equal(1, #list)
+      assert.are.same({}, (requested(list, ZOE)))
+    end)
+
+    it("that matches, in any order, is answered with nothing", function()
+      award("aw-00000001")
+      award("aw-00000002")
+      receive(held({ "aw-00000002", "aw-00000001" }), ZOE)
+      receive(held({}, "SA0002"), ZOE)
+      assert.are.same({}, sent())
+    end)
+
+    it("for a raid that isn't loaded is ignored", function()
+      receive("H;SZZZZZ;1;1;dff3b5fb", ZOE)
+      assert.are.same({}, sent())
+      assert.is_true(logged("ignored Zoé Brûlé's H for raid SZZZZZ: not loaded."))
+    end)
+
+    it("is dropped when malformed", function()
+      for _, body in ipairs({ "H;SA0001;1;1;DFF3B5FB", "H;SA0001;1;1;dff3b5f", "H;;1;1;dff3b5fb",
+        "H;SA0001;1;dff3b5fb", "H;SA0001;x;1;dff3b5fb", "H;SA0001;1;1;dff3b5fb;x" }) do
+        receive(body, ZOE)
+      end
+      assert.are.same({}, sent())
+      assert.is_true(logged("dropped a malformed H message from Zoé Brûlé"))
+    end)
+
+    it("answered in a boss fight holds the C until the fight ends", function()
+      wow.bossFight(true)
+      receive(held({ "aw-00000001" }), ZOE)
+      assert.are.same({}, sent())
+      wow.bossFight(false)
+      assert.are.equal(1, #sent())
+    end)
+
+    it("answered with a C that doesn't fit the queue sends none of it, and logs it", function()
+      wow.bossFight(true)
+      for i = 1, 100 do
+        local op = assert(ns.Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
+          user = "u_ana", method = "HR", id = string.format("aw-%08d", i), raid = RAID }))
+        assert.is_true(Hub.SendOp(op, RAID))
+      end
+      receive(held({}), ZOE)
+      assert.is_true(logged("the sending queue is full, so the catch-up request to Zoé Brûlé wasn't sent."))
+      wow.bossFight(false)
+      for _ = 1, 110 do wow.advance(1) end
+      assert.are.equal(100, #wow.addonMessages)
+    end)
+
+    it("a C chunk asked for again is resent", function()
+      receive(held({ "aw-00000001" }), ZOE)
+      local list = sent()
+      local _, reqid = requested(list, ZOE)
+      receive("Q;" .. reqid .. ";1", ZOE, "WHISPER")
+      assert.are.same({ list[1][1], "WHISPER", ZOE }, sent()[2])
+    end)
+  end)
+
+  describe("C", function()
+    local function request(ids, reqid, code)
+      return Sync.EncodeRequest(ids, code or "SA0001", reqid or "r00001")
+    end
+
+    it("rebuilt from its chunks, in any order, hands over the ids its sender lacks", function()
+      local theirs = {}
+      for i = 1, 30 do
+        theirs[i] = string.format("aw-%08d", i)
+        if i % 10 ~= 0 then award(theirs[i]) end
+      end
+      award("aw-mine0001")
+      award("aw-mine0002")
+      local bodies = request(theirs)
+      assert.are.equal(3, #bodies)
+      receive(bodies[3], ZOE, "WHISPER")
+      receive(bodies[1], ZOE, "WHISPER")
+      assert.are.same({}, calls)
+      receive(bodies[1], ZOE, "WHISPER")
+      receive(bodies[2], ZOE, "WHISPER")
+      assert.are.same({ { ZOE, "r00001", RAID, { "aw-mine0001", "aw-mine0002" } } }, calls)
+      assert.is_true(logged("Zoé Brûlé asked to catch up (r00001) on raid " .. RAID
+        .. "; they lack 2: aw-mine0001, aw-mine0002."))
+    end)
+
+    it("from an add-on holding none hands over every id held", function()
+      award("aw-00000001")
+      receive(request({})[1], ZOE, "WHISPER")
+      assert.are.same({ { ZOE, "r00001", RAID, { "aw-00000001" } } }, calls)
+    end)
+
+    it("from an add-on holding all hands over none", function()
+      award("aw-00000001")
+      receive(request({ "aw-00000001", "aw-notmine1" })[1], ZOE, "WHISPER")
+      assert.are.same({ { ZOE, "r00001", RAID, {} } }, calls)
+    end)
+
+    it("with a chunk missing asks for it again after 10 seconds", function()
+      local requests = {}
+      Hub.sendRequest = function(target, body) requests[#requests + 1] = { target, body } end
+      local ids = {}
+      for i = 1, 20 do ids[i] = string.format("aw-%08d", i) end
+      local bodies = request(ids)
+      receive(bodies[1], ZOE, "WHISPER")
+      wow.advance(10)
+      assert.are.same({ { ZOE, "Q;r00001;2" } }, requests)
+      receive(bodies[2], ZOE, "WHISPER")
+      assert.are.equal(1, #calls)
+    end)
+
+    it("arriving paced over more than 40 seconds is rebuilt, with nothing asked again", function()
+      local requests = {}
+      Hub.sendRequest = function(target, body) requests[#requests + 1] = { target, body } end
+      local ids = {}
+      for i = 1, 600 do ids[i] = string.format("aw-%08d", i) end
+      local bodies = request(ids)
+      assert.are.equal(45, #bodies)
+      for _, body in ipairs(bodies) do
+        receive(body, ZOE, "WHISPER")
+        wow.advance(1)
+      end
+      assert.are.same({ { ZOE, "r00001", RAID, {} } }, calls)
+      assert.are.same({}, requests)
+    end)
+
+    it("asks again 10 seconds after the last new chunk, and drops 40 seconds after it", function()
+      local requests = {}
+      Hub.sendRequest = function(target, body) requests[#requests + 1] = { target, body } end
+      local ids = {}
+      for i = 1, 50 do ids[i] = string.format("aw-%08d", i) end
+      local bodies = request(ids)
+      receive(bodies[1], ZOE, "WHISPER")
+      wow.advance(8)
+      receive(bodies[2], ZOE, "WHISPER")
+      wow.advance(9)
+      assert.are.same({}, requests)
+      wow.advance(1)
+      assert.are.same({ { ZOE, "Q;r00001;3,4" } }, requests)
+      for _ = 1, 29 do wow.advance(1) end
+      assert.are.equal(3, #requests)
+      assert.is_false(logged("dropped Zoé Brûlé's message r00001"))
+      wow.advance(1)
+      assert.is_true(logged("dropped Zoé Brûlé's message r00001 (chunks still missing)"))
+    end)
+
+    it("from two senders, or under an O's msgid, is kept apart", function()
+      local op = Sync.EncodeOp({ type = "confirm", id = "cf-00000001", key = "aw-00000001", at = 1792000100 },
+        "SA0001", BO, "r00001")
+      local ids = {}
+      for i = 1, 20 do ids[i] = string.format("aw-%08d", i) end
+      local bodies = request(ids)
+      receive(bodies[1], ZOE, "WHISPER")
+      receive(op[1], BO)
+      receive(request(ids)[1], BO, "WHISPER")
+      receive(bodies[2], ZOE, "WHISPER")
+      -- Bo's O was recorded whole, so Zoé lacks it; Bo's own C is still missing a chunk.
+      assert.are.same({ { ZOE, "r00001", RAID, { "cf-00000001" } } }, calls)
+    end)
+
+    it("for a raid that isn't loaded is ignored", function()
+      receive(request({}, nil, "SZZZZZ")[1], ZOE, "WHISPER")
+      assert.are.same({}, calls)
+      assert.is_true(logged("ignored Zoé Brûlé's message for raid SZZZZZ: not loaded."))
+    end)
+
+    it("is dropped when malformed, or when its whole list holds an id that isn't valid", function()
+      receive("C;r00001;SA0001;1/1;aw 1", ZOE, "WHISPER")
+      receive("C;r00002;SA0001;1/1;short", ZOE, "WHISPER")
+      assert.are.same({}, calls)
+      assert.is_true(logged("dropped a malformed C message from Zoé Brûlé"))
+      assert.is_true(logged("dropped Zoé Brûlé's message r00002 (malformed)"))
+    end)
   end)
 end)

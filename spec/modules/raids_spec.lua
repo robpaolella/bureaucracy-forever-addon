@@ -98,6 +98,17 @@ describe("Raids", function()
     assert.are.same({ { "raid00001", true }, { "raid00002", true } }, heard)
   end)
 
+  it("calls the other load hooks after the after-load hook, in the order added", function()
+    local heard = {}
+    Raids.afterLoad = function(id) heard[#heard + 1] = "afterLoad " .. id end
+    Raids.OnLoad(function(id) heard[#heard + 1] = "first " .. id end)
+    Raids.OnLoad(function(id) heard[#heard + 1] = "second " .. id end)
+    Raids.Load(snapshot(ns, "raid00001"), "pasted")
+    Raids.ReplaceInbox({ snapshot(ns, "raid00002") })
+    assert.are.same({ "afterLoad raid00001", "first raid00001", "second raid00001",
+      "afterLoad raid00002", "first raid00002", "second raid00002" }, heard)
+  end)
+
   it("removes a pasted raid from the store and the status", function()
     Raids.Load(snapshot(ns, "raid00001"), "pasted")
     Raids.Load(snapshot(ns, "raid00002"), "pasted")
