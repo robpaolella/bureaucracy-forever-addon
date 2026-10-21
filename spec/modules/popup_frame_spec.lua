@@ -117,6 +117,17 @@ describe("PopupFrame", function()
       assert.is_false(pf.frame.notice:IsShown())
     end)
 
+    it("marks practice mode in the title and the foot, redrawn when it switches (practice)", function()
+      setup({ reserves = { [1] = { holder("Ashla Brightwater", "HR") } } })
+      drop({ { id = 1 } })
+      wow.slash("/bf practice")
+      assert.are.equal("[Practice] Loot · Lucifron", pf.frame.title:GetText())
+      assert.is_truthy(pf.frame.foot:GetText():find("^Reserves: Molten Core.* · |cffffd100practice|r$"))
+      wow.slash("/bf practice")
+      assert.are.equal("Loot · Lucifron", pf.frame.title:GetText())
+      assert.is_nil(pf.frame.foot:GetText():find("practice", 1, true))
+    end)
+
     it("lists every item with its contenders and skipped holders (popup-crowded, popup-page2)", function()
       local hr = {}
       for i = 1, 4 do hr[i] = holder("Raider " .. string.char(64 + i), "HR") end

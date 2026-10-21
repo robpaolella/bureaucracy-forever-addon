@@ -1,4 +1,4 @@
--- Core: the add-on's namespace, its log, its event hub and the /bf command.
+-- Core: the add-on's namespace, its log, its event hub, the practice mode switch and the /bf command.
 -- Every file listed in the .toc receives the add-on's name and the shared namespace table.
 local ADDON_NAME, ns = ...
 
@@ -55,6 +55,29 @@ ns.On("ADDON_LOADED", function(name)
   ns.db = BureaucracyForeverDB
 end)
 
+-- Practice mode (#17): hand-outs are real, but their awards are marked practice and never reach the
+-- guild site. Saved, so a /reload keeps it; every login turns it off, so a practice mode left on
+-- can't mark a real raid's awards.
+local PRACTICE_ON = "Practice mode on: awards are marked [Practice] and nothing is sent to the guild site."
+
+function ns.Practice()
+  return ns.db ~= nil and ns.db.practice == true
+end
+
+-- Turns practice mode on or off and says so in chat. It applies to the next hand-out: awards
+-- already made keep their mark.
+function ns.SetPractice(on)
+  ns.db.practice = on and true or nil
+  ns.Print(on and PRACTICE_ON or "Practice mode off.")
+  ns.UI.RefreshPractice()
+end
+
+ns.On("PLAYER_ENTERING_WORLD", function(isInitialLogin)
+  if not isInitialLogin then return end
+  ns.db.practice = nil
+  ns.UI.RefreshPractice()
+end)
+
 SLASH_BUREAUCRACYFOREVER1 = "/bf"
 SlashCmdList.BUREAUCRACYFOREVER = function(input)
   local command = strtrim(input or ""):lower()
@@ -66,8 +89,11 @@ SlashCmdList.BUREAUCRACYFOREVER = function(input)
     ns.UI.ShowMinimapButton(not ns.UI.button:IsShown())
   elseif command == "log" then
     printLog()
+  elseif command == "practice" then
+    ns.SetPractice(not ns.Practice())
   else
     ns.Print("type /bf to open or close the window, /bf version for the version,"
-      .. " /bf minimap to show or hide the minimap button, /bf log for the add-on's log.")
+      .. " /bf minimap to show or hide the minimap button, /bf log for the add-on's log,"
+      .. " /bf practice to turn practice mode on or off.")
   end
 end

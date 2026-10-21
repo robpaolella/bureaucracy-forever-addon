@@ -8,6 +8,8 @@
 -- Once a roll is called the row carries the roll list (#90): who rolled what, the winner pre-selected
 -- (the officer may pick another name), and the Give button that follows the pick.
 -- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
+-- In practice mode (#17) every award made here is marked practice; the operations that follow an
+-- award (confirm, correction, undo) take the award's own mark, so switching changes only the next.
 local _, ns = ...
 
 local Popup = {}
@@ -411,7 +413,8 @@ end
 -- enabled, tooltip), list = { title, people = { { char, method, kind, available, reason, enabled,
 -- tooltip } }, empty, hint, back } }), buttons (each: text, action, enabled, tooltip; the D/B
 -- button's also pick)), dbMenu ({ title,
--- members = { { name, selected } }, note }), count, foot, recheck.
+-- members = { { name, selected } }, note }), count, foot, recheck, practice (practice mode is on: the
+-- title starts with "[Practice] " and the frame tags the foot).
 function Popup.Build()
   if not isLootMaster() then return nil, "not loot master" end
   if ns.Selection.IsQuiet() then return nil, "not a guild run" end
@@ -463,7 +466,9 @@ function Popup.Build()
     model.recheck = model.recheck or row.recheck
     model.rows[#model.rows + 1] = row
   end
-  model.title = "Loot" .. (boss.name and (" · " .. boss.name) or "")
+  model.practice = ns.Practice()
+  model.title = (model.practice and "[Practice] " or "") .. "Loot"
+    .. (boss.name and (" · " .. boss.name) or "")
   if not snapshot then
     model.notice, model.syncLink = NO_RESERVES_NOTICE, "Sync"
   end
@@ -568,7 +573,7 @@ function Popup.Give(slot, item, winner, roll)
   local method = fromRolls and METHODS[row.mode] or (row.mode == "hr" and "HR" or "SR")
   local user = fromRolls and row.users[bare(chosen)] or row.user
   local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = chosen,
-    user = user, method = method, roll = roll })
+    user = user, method = method, roll = roll, practice = ns.Practice() })
   local data
   if op then
     attempt.awardKey = op.id
@@ -682,7 +687,8 @@ function Popup.GiveDB(slot, item, pick)
   if not attempt then return nil, reason end
   dbNotes[slot] = nil
   ns.Rolls.End(slot, item)
-  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, method = "DISENCHANT_BANK" })
+  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, method = "DISENCHANT_BANK",
+    practice = ns.Practice() })
   local data
   if op then
     attempt.awardKey = op.id

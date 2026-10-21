@@ -86,9 +86,9 @@ describe("Rolls", function()
       assert.are.equal("Open roll for " .. link(3) .. ": everyone /roll", wow.sent[1].text)
     end)
 
-    it("starts with [Practice] when the practice hook says so", function()
+    it("starts with [Practice] in practice mode", function()
       setup()
-      ns.Rolls.IsPractice = function() return true end
+      wow.slash("/bf practice")
       assert.is_truthy(call(3))
       assert.are.equal("[Practice] Open roll for " .. link(3) .. ": everyone /roll", wow.sent[1].text)
     end)

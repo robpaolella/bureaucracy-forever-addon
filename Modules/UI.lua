@@ -1,7 +1,8 @@
 -- UI: the loot pop-up and the officers' window (#9).
 -- The officers' window (#37): a titled frame, three tabs (Awards, Reserves, Sync) and an empty
 -- footer, plus a minimap button. Tab content and the footer's contents belong to #14 to #17:
--- they draw into UI.tabs[name] and UI.footer.
+-- they draw into UI.tabs[name] and UI.footer. The footer's Practice mode checkbox and the
+-- "[Practice]" title are #17's.
 local _, ns = ...
 
 local UI = {}
@@ -1245,6 +1246,37 @@ local function buildSync(content)
     .. "afterwards. Discard if they were from a run that wasn't a guild run.")
 end
 
+-- The footer's Practice mode checkbox (#17), at its right: the game's checkbox art and a gold label.
+-- A click does what /bf practice does.
+local function buildPracticeBox()
+  local box = CreateFrame("Button", nil, UI.footer)
+  UI.practiceBox = box
+  box:SetSize(120, 24)
+  box:SetPoint("RIGHT", UI.footer, "RIGHT", 0, 0)
+  box.box = box:CreateTexture(nil, "ARTWORK")
+  box.box:SetTexture("Interface\\Buttons\\UI-CheckBox-Up")
+  box.box:SetSize(22, 22)
+  box.box:SetPoint("LEFT", box, "LEFT", 0, 0)
+  box.check = box:CreateTexture(nil, "OVERLAY")
+  box.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+  box.check:SetSize(22, 22)
+  box.check:SetPoint("LEFT", box, "LEFT", 0, 0)
+  box.label = newText(box, "GameFontNormal")
+  box.label:SetPoint("LEFT", box.box, "RIGHT", 4, 0)
+  box.label:SetText("Practice mode")
+  box:SetScript("OnClick", function() ns.SetPractice(not ns.Practice()) end)
+end
+
+-- Draws practice mode's marker: the window's title and the footer's checkbox, then the pop-up's
+-- title and foot.
+function UI.RefreshPractice()
+  if not window then return end
+  local on = ns.Practice()
+  UI.title:SetText((on and "[Practice] " or "") .. "Bureaucracy Forever")
+  if on then UI.practiceBox.check:Show() else UI.practiceBox.check:Hide() end
+  ns.PopupFrame.Redraw()
+end
+
 local function build()
   window = CreateFrame("Frame", "BureaucracyForeverWindow", UIParent, "BasicFrameTemplateWithInset")
   UI.window = window
@@ -1267,13 +1299,15 @@ local function build()
     title = newText(window, "GameFontNormal")
     title:SetPoint("TOP", window, "TOP", 0, -5)
   end
-  title:SetText("Bureaucracy Forever")
+  UI.title = title
 
   -- The footer is the strip along the bottom, shared by all tabs.
   UI.footer = CreateFrame("Frame", nil, window)
   UI.footer:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", 12, 10)
   UI.footer:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -12, 10)
   UI.footer:SetHeight(24)
+  buildPracticeBox()
+  UI.RefreshPractice()
 
   local previous
   for index, name in ipairs(TAB_NAMES) do

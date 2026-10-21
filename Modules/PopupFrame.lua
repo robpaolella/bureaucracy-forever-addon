@@ -20,6 +20,7 @@ local BADGE_COLORS = {
 local NO_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local SPINNER = "Interface\\COMMON\\StreamCircle"
 local GOLD = { 1, 0.82, 0 }
+local PRACTICE_TAG = " · |cffffd100practice|r" -- the foot's practice mode tag (#17)
 -- Game icons for the tick and the arrows: the game's font has no such characters.
 local TICK = "Interface\\Buttons\\UI-CheckBox-Check"
 local ARROW_DOWN = "|TInterface\\Buttons\\Arrow-Down-Up:12:12|t"
@@ -850,7 +851,7 @@ function PopupFrame.Refresh()
   end
   frame.foot:ClearAllPoints()
   frame.foot:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
-  frame.foot:SetText(model.foot)
+  frame.foot:SetText(model.foot .. (model.practice and PRACTICE_TAG or ""))
   frame:SetHeight(y + frame.foot:GetStringHeight() + PAD)
   frame.model = model
   if not dismissed then frame:Show() end
@@ -884,6 +885,7 @@ end)
 local function redraw()
   if open then PopupFrame.Refresh() end
 end
+PopupFrame.Redraw = redraw -- practice mode switching changes the title and the foot
 ns.On("ADDON_RESTRICTION_STATE_CHANGED", redraw)
 ns.On("CHAT_MSG_SYSTEM", redraw) -- a roll (counted or ignored): Rolls, loaded earlier, reads it first
 ns.Tracking.On("confirmed", redraw)
