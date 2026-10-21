@@ -44,7 +44,7 @@ end)
 
 describe("practice mode (#17)", function()
   local ns
-  local ON = PREFIX .. "Practice mode on: awards are marked [Practice] and nothing is sent to the guild site."
+  local ON = PREFIX .. "Practice mode on: reserves are made up, and nothing is sent to the guild site."
   local OFF = PREFIX .. "Practice mode off."
 
   -- A new session from the saved data: a login, or a /reload.

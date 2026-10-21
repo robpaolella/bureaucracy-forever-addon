@@ -58,7 +58,7 @@ end)
 -- Practice mode (#17): hand-outs are real, but their awards are marked practice and never reach the
 -- guild site. Saved, so a /reload keeps it; every login turns it off, so a practice mode left on
 -- can't mark a real raid's awards.
-local PRACTICE_ON = "Practice mode on: awards are marked [Practice] and nothing is sent to the guild site."
+local PRACTICE_ON = "Practice mode on: reserves are made up, and nothing is sent to the guild site."
 
 function ns.Practice()
   return ns.db ~= nil and ns.db.practice == true

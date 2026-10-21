@@ -8,6 +8,8 @@
 -- Once a roll is called the row carries the roll list (#90): who rolled what, the winner pre-selected
 -- (the officer may pick another name), and the Give button that follows the pick.
 -- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
+-- In practice mode (#107) each item in the window gets made-up reserves from the group (PracticeReserves),
+-- the same on every redraw of the window.
 -- In practice mode (#17) every award made here is marked practice; the operations that follow an
 -- award (confirm, correction, undo) take the award's own mark, so switching changes only the next.
 local _, ns = ...
@@ -65,6 +67,8 @@ local dbNotes = {} -- per slot, why the last D/B click handed nothing out
 local refusals = {} -- per award key, why the last not-confirmed choice was refused
 local picks = {} -- per slot, the name the officer clicked in the roll list: { item, name }
 local rollNotes = {} -- per slot, why the last hidden-roll click handed nothing out: { item, text }
+local madeUp = {} -- practice mode: per item id in this loot window, its made-up reserves
+local dropCount = 0 -- practice mode: drops given made-up reserves this session, to move through the cases
 local METHODS = { hr = "HR", sr = "SR", open = "OPEN_ROLL" }
 local ROLL_HEADINGS = { hr = "Rolls (hard reserve holders only)", sr = "Rolls (soft reserve holders only)",
   open = "Rolls (everyone)" }
@@ -72,7 +76,9 @@ local HIDDEN_WARNING = "The game is hiding rolls from add-ons right now. Watch c
 local NOT_RECEIVE = " can't be given it: the game won't let them receive it (usually: not nearby when"
   .. " the boss died)."
 
-ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes, refusals, picks, rollNotes = nil, {}, {}, {}, {} end)
+ns.On("LOOT_CLOSED", function()
+  chosenBoss, dbNotes, refusals, picks, rollNotes, madeUp = nil, {}, {}, {}, {}, {}
+end)
 
 -- Whether the game locks chat for add-ons now (a boss fight). A call that fails counts as no lock.
 function Popup.ChatLocked()
@@ -197,7 +203,13 @@ local function resolveRow(it, ctx, earlier, copyNote, pendingKey)
   end
   for _, a in ipairs(earlier) do awards[#awards + 1] = a end
   local cands, unknown = candidates(it.slot)
-  local args = { item = it.item, reserves = ctx.reserves, awards = awards, roster = ctx.roster,
+  local reserves, names = ctx.reserves, ctx.roster
+  local made = ctx.made and ctx.made[it.item]
+  if made then
+    -- Practice: the made-up group stands in for the game's, so the rules skip the holders it leaves out.
+    reserves, names, cands, unknown = { [it.item] = made.holders }, made.roster, made.candidates, false
+  end
+  local args = { item = it.item, reserves = reserves, awards = awards, roster = names,
     candidates = cands }
   local resolved = ns.Rules.Resolve(args)
   local row = { slot = it.slot, item = it.item, link = it.link }
@@ -238,7 +250,7 @@ local function resolveRow(it, ctx, earlier, copyNote, pendingKey)
   if mode == "sr" and #resolved.contenders > 1 then row.label = "Soft reserve roll-off" end
   row.note = copyNote
   if mode == "open" then
-    if not ctx.snapshot then
+    if not ctx.snapshot and not ctx.made then
       row.note = "No reserves loaded"
     elseif #row.skipped > 0 then
       row.note = "No one else reserved it"
@@ -462,6 +474,17 @@ function Popup.Build()
   local raidId = ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
   local ctx = { snapshot = snapshot, awards = {}, reserves = {}, roster = roster(), unlisted = {} }
+  if ns.Practice() then
+    -- Practice: each item of the window gets made-up reserves, the same on every redraw of it.
+    ctx.made = {}
+    for _, it in ipairs(items) do
+      if not madeUp[it.item] then
+        madeUp[it.item] = ns.PracticeReserves.Generate(ctx.roster, dropCount)
+        dropCount = dropCount + 1
+      end
+      ctx.made[it.item] = madeUp[it.item]
+    end
+  end
   if snapshot then
     ctx.reserves = snapshot.reserves
     for _, a in ipairs(snapshot.awards) do ctx.awards[#ctx.awards + 1] = a end
@@ -508,7 +531,7 @@ function Popup.Build()
   model.practice = ns.Practice()
   model.title = (model.practice and "[Practice] " or "") .. "Loot"
     .. (boss.name and (" · " .. boss.name) or "")
-  if not snapshot then
+  if not snapshot and not ctx.made then
     model.notice, model.syncLink = NO_RESERVES_NOTICE, "Sync"
   end
   if locked then model.fight = FIGHT_NOTICE end
@@ -592,8 +615,8 @@ local function handOut(model, row, chosen, roll, fromRolls)
   if op then
     attempt.awardKey = op.id
     local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
-    data = { raid = snapshot.code, key = op.id, item = row.item, link = row.link, boss = model.boss.id,
-      method = method, roll = roll, winner = chosen, practice = op.practice }
+    data = { raid = snapshot and snapshot.code, key = op.id, item = row.item, link = row.link,
+      boss = model.boss.id, method = method, roll = roll, winner = chosen, practice = op.practice }
   end
   attempt.announced = post("award", data, why, "Award line for " .. row.link,
     row.link .. " is being handed to " .. chosen .. ", but its raid chat line couldn't be posted.")
