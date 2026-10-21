@@ -132,16 +132,31 @@ local function topOf(off)
   return best, names
 end
 
--- The officer re-rolls a tie: posts the tie line and counts only the tied players' new rolls.
--- Returns the result, or nil and why: "fight", "no roll-off", "no tie".
-function Rolls.Reroll(slot, item)
-  if ns.Popup.ChatLocked() then return nil, "fight" end
+-- The tie line a re-roll posts, with the roll-off and the tied names, or nil and why: "no roll-off",
+-- "no tie" or "line too long". Chat lock is not checked.
+local function tieLine(slot, item)
   local off = offs[keyOf(slot, item)]
   if not off then return nil, "no roll-off" end
   local _, tied = topOf(off)
   if off.hidden or #tied < 2 then return nil, "no tie" end
   local line = fit(tied, function(text) return "Tie for " .. off.link .. ": " .. text .. ", roll again" end)
   if not line then return nil, "line too long" end
+  return line, off, tied
+end
+
+-- The line Rolls.Reroll would post now, or nil and why (as tieLine).
+function Rolls.RerollLine(slot, item)
+  local line, why = tieLine(slot, item)
+  if not line then return nil, why end
+  return line
+end
+
+-- The officer re-rolls a tie: posts the tie line and counts only the tied players' new rolls.
+-- Returns the result, or nil and why: "fight", "no roll-off", "no tie", "line too long".
+function Rolls.Reroll(slot, item)
+  if ns.Popup.ChatLocked() then return nil, "fight" end
+  local line, off, tied = tieLine(slot, item)
+  if not line then return nil, off end
   post(line)
   off.round, off.counted, off.eligible, off.tiedOnly = off.round + 1, {}, tied, true
   off.over = false
