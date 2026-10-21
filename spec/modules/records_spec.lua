@@ -508,7 +508,7 @@ describe("Records", function()
       assert.is_nil(ns.db.authors)
     end)
 
-    it("of a received confirm, not-confirmed or void is kept apart from it, the first one standing", function()
+    it("of a received confirm, not-confirmed or void is kept apart, the first one standing", function()
       local key = Records.Award(ana()).id
       local confirm = Records.Confirm(key, { id = "cf-1x8p4d2s", author = "Zoé Brûlé" })
       local notConfirmed = Records.NotConfirmed(key, { id = "nc-1x8p4d2s", author = "Bo Marsh" })
