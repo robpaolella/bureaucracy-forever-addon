@@ -164,3 +164,127 @@ describe("the update notice", function()
     end)
   end)
 end)
+
+describe("the loot master handover notice", function()
+  local ns, N
+  local ME = "Masterlooter"
+
+  local function masterIs(index) -- raid index of the loot master; 0 is the player
+    wow.state.lootMethod = { "master", index == 0 and 0 or nil, index }
+    wow.fire("PARTY_LOOT_METHOD_CHANGED")
+  end
+
+  before_each(function()
+    ns = wow.start()
+    N = ns.Notice
+    wow.state.group = { ME, "Konvett-Realm", "Other" }
+    wow.state.groupIsRaid = true
+    wow.state.lootMethod = { "master", nil, 2 }
+    wow.fire("PLAYER_ENTERING_WORLD", false, false)
+  end)
+
+  local function addAwards(n)
+    local snapshot = assert(ns.Snapshot.Validate({
+      formatVersion = 1, raid = "raid00001", code = "SRAID1", env = "staging", name = "Molten Core",
+      startsAt = 1792000000, durationMin = 240, generated = 1791990000,
+      addon = { version = "0.0.0", url = URL }, bosses = {},
+      awards = {}, reserves = {},
+    }, ns.version))
+    ns.Raids.Load(snapshot, "pasted")
+    ns.db.activeRaid = "raid00001"
+    ns.db.awards = { raid00001 = {} }
+    for i = 1, n do ns.db.awards.raid00001[i] = { char = "X" } end
+  end
+
+  it("names the previous loot master and the awards held, with Open awards and OK", function()
+    addAwards(12)
+    masterIs(0)
+    assert.is_true(N.frame:IsShown())
+    assert.equals("|cffffffffYou're now the loot master.|r", N.frame.lead.text)
+    assert.equals("Konvett's 12 awards are loaded as history. Your add-on now hands out and records "
+      .. "awards, and other officers' add-ons follow you.", N.frame.hint.text)
+    assert.is_false(N.frame.icon:IsShown())
+    assert.equals("Open awards", N.frame.buttons[1].label.text)
+    assert.equals("OK", N.frame.buttons[2].label.text)
+  end)
+
+  it("reads 0 with no raid selected, and 1 award in the singular", function()
+    masterIs(0)
+    assert.matches("Konvett's 0 awards", N.frame.hint.text)
+    N.frame.buttons[2].scripts.OnClick(N.frame.buttons[2])
+    wow.state.lootMethod = { "master", nil, 2 }
+    wow.fire("PARTY_LOOT_METHOD_CHANGED")
+    addAwards(1)
+    masterIs(0)
+    assert.matches("Konvett's 1 award is", N.frame.hint.text)
+  end)
+
+  it("shows nothing for a change to someone else", function()
+    wow.state.lootMethod = { "master", nil, 3 }
+    wow.fire("PARTY_LOOT_METHOD_CHANGED")
+    assert.is_false(N.frame:IsShown())
+  end)
+
+  it("shows nothing when no loot master was seen before", function()
+    wow.state.lootMethod = { "group", 0, 0 }
+    ns = wow.start()
+    wow.state.group = { ME, "Konvett" }
+    wow.fire("PLAYER_ENTERING_WORLD", false, false)
+    masterIs(0)
+    assert.is_false(ns.Notice.frame:IsShown())
+  end)
+
+  it("Open awards opens the window on the Awards tab and closes the notice; OK closes it", function()
+    masterIs(0)
+    wow.click(function() N.frame.buttons[1].scripts.OnClick(N.frame.buttons[1]) end)
+    assert.is_false(N.frame:IsShown())
+    assert.is_true(ns.UI.window:IsShown())
+    assert.equals("Awards", ns.UI.selected)
+    masterIs(2)
+    masterIs(0)
+    N.frame.buttons[2].scripts.OnClick(N.frame.buttons[2])
+    assert.is_false(N.frame:IsShown())
+  end)
+
+  it("still shows after a /reload, since the first look at the world seeds the memory", function()
+    ns = wow.start()
+    N = ns.Notice
+    wow.state.group = { ME, "Konvett" }
+    wow.state.groupIsRaid = true
+    wow.state.lootMethod = { "master", nil, 2 }
+    wow.fire("PLAYER_ENTERING_WORLD", false, true)
+    masterIs(0)
+    assert.is_true(N.frame:IsShown())
+  end)
+
+  it("keeps the last loot master when master loot goes off and on", function()
+    wow.state.lootMethod = { "group", 0, 0 }
+    wow.fire("PARTY_LOOT_METHOD_CHANGED")
+    masterIs(0)
+    assert.matches("Konvett's", N.frame.hint.text)
+  end)
+
+  it("forgets the previous loot master on leaving the group", function()
+    wow.state.group = {}
+    wow.fire("GROUP_ROSTER_UPDATE")
+    wow.state.group = { ME, "Other" }
+    wow.state.lootMethod = { "group", 0, 0 }
+    wow.fire("GROUP_ROSTER_UPDATE")
+    masterIs(0)
+    assert.is_false(N.frame:IsShown())
+  end)
+
+  it("waits for the end of a boss fight, and the pop-up stays", function()
+    wow.bossFight(true)
+    wow.openLoot({ { link = "|cffa335ee|Hitem:1:::::::::::::|h[Choker]|h|r", name = "Choker", quality = 4,
+      quantity = 1, candidates = { ME } } })
+    masterIs(0)
+    assert.is_false(N.frame:IsShown())
+    assert.is_table(ns.Popup.Build())
+    assert.equals("handover", N.Pending().key)
+    wow.bossFight(false)
+    assert.is_true(N.frame:IsShown())
+    assert.equals("handover", N.Shown().key)
+    assert.is_table(ns.Popup.Build())
+  end)
+end)
