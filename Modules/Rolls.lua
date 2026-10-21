@@ -80,6 +80,7 @@ end
 -- The officer clicked a row's Call roll or Call open roll: posts the call and starts reading
 -- rolls for it. slot and item are what the clicked button showed. Returns the roll-off's result
 -- (see Rolls.Result), or nil and why: "fight" (chat is locked), "not ready", "changed", "not a roll"
+-- "another roll" (another row's roll-off is still reading: End it first, or wait for its hand-out)
 -- or "line too long".
 function Rolls.Start(slot, item)
   if ns.Popup.ChatLocked() then return nil, "fight" end
@@ -89,6 +90,8 @@ function Rolls.Start(slot, item)
     if r.slot == slot then row = r end
   end
   if not row then return nil, "not ready" end
+  -- Rolls can't be told apart by item, so one roll-off reads at a time (the same row may call again).
+  if current and not current.over and current.key ~= keyOf(slot, item) then return nil, "another roll" end
   if row.item ~= item then return nil, "changed" end
   if row.action ~= "roll" and row.action ~= "openroll" then return nil, "not a roll" end
   local kind = row.action == "openroll" and "open" or row.mode
@@ -101,7 +104,7 @@ function Rolls.Start(slot, item)
   if not line then return nil, "line too long" end
   post(line)
   local off = { slot = slot, item = item, link = row.link, kind = kind, eligible = eligible, round = 1,
-    counted = {}, ignored = {}, earlier = {}, hidden = false }
+    counted = {}, ignored = {}, hidden = false, key = keyOf(slot, item) }
   for _, e in ipairs(early) do
     off.ignored[#off.ignored + 1] = { name = e.name, roll = e.roll, reason = REASON_EARLY }
   end
@@ -135,14 +138,11 @@ function Rolls.Reroll(slot, item)
   if ns.Popup.ChatLocked() then return nil, "fight" end
   local off = offs[keyOf(slot, item)]
   if not off then return nil, "no roll-off" end
-  local top, tied = topOf(off)
+  local _, tied = topOf(off)
   if off.hidden or #tied < 2 then return nil, "no tie" end
   local line = fit(tied, function(text) return "Tie for " .. off.link .. ": " .. text .. ", roll again" end)
   if not line then return nil, "line too long" end
   post(line)
-  for _, r in ipairs(off.counted) do
-    off.earlier[#off.earlier + 1] = { round = off.round, name = r.name, roll = r.roll, top = r.roll == top }
-  end
   off.round, off.counted, off.eligible, off.tiedOnly = off.round + 1, {}, tied, true
   off.over = false
   current = off
@@ -183,6 +183,13 @@ function Rolls.Result(slot, item)
   return result
 end
 
+-- The officer is done with a row's roll-off (the item went another way): it stops reading rolls and
+-- the next call may start. Its result stays readable until the loot window closes.
+function Rolls.End(slot, item)
+  local off = offs[keyOf(slot, item)]
+  if off then off.over = true end
+end
+
 local function handleRoll(text)
   if issecretvalue and issecretvalue(text) then
     -- A hidden system message may be a roll: the officer has to read it in the chat window.
@@ -218,10 +225,13 @@ end
 
 ns.On("CHAT_MSG_SYSTEM", handleRoll)
 
--- A hand-out the game confirmed ends the roll-off for that slot: later rolls are for the next one.
-ns.Tracking.On("confirmed", function(attempt)
+-- A hand-out the game confirmed, or gave up on, ends the roll-off for that slot: later rolls are
+-- for the next one.
+local function handedOut(attempt)
   if current and current.slot == attempt.slot then current.over = true end
-end)
+end
+ns.Tracking.On("confirmed", handedOut)
+ns.Tracking.On("unconfirmed", handedOut)
 
 ns.On("LOOT_CLOSED", function()
   offs, current, early = {}, nil, {}

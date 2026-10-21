@@ -238,6 +238,23 @@ describe("Rolls", function()
       assert.are.equal(1, r.rolled)
     end)
 
+    it("keeps one roll-off reading: a second row's call is refused until the first ends", function()
+      setup()
+      call(1)
+      wow.sent = {}
+      local result, why = call(2)
+      assert.is_nil(result)
+      assert.are.equal("another roll", why)
+      assert.are.same({}, wow.sent)
+      roll("Ashla Brightwater", 77)
+      assert.are.equal(1, ns.Rolls.Result(1, 1).rolled)
+      assert.is_truthy(call(1)) -- the same row may call again
+      ns.Rolls.End(1, 1)
+      assert.is_truthy(call(2))
+      roll("Bram Ironvein", 5)
+      assert.are.equal(1, ns.Rolls.Result(2, 2).rolled)
+    end)
+
     it("clears with the loot window", function()
       setup()
       call(1)
