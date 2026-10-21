@@ -1,12 +1,14 @@
 -- The Awards tab and the footer's loot master line (#14): the selected raid's awards, grouped by
--- boss, read only. The three buttons on a not confirmed row are drawn greyed and do nothing:
--- #101 wires them. Draws into UI.tabs.Awards and UI.footer.
+-- boss, read only. A not confirmed row has three buttons: for the loot master they are the pop-up's
+-- three choices (#101), with its Give to someone else list and refusal text; another officer sees
+-- them greyed. Draws into UI.tabs.Awards and UI.footer.
 local _, ns = ...
 
 local UI = ns.UI
 local parts = UI.parts
 local newText, newButton = parts.newText, parts.newButton
 local bare = ns.Rules.Bare
+local PopupFrame = ns.PopupFrame
 
 local CONTENT_WIDTH = 616
 local COLUMNS = { time = { 0, 44 }, item = { 48, 190 }, winner = { 242, 170 }, how = { 416, 96 },
@@ -53,7 +55,7 @@ function UI.LootMasterLine()
 end
 
 local function row(snapshot, award)
-  return { time = date("%H:%M", award.at), practiceTime = date("%a %H:%M", award.at),
+  return { key = award.key, time = date("%H:%M", award.at), practiceTime = date("%a %H:%M", award.at),
     boss = bossName(snapshot, award.boss), item = parts.itemText(award.item), winner = plain(award.char),
     how = HOW[award.method] or plain(award.method), roll = award.roll,
     notConfirmed = award.state == "not-confirmed" and not award.voided,
@@ -67,16 +69,20 @@ local function byTime(a, b) return a.at < b.at end
 
 -- What the tab shows: { empty = true } with nothing to list; otherwise { summary, banner (for
 -- another officer), readOnly, groups = { { heading, rows } }, practice = { heading, rows } or nil }.
--- A not confirmed row has `notConfirmed`, a voided one `voided` and its `note`.
+-- A row has its award's `key`. A not confirmed row has `notConfirmed`, `refusal` (why the last
+-- choice was refused, even for a player no longer loot master), and for the loot master `choices`
+-- (Popup.Choices); a voided one `voided` and its `note`.
 function UI.AwardsView()
   local raidId = ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
   local rows, practice, order, byBoss = {}, {}, {}, {}
+  local name, me = master()
   for _, award in ipairs(ns.Raids.Awards(raidId)) do
     local r = row(snapshot, award)
+    if me and r.notConfirmed then r.choices = ns.Popup.Choices(r.key) end
+    if r.notConfirmed then r.refusal = ns.Popup.Refusal(r.key) end
     if award.practice then practice[#practice + 1] = r else rows[#rows + 1] = r end
   end
-  local name, me = master()
   local view = { readOnly = not me, banner = name and not me and BANNER:format(plain(name)) or nil }
   if #rows == 0 and #practice == 0 then
     view.empty = true
@@ -144,6 +150,52 @@ local function greyButton(index, x, y)
   b:Show()
 end
 
+-- The loot master's click on one of a not confirmed row's choices: Give to someone else opens or
+-- closes its list (one open at a time); the others act at once. The row then shows its new state.
+local function choose(key, action)
+  if action == "giveelse" then
+    tab.elseOpen = tab.elseOpen ~= key and key or nil
+  else
+    ns.Popup.Choose(key, action)
+  end
+  UI.RefreshAwards()
+end
+
+-- The loot master's three buttons of a not confirmed row: the pop-up's choices, a greyed one
+-- showing why when hovered.
+local function choiceButton(index, x, y, key, choice)
+  local b = tab.choices[index]
+  if not b then
+    b = PopupFrame.TipButton(tab.child, 86)
+    b:SetScript("OnClick", function(self)
+      if self.choice.enabled then choose(self.key, self.choice.action) end
+    end)
+    tab.choices[index] = b
+  end
+  PopupFrame.SetButton(b, BUTTONS[(index - 1) % 3 + 1], choice.enabled)
+  b.key, b.choice, b.tip = key, choice, choice.tooltip
+  b:ClearAllPoints()
+  b:SetPoint("TOPLEFT", tab.child, "TOPLEFT", x, -y)
+  b:Show()
+end
+
+-- Why the last choice on the row was refused, in the pop-up's words. Returns the new y.
+local function refusal(index, y, text)
+  local line = tab.refusals[index]
+  if not line then
+    line = newText(tab.child, "GameFontHighlightSmall")
+    line:SetJustifyH("LEFT")
+    line:SetTextColor(1, 0.35, 0.35)
+    line:SetWidth(CONTENT_WIDTH - COLUMNS.item[1])
+    tab.refusals[index] = line
+  end
+  line:ClearAllPoints()
+  line:SetPoint("TOPLEFT", tab.child, "TOPLEFT", COLUMNS.item[1], -y)
+  line:SetText(text)
+  line:Show()
+  return y + line:GetStringHeight() + ROW_GAP
+end
+
 local function strike(index, y)
   local line = tab.strikes[index]
   if not line then
@@ -182,20 +234,41 @@ local function drawRow(r, y, used, practice)
   put(shown.how, "how", y, colour(r.how))
   put(shown.roll, "roll", y, r.roll and colour(tostring(r.roll)) or "")
   put(shown.note, "note", y, r.note or (practice and AMBER:format("Practice")) or "")
-  tab.shown[#tab.shown + 1] = { time = shown.time, item = shown.item, winner = shown.winner,
+  local line = { time = shown.time, item = shown.item, winner = shown.winner,
     how = shown.how, roll = shown.roll, note = shown.note, voided = r.voided, notConfirmed = r.notConfirmed }
+  tab.shown[#tab.shown + 1] = line
   if r.voided then
     used.strikes = used.strikes + 1
     strike(used.strikes, y)
   end
   y = y + math.max(shown.item:GetStringHeight(), shown.winner:GetStringHeight(),
     shown.how:GetStringHeight()) + ROW_GAP
-  if r.notConfirmed then
+  local choices = r.notConfirmed and r.choices
+  if choices and tab.elseOpen == r.key then
+    -- Give to someone else's list, in the buttons' place, as the pop-up draws it.
+    tab.listShown = true
+    tab.listKey = r.key
+    line.list = tab.list
+    y = PopupFrame.DrawList(tab.list, choices.list, COLUMNS.item[1], y) - 8 + ROW_GAP
+  elseif choices then
+    line.choices = {}
+    for n = 1, 3 do
+      used.choices = used.choices + 1
+      choiceButton(used.choices, COLUMNS.item[1] + (n - 1) * 90, y, r.key, choices.buttons[n])
+      line.choices[n] = tab.choices[used.choices]
+    end
+    y = y + BUTTON_HEIGHT + ROW_GAP
+  elseif r.notConfirmed then
     for n = 1, 3 do
       used.buttons = used.buttons + 1
       greyButton(used.buttons, COLUMNS.item[1] + (n - 1) * 90, y)
     end
     y = y + BUTTON_HEIGHT + ROW_GAP
+  end
+  if r.refusal then
+    used.refusals = used.refusals + 1
+    y = refusal(used.refusals, y, r.refusal)
+    line.refusal = tab.refusals[used.refusals]
   end
   return y
 end
@@ -241,23 +314,28 @@ function UI.RefreshAwards()
   local view = UI.AwardsView()
   tab.view = view
   hideAll({ tab.headings, tab.times, tab.items, tab.winners, tab.hows, tab.rolls, tab.notes,
-    tab.buttons, tab.strikes })
+    tab.buttons, tab.choices, tab.refusals, tab.strikes })
+  tab.list:Hide()
+  tab.listShown = false
   tab.shown = {}
   tab.practiceToggle:Hide()
   local list = not view.empty
   setShown({ tab.summary, tab.columns, tab.scroll }, list)
   setShown({ tab.title, tab.hint }, not list)
   if view.banner then tab.banner:Show() tab.banner:SetText(view.banner) else tab.banner:Hide() end
-  if not list then return end
-  tab.summary:SetText(view.summary)
-  local used = { rows = 0, headings = 0, buttons = 0, strikes = 0 }
-  local y = 0
-  for _, group in ipairs(view.groups or {}) do
-    y = drawHeading(group.heading, y, used)
-    for _, r in ipairs(group.rows) do y = drawRow(r, y, used) end
+  if list then
+    tab.summary:SetText(view.summary)
+    local used = { rows = 0, headings = 0, buttons = 0, choices = 0, refusals = 0, strikes = 0 }
+    local y = 0
+    for _, group in ipairs(view.groups or {}) do
+      y = drawHeading(group.heading, y, used)
+      for _, r in ipairs(group.rows) do y = drawRow(r, y, used) end
+    end
+    if view.practice then y = drawPractice(view, y + 6, used) end
+    tab.child:SetHeight(y)
   end
-  if view.practice then y = drawPractice(view, y + 6, used) end
-  tab.child:SetHeight(y)
+  -- The list stays open only while its row is drawn and still not confirmed.
+  if not tab.listShown then tab.elseOpen = nil end
 end
 
 -- The footer's loot master line, on every tab.
@@ -276,6 +354,7 @@ local function build()
   tab.content = content
   tab.headings, tab.times, tab.items, tab.winners, tab.hows = {}, {}, {}, {}, {}
   tab.rolls, tab.notes, tab.buttons, tab.strikes, tab.shown = {}, {}, {}, {}, {}
+  tab.choices, tab.refusals = {}, {}
 
   -- Another officer's view: a line above the list.
   tab.banner = newText(content, "GameFontNormal")
@@ -301,6 +380,14 @@ local function build()
   tab.scroll:SetScrollChild(tab.child)
   tab.scroll:EnableMouseWheel(true)
   tab.scroll:SetScript("OnMouseWheel", scrollByWheel)
+  -- Give to someone else's list, the pop-up's own: a name's Give hands out and closes it.
+  tab.list = PopupFrame.NewList(tab.child, function(char)
+    if ns.Popup.Choose(tab.listKey, "giveelse", char) then tab.elseOpen = nil end
+    UI.RefreshAwards()
+  end, function()
+    tab.elseOpen = nil
+    UI.RefreshAwards()
+  end)
 
   tab.title = newText(content, "GameFontNormal")
   tab.title:SetPoint("CENTER", content, "CENTER", 0, 30)
@@ -326,8 +413,11 @@ ns.On("ADDON_LOADED", function(name)
   if name == ns.name then build() end
 end)
 
--- The footer follows the loot method and the group; the list follows the group's changes too.
-for _, event in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_LOOT_METHOD_CHANGED" }) do
+-- The footer follows the loot method and the group; the list follows the group's changes too, a
+-- boss fight starting or ending (the choices that post a line wait) and the loot window (who can
+-- receive; refusals clear when it closes).
+for _, event in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_LOOT_METHOD_CHANGED",
+  "ADDON_RESTRICTION_STATE_CHANGED", "LOOT_OPENED", "LOOT_CLOSED" }) do
   ns.On(event, function() UI.RefreshAwards() end)
 end
 for _, event in ipairs({ "confirmed", "unconfirmed", "late" }) do

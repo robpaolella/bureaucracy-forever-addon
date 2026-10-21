@@ -408,32 +408,13 @@ local function footLine(raidId, snapshot)
 end
 
 -- The row's not confirmed state: the hand-out the game gave up on (its award still waits as not
--- confirmed) and the officer's three choices. Buttons that post a line wait in a boss fight; Try
--- again posts none. list is Give to someone else's list, from GiveElseList.
-local function notConfirmed(attempt, locked)
-  local key = attempt.awardKey
-  local wait = locked and NC_FIGHT_TOOLTIP or nil
-  local list = { title = "Give " .. attempt.link .. " to someone else", people = {}, back = "Back" }
-  local award = ns.Records.Get(key)
-  for _, c in ipairs(Popup.GiveElseList(key) or {}) do
-    local hard = c.method == "HR"
-    list.people[#list.people + 1] = { char = c.char, method = hard and LABELS["hr-single"] or LABELS.sr,
-      kind = hard and "hr" or "sr", available = c.available,
-      reason = c.reason == "cannot receive" and "can't receive it" or c.reason,
-      enabled = c.available and not locked, tooltip = c.available and wait or nil }
-  end
-  if #list.people == 0 then list.empty = "No one else reserved it." end
-  list.hint = "Posts one correction line: Correction: " .. attempt.link .. " → their name, not "
-    .. (award.char or "disenchant/bank") .. "."
-  return { key = key,
-    text = "The game didn't confirm that " .. attempt.winner .. " got it. They may be too far away, or"
-      .. " their bags are full.",
-    hint = NC_HINT, refusal = refusals[key], list = list,
-    buttons = {
-      { text = "Try again", action = "tryagain", enabled = true },
-      { text = "Give to someone else", action = "giveelse", enabled = not locked, tooltip = wait },
-      { text = "Not handed out", action = "nothandedout", enabled = not locked, tooltip = wait },
-    } }
+-- confirmed), what happened and the officer's three choices (Choices).
+local function notConfirmed(attempt)
+  local choices = Popup.Choices(attempt.awardKey)
+  choices.text = "The game didn't confirm that " .. attempt.winner .. " got it. They may be too far away,"
+    .. " or their bags are full."
+  choices.hint = NC_HINT
+  return choices
 end
 
 -- The attempt of each slot whose hand-out the game didn't confirm and whose award still waits
@@ -522,7 +503,7 @@ function Popup.Build()
       row.handout = { text = "Handing out to " .. handout.winner .. "…",
         note = handout.announced and ANNOUNCED or NOT_ANNOUNCED }
     end
-    if gaveUp and not handout then row.notConfirmed = notConfirmed(gaveUp, locked) end
+    if gaveUp and not handout then row.notConfirmed = notConfirmed(gaveUp) end
     row.dbNote = dbNotes[it.slot]
     addButtons(row, boss, locked, ns.Rolls.Result(it.slot, it.item))
     model.recheck = model.recheck or row.recheck
@@ -573,6 +554,9 @@ end
 function Popup.Refused(key, why)
   refusals[key] = why and (REFUSALS[why] or ("It couldn't be done (" .. tostring(why) .. ").")) or nil
 end
+
+-- Why the last choice on the award was refused, in the row's words, or nil.
+function Popup.Refusal(key) return refusals[key] end
 
 -- Posts the operation's chat line, built from data, in raid (or party) chat. With no data (the
 -- record wasn't saved; why says why) or a line that can't be built, nothing is posted: the log
@@ -729,6 +713,12 @@ local function attemptOf(key)
 end
 
 local function itemOf(link) return link and tonumber(link:match("item:(%d+)")) end
+
+-- The award's item link: its last hand-out's, else the game's, else its number.
+local function linkOf(key, award)
+  local attempt = attemptOf(key)
+  return attempt and attempt.link or select(2, GetItemInfo(award.item)) or ("item " .. award.item)
+end
 
 -- The award, if it is not confirmed and not voided: the only kind the three choices act on. Or
 -- nil and why: "not unconfirmed", or "handing out" while a hand-out of it waits for the game.
@@ -951,14 +941,64 @@ function Popup.NotHandedOut(key)
   if not award then return nil, refused end
   local op, why = ns.Records.Void(key, { reason = "not handed out" })
   if not op then return nil, why end
-  local attempt = attemptOf(key)
-  local link = attempt and attempt.link or select(2, GetItemInfo(award.item)) or ("item " .. award.item)
+  local link = linkOf(key, award)
   local snapshot = ns.Raids.Get(award.raid)
   post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
     winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
     link .. (award.char and (" is no longer awarded to " .. award.char) or " is no longer going to"
       .. " disenchant/bank") .. ", but its raid chat line couldn't be posted.")
   return op
+end
+
+-- The three choices of a not confirmed award, built from its key alone, so the Awards tab has them
+-- after a /reload too: { key, refusal (why the last choice was refused), buttons (Try again, Give to
+-- someone else, Not handed out: text, action, enabled, tooltip), list (Give to someone else's, from
+-- GiveElseList: { title, people = { { char, method, kind, available, reason, enabled, tooltip } },
+-- empty, hint, back }) }. Buttons that post a line wait in a boss fight; Try again posts none.
+function Popup.Choices(key)
+  local award = ns.Records.Get(key)
+  local link = linkOf(key, award)
+  local locked = Popup.ChatLocked()
+  local wait = locked and NC_FIGHT_TOOLTIP or nil
+  local list = { title = "Give " .. link .. " to someone else", people = {}, back = "Back" }
+  for _, c in ipairs(Popup.GiveElseList(key) or {}) do
+    local hard = c.method == "HR"
+    list.people[#list.people + 1] = { char = c.char, method = hard and LABELS["hr-single"] or LABELS.sr,
+      kind = hard and "hr" or "sr", available = c.available,
+      reason = c.reason == "cannot receive" and "can't receive it" or c.reason,
+      enabled = c.available and not locked, tooltip = c.available and wait or nil }
+  end
+  if #list.people == 0 then list.empty = "No one else reserved it." end
+  list.hint = "Posts one correction line: Correction: " .. link .. " → their name, not "
+    .. (award.char or "disenchant/bank") .. "."
+  return { key = key, refusal = refusals[key], list = list,
+    buttons = {
+      { text = "Try again", action = "tryagain", enabled = true },
+      { text = "Give to someone else", action = "giveelse", enabled = not locked, tooltip = wait },
+      { text = "Not handed out", action = "nothandedout", enabled = not locked, tooltip = wait },
+    } }
+end
+
+-- The officer's click on a not confirmed award's choice, in the pop-up or the Awards tab: action
+-- "tryagain", "nothandedout" or "giveelse" (to char). A refusal is logged and kept for the row
+-- (Refused); a choice made clears it. Returns what the choice returns.
+function Popup.Choose(key, action, char)
+  local ok, why
+  if action == "giveelse" then
+    ok, why = Popup.GiveElse(key, char)
+  elseif action == "tryagain" then
+    ok, why = Popup.TryAgain(key)
+  else
+    ok, why = Popup.NotHandedOut(key)
+  end
+  if not ok then
+    local award = ns.Records.Get(key)
+    local link = award and linkOf(key, award) or tostring(key)
+    ns.Log((action == "giveelse" and ("Give to " .. tostring(char) .. " instead")
+      or ("Not confirmed choice " .. action)) .. " for " .. link .. " refused: " .. tostring(why))
+  end
+  Popup.Refused(key, not ok and why or nil)
+  return ok, why
 end
 
 -- Once the game confirms a hand-out made here, its award is confirmed, even after it was given

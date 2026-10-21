@@ -210,24 +210,13 @@ local function choose(row, action)
     PopupFrame.Refresh()
     return
   end
-  local fn = action == "tryagain" and ns.Popup.TryAgain or ns.Popup.NotHandedOut
-  local ok, why = fn(nc.key)
-  if not ok then
-    ns.Log("Not confirmed choice " .. action .. " for " .. row.data.link .. " refused: " .. tostring(why))
-  end
-  ns.Popup.Refused(nc.key, not ok and why or nil)
+  ns.Popup.Choose(nc.key, action)
   PopupFrame.Refresh()
 end
 
 -- The Give button of a name in the Give to someone else list.
 local function giveElse(row, char)
-  local key = row.data.notConfirmed.key
-  local ok, why = ns.Popup.GiveElse(key, char)
-  if not ok then
-    ns.Log("Give to " .. char .. " instead for " .. row.data.link .. " refused: " .. tostring(why))
-  end
-  ns.Popup.Refused(key, not ok and why or nil)
-  if ok then elseOpen = nil end
+  if ns.Popup.Choose(row.data.notConfirmed.key, "giveelse", char) then elseOpen = nil end
   PopupFrame.Refresh()
 end
 
@@ -260,15 +249,15 @@ local function newNotConfirmed(row)
   return box
 end
 
-local function newList(row)
-  local box = newBox(row)
+-- The Give to someone else list's box, in parent: onGive(char) is a name's Give, onBack is Back.
+-- The Awards tab draws the same list (#101).
+local function newList(parent, onGive, onBack)
+  local box = newBox(parent)
+  box.onGive = onGive
   box.title = newText(box, "GameFontNormal")
   box.title:SetWidth(BOX_WIDTH - 90)
   box.back = tipButton(box, 60)
-  box.back:SetScript("OnClick", function()
-    elseOpen = nil
-    PopupFrame.Refresh()
-  end)
+  box.back:SetScript("OnClick", onBack)
   box.empty = newText(box, "GameFontHighlightSmall")
   box.hint = newText(box, "GameFontDisableSmall")
   box.hint:SetWidth(BOX_WIDTH - 12)
@@ -338,7 +327,10 @@ local function newRow()
   -- The hand-out box, as the design draws it.
   row.box = newBox(row)
   row.ncBox = newNotConfirmed(row)
-  row.list = newList(row)
+  row.list = newList(row, function(char) giveElse(row, char) end, function()
+    elseOpen = nil
+    PopupFrame.Refresh()
+  end)
   row.rollBox = newRollBox(row)
   row.rollHint = newText(row, "GameFontDisableSmall")
   row.spinner = row.box:CreateTexture(nil, "ARTWORK")
@@ -469,10 +461,10 @@ local function drawNotConfirmed(row, nc, below)
   return below + y + 8
 end
 
--- The Give to someone else list: each other contender with the method they hold and a Give
--- button; one who can't receive is greyed with the reason and has no button.
-local function drawList(row, list, below)
-  local box = row.list
+-- The Give to someone else list, in its box at x and below in the box's parent: each other
+-- contender with the method they hold and a Give button; one who can't receive is greyed with the
+-- reason and has no button. Returns the new below.
+local function drawList(box, list, x, below)
   box.title:ClearAllPoints()
   box.title:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
   box.title:SetText(list.title)
@@ -490,7 +482,7 @@ local function drawList(row, list, below)
       e.line:SetColorTexture(0.2, 0.2, 0.2, 1)
       e.line:SetSize(BOX_WIDTH - 12, 1)
       e.give:SetScript("OnClick", function()
-        if e.enabled then giveElse(row, e.char) end
+        if e.enabled then box.onGive(e.char) end
       end)
       box.entries[i] = e
     end
@@ -548,11 +540,15 @@ local function drawList(row, list, below)
   end
   y = boxLine(box, box.hint, list.hint, y + 2)
   box:ClearAllPoints()
-  box:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
+  box:SetPoint("TOPLEFT", box:GetParent(), "TOPLEFT", x, -below)
   box:SetSize(BOX_WIDTH, y + 4)
   box:Show()
   return below + y + 8
 end
+
+-- What the Awards tab shares to draw a not confirmed award's choices the pop-up's way (#101).
+PopupFrame.NewList, PopupFrame.DrawList = newList, drawList
+PopupFrame.TipButton, PopupFrame.SetButton = tipButton, setButton
 
 -- The hidden rolls' name buttons, flowing across the box; a click awards to that player with the
 -- roll typed in the box (#102). Returns the new y.
@@ -793,7 +789,7 @@ local function drawRow(row, data, y)
   row.ncBox:Hide()
   row.list:Hide()
   if nc and elseOpen == nc.key then
-    below = drawList(row, nc.list, below)
+    below = drawList(row.list, nc.list, 40, below)
   elseif nc then
     below = drawNotConfirmed(row, nc, below)
   end
