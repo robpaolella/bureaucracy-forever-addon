@@ -115,6 +115,34 @@ function Notice.CheckUpdate(addon)
   })
 end
 
+-- The handover notice (#110): the loot master this add-on last saw, kept when master loot goes
+-- off and forgotten on leaving the group, and the notice when the game hands the role to the player.
+local lastMaster -- bare name
+
+local function currentMaster()
+  local name = ns.UI.parts.lootMaster()
+  return name and ns.Rules.Bare(name) or nil
+end
+
+local function plain(text) return (tostring(text):gsub("|", "||")) end
+
+function Notice.Handover(previous)
+  local count = #ns.Raids.Awards(ns.Selection.Status().activeRaid)
+  Notice.Raise("handover", {
+    lead = p.WHITE:format("You're now the loot master."),
+    hint = plain(previous) .. "'s " .. count .. (count == 1 and " award is" or " awards are")
+      .. " loaded as history. Your add-on now hands out and records awards, and other "
+      .. "officers' add-ons follow you.",
+    buttons = {
+      { label = "Open awards", onClick = function()
+        ns.UI.window:Show()
+        ns.UI.Select("Awards")
+      end },
+      { label = "OK" },
+    },
+  })
+end
+
 local function build()
   p = ns.UI.parts
   frame = CreateFrame("Frame", "BureaucracyForeverNotice", UIParent)
@@ -190,3 +218,25 @@ ns.Raids.afterLoad = function(raidId)
   local snapshot = ns.Raids.Get(raidId)
   if snapshot then Notice.CheckUpdate(snapshot.addon) end
 end
+
+ns.On("PLAYER_ENTERING_WORLD", function()
+  if lastMaster == nil then lastMaster = currentMaster() end
+end)
+
+ns.On("GROUP_ROSTER_UPDATE", function()
+  if GetNumGroupMembers() == 0 then
+    lastMaster = nil
+  elseif lastMaster == nil then
+    lastMaster = currentMaster()
+  end
+end)
+
+ns.On("PARTY_LOOT_METHOD_CHANGED", function()
+  local now = currentMaster()
+  if not now then return end
+  local before = lastMaster
+  lastMaster = now
+  if before and before ~= now and now == ns.Rules.Bare(UnitName("player")) then
+    Notice.Handover(before)
+  end
+end)
