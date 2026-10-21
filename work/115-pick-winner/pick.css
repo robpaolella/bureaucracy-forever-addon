@@ -1,0 +1,38 @@
+/* Revision 3 (#115): Pick winner. Radio rows (.rb, .pick) are revision 2's approved raid-list rows. */
+.rb { display:inline-block; width:14px; height:14px; border-radius:50%; border:2px solid #a88d3b; background:#120a04; vertical-align:-2px; margin-right:6px; flex:none; box-shadow: inset 0 0 2px #000; }
+.rb.on { background: radial-gradient(circle, #ffd100 0 3px, #120a04 4px); }
+.pick-list { text-align:left; margin: 4px 0 8px; }
+.pick { display:flex; align-items:center; gap:6px; padding:4px 6px; cursor:pointer; border:1px solid transparent; font-family:"ArialN",sans-serif; font-size:14px; }
+.pick:hover { background: rgba(255,255,255,.05); }
+.pick.on { background: rgba(255,209,0,.12); border-color:#ffd10044; }
+.pick:focus-visible, .mi[data-pw-other]:focus-visible { outline:2px solid #fff; outline-offset:-1px; }
+.pick.pw-off { cursor:default; } .pick.pw-off:hover { background:none; } .pick.pw-off .rb { opacity:.35; }
+.pw-name { min-width: 150px; }
+.pw-head { margin: 6px 0 2px 2px; font-family: "Friz", serif; }
+.pw-empty { padding: 4px 8px; }
+.pw-scroll { max-height: 168px; overflow-y: auto; border: 1px solid #ffffff12; scrollbar-color: #a88d3b #120a04; }
+.pw-menu { scrollbar-color: #a88d3b #120a04; }
+.pw-sub { display:flex; align-items:center; gap:10px; margin: 2px 0 4px 34px; flex-wrap: wrap; }
+.pw-menu { left: 0; top: 24px; width: 220px; max-height: 210px; overflow-y: auto; background: rgba(9,9,24,.99); z-index: 40; }
+.pw-menu .mi { cursor: pointer; }
+.pw-menu .mi .chk { flex:none; position:relative; height:12px; }
+.pw-menu .mi .chk.on::after { content:""; position:absolute; left:3px; top:0; width:4px; height:8px; border:solid var(--gold); border-width:0 2px 2px 0; transform:rotate(45deg); }
+.input.pw-bad { color: #ff6060; }
+.pw-note { display:flex; flex-direction:column; gap:2px; text-align:left; margin: 4px 0 8px; }
+.pw-note .input { width: 100%; box-sizing: border-box; }
+.pw-preview { text-align:left; background: rgba(0,0,0,.45); border: 1px solid #ffffff14; padding: 5px 8px; margin-bottom: 8px; }
+.pw-line { font-family: "ArialN", sans-serif; font-size: 13px; line-height: 1.35; word-break: break-word; margin-top: 2px; }
+.pw-line.rl { color: var(--raid-leader); } .pw-line .code { opacity: .75; }
+.pw-why { font-size: 12px; }
+.pw-intro { font-family: "ArialN", sans-serif; font-size: 13px; margin: 0 0 6px; line-height: 1.4; text-align: left; }
+.pw-box { margin: 2px 0 6px 40px; padding: 8px 10px; max-width: 560px; }
+.pw-box .btn-row, .pw-side .btn-row { align-items: center; }
+table.list tr.pw-inrow td { background: rgba(255,160,32,.06); border-bottom: 1px solid #ffd10033; }
+table.list tr.pw-row-open td { background: rgba(255,209,0,.12); }
+table.list tr.pw-row-open td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
+.notice .frame-title-in { font: 15px "Friz", serif; margin: 2px 0 6px; }
+.notice .btn-row { align-items: center; }
+.pw-side .pw-sub { margin-left: 26px; }
+.pw-side .pw-name { min-width: 120px; }
+.pw-side .pick { flex-wrap: wrap; }
+.pw-side .pw-again { flex-basis: 100%; padding-left: 26px; }

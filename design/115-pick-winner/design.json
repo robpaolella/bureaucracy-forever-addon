@@ -1,0 +1,9 @@
+{
+  "design_issue": 115,
+  "covers": [40],
+  "revision": 3,
+  "replaces": "design/9-loot-ui (revision 1), the Awards tab's needs-a-winner row and Pick winner only",
+  "versions": {"approved": "index.html"},
+  "states": ["pick-start", "pick-open", "pick-reserve", "pick-roll", "pick-roll-missing", "pick-db", "pick-again", "pick-none", "pick-crowded", "pick-fight", "pick-practice", "pick-done", "pick-unposted"],
+  "themes": ["default"]
+}
