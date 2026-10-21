@@ -21,4 +21,5 @@ Modules\Popup.lua
 Modules\Rolls.lua
 Modules\PopupFrame.lua
 Modules\UI.lua
+Modules\AwardsTab.lua
 Inbox.lua
