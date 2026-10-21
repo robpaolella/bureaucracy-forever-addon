@@ -57,6 +57,8 @@ local REFUSALS = {
   ["not loot master"] = "Only the loot master can hand items out.",
   ["not unconfirmed"] = "This award is already settled.",
   ["handing out"] = "A hand-out of it is still waiting for the game.",
+  ["not undoable"] = "Only a confirmed award can be undone.",
+  ["undo fight"] = "Chat is locked in the boss fight. Undo waits until it ends.",
   unknown = "The game can't name them yet. Try again in a moment.",
   grey = "Grey items can only go to you.",
   empty = "That item is gone from the loot window.",
@@ -993,6 +995,37 @@ function Popup.NotHandedOut(key)
   return op
 end
 
+-- Undo on a confirmed award (or one made by hand on the site) in the Awards tab (#40): voids it and
+-- posts its undo line. As NotHandedOut: no loot window needed, and a line that can't be built is not
+-- posted, the officer told and the void standing. Returns the void operation, or nil and why:
+-- "fight", "not undoable" (not confirmed, or already voided), "handing out" or Records.Void's
+-- reasons. A refusal changes nothing and posts nothing.
+function Popup.Undo(key)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local award = ns.Records.Get(key)
+  if not (award and (award.state == "confirmed" or award.state == "manual") and not award.voided) then
+    return nil, "not undoable"
+  end
+  local attempt = attemptOf(key)
+  if attempt and attempt.status == "pending" then return nil, "handing out" end
+  local op, why = ns.Records.Void(key)
+  if not op then return nil, why end
+  local link = linkOf(key, award)
+  local snapshot = ns.Raids.Get(award.raid)
+  post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
+    winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
+    link .. (award.char and (" is no longer awarded to " .. award.char) or " is no longer going to"
+      .. " disenchant/bank") .. ", but its raid chat line couldn't be posted.")
+  return op
+end
+
+-- The Undo button of a confirmed award: { enabled, tooltip }. It posts a line, so it waits in a
+-- boss fight.
+function Popup.UndoButton()
+  local locked = Popup.ChatLocked()
+  return { enabled = not locked, tooltip = locked and NC_FIGHT_TOOLTIP or nil }
+end
+
 -- The three choices of a not confirmed award, built from its key alone, so the Awards tab has them
 -- after a /reload too: { key, refusal (why the last choice was refused), buttons (Try again, Give to
 -- someone else, Not handed out: text, action, enabled, tooltip), list (Give to someone else's, from
@@ -1036,8 +1069,8 @@ end
 
 -- The officer's click on a not confirmed award's choice, in the pop-up or the Awards tab: action
 -- "tryagain", "nothandedout", "giveelse" (to char) or "givedb" (to the D/B pick char, the
--- Disenchant/bank line). A refusal is logged and kept for the row (Refused); a choice made clears it.
--- Returns what the choice returns.
+-- Disenchant/bank line); or "undo", Undo on a confirmed one. A refusal is logged and kept for the
+-- row (Refused); a choice made clears it. Returns what the choice returns.
 function Popup.Choose(key, action, char)
   local ok, why, note
   if action == "giveelse" then
@@ -1046,6 +1079,9 @@ function Popup.Choose(key, action, char)
     ok, why, note = Popup.GiveElseDB(key, char)
   elseif action == "tryagain" then
     ok, why = Popup.TryAgain(key)
+  elseif action == "undo" then
+    ok, why = Popup.Undo(key)
+    if why == "fight" then why = "undo fight" end
   else
     ok, why = Popup.NotHandedOut(key)
   end
@@ -1053,7 +1089,8 @@ function Popup.Choose(key, action, char)
     local award = ns.Records.Get(key)
     local link = award and linkOf(key, award) or tostring(key)
     local what = ({ giveelse = "Give to " .. tostring(char) .. " instead",
-      givedb = "Give to disenchant/bank (" .. tostring(char) .. ") instead" })[action]
+      givedb = "Give to disenchant/bank (" .. tostring(char) .. ") instead",
+      undo = "Undo" })[action]
     ns.Log((what or ("Not confirmed choice " .. action)) .. " for " .. link .. " refused: " .. tostring(why))
   end
   Popup.Refused(key, not ok and why or nil, note)

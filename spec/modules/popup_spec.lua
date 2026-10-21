@@ -1897,3 +1897,94 @@ describe("Popup", function()
     end)
   end)
 end)
+
+-- Undo on a confirmed award (#40), from the Awards tab: the cases the tab's tests don't reach.
+describe("Popup.Undo", function()
+  local ns
+  local LINK = "|cffa335ee|Hitem:1::::::::60:::::|h[Item 1]|h|r"
+
+  before_each(function()
+    ns = wow.start()
+    wow.state.group = { "Masterlooter", "Ashla Brightwater" }
+    wow.state.groupIsRaid = true
+    wow.state.lootMethod = { "master", 0, 0 }
+    wow.state.items[1] = { name = "Item 1", link = LINK, icon = 1 }
+    ns.Raids.Load(assert(ns.Snapshot.Validate(tree({ code = "SA0001",
+      reserves = { [1] = { holder("Ashla Brightwater", "HR") } } }), "0.1.0")), "pasted")
+    assert(ns.Selection.ChooseRaid("raid00001"))
+  end)
+
+  local function given(fields)
+    return assert(ns.Records.Award(fields or { boss = "luc", item = 1, char = "Ashla Brightwater",
+      method = "HR" })).id
+  end
+
+  local function undo(key)
+    local result
+    wow.click(function() result = { ns.Popup.Choose(key, "undo") } end)
+    return result
+  end
+
+  it("refuses an award not confirmed, announced or already voided, changing nothing", function()
+    local announced = given()
+    local unconfirmed = given()
+    assert(ns.Records.NotConfirmed(unconfirmed))
+    local voided = given()
+    assert(ns.Records.Confirm(voided))
+    assert(ns.Records.Void(voided, { reason = "traded" }))
+    for _, key in ipairs({ announced, unconfirmed, voided }) do
+      assert.are.same({ nil, "not undoable" }, undo(key))
+      assert.are.equal("Only a confirmed award can be undone.", ns.Popup.Refusal(key))
+    end
+    assert.is_nil(ns.Records.Get(announced).voided)
+    assert.are.equal("traded", ns.Records.Get(voided).voidReason)
+    assert.are.equal(0, #wow.sent)
+    assert.is_truthy(ns.log[#ns.log].text:find("^Undo for .* refused: not undoable"))
+  end)
+
+  it("refuses while a hand-out of it still waits for the game", function()
+    wow.openLoot({ { id = 1, link = LINK, quality = 4, sourceGuid = "corpse1",
+      candidates = wow.state.group } })
+    wow.click(function() assert(ns.Popup.Give(1, 1, "Ashla Brightwater")) end)
+    local key = ns.Raids.Awards("raid00001")[1].key
+    assert(ns.Records.Confirm(key))
+    local sent = #wow.sent
+    assert.are.same({ nil, "handing out" }, undo(key))
+    assert.is_nil(ns.Records.Get(key).voided)
+    assert.are.equal(sent, #wow.sent)
+  end)
+
+  it("in a boss fight refuses with the Undo wording; the button is greyed with the pop-up's tooltip",
+    function()
+      local key = given()
+      assert(ns.Records.Confirm(key))
+      wow.bossFight(true)
+      assert.are.same({ enabled = false, tooltip = "Posts a line, so it waits until the boss fight ends" },
+        ns.Popup.UndoButton(key))
+      assert.are.same({ nil, "undo fight" }, undo(key))
+      assert.are.equal("Chat is locked in the boss fight. Undo waits until it ends.", ns.Popup.Refusal(key))
+      wow.bossFight(false)
+      assert.are.same({ enabled = true }, ns.Popup.UndoButton(key))
+    end)
+
+  it("undoes a confirmed award, clearing an earlier refusal; Undone with no reason", function()
+    local key = given()
+    assert(ns.Records.Confirm(key))
+    wow.state.chatLockdown = true
+    undo(key)
+    wow.state.chatLockdown = false
+    local op = assert(undo(key)[1])
+    assert.are.same({ "void", nil }, { op.type, op.reason })
+    assert.is_nil(ns.Popup.Refusal(key))
+    assert.are.same({ channel = "RAID", text = "Undo: " .. LINK .. " is no longer awarded to Ashla"
+      .. " Brightwater <BF1;V;SA0001;" .. op.id .. ";" .. key .. ">" }, wow.sent[#wow.sent])
+  end)
+
+  it("undoes a Disenchant/bank award with the line naming no winner", function()
+    local key = given({ boss = "luc", item = 1, method = "DISENCHANT_BANK" })
+    assert(ns.Records.Confirm(key))
+    assert.is_truthy(undo(key)[1])
+    assert.are.equal("Undo: " .. LINK .. " is no longer going to disenchant/bank",
+      wow.sent[#wow.sent].text:match("^(.-) <BF1;"))
+  end)
+end)
