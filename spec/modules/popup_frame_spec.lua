@@ -411,6 +411,8 @@ describe("PopupFrame", function()
       assert.are.equal("Try again posts nothing. Give to someone else posts one correction line, and Not"
         .. " handed out posts an undo line. If you close this, it waits in the Awards tab as"
         .. " \"not confirmed\".", box.hint:GetText())
+      assert.is_true(box.warnEdge:GetHeight() > box.text:GetStringHeight())
+      assert.is_true(box.buttons[1].points[1].y < -box.warnEdge:GetHeight())
       assert.are.equal("", box.refusal:GetText())
       assert.is_false(box.refusal:IsShown())
       assert.are.same({ row, 40 }, { box.points[1].relativeTo, box.points[1].x })
@@ -455,6 +457,9 @@ describe("PopupFrame", function()
       assert.are.same({ "Tovin Hale", "SOFT RESERVE", true }, { e3.name:GetText(), e3.method:GetText(),
         e3.give:IsShown() })
       assert.is_nil(list.entries[4])
+      -- Each method sits on a badge and each name has a separator line; the greyed one has no badge.
+      assert.are.same({ true, false, true }, { e1.badge:IsShown(), e2.badge:IsShown(), e3.badge:IsShown() })
+      assert.is_true(e1.line:IsShown() and e3.line:IsShown())
       assert.is_false(list.empty:IsShown())
       assert.are.equal("Posts one correction line: Correction: " .. link(1)
         .. " → their name, not Ashla Brightwater.", list.hint:GetText())

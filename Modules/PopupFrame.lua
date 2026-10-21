@@ -231,8 +231,15 @@ end
 
 local function newNotConfirmed(row)
   local box = newBox(row)
+  -- The warning panel, as the design draws it: an amber edge round a dark amber inside.
+  box.warnEdge = box:CreateTexture(nil, "ARTWORK", nil, 0)
+  box.warnEdge:SetColorTexture(0.55, 0.35, 0.08, 1)
+  box.warnFill = box:CreateTexture(nil, "ARTWORK", nil, 1)
+  box.warnFill:SetColorTexture(0.12, 0.07, 0.02, 1)
+  box.warnFill:SetPoint("TOPLEFT", box.warnEdge, "TOPLEFT", 1, -1)
+  box.warnFill:SetPoint("BOTTOMRIGHT", box.warnEdge, "BOTTOMRIGHT", -1, 1)
   box.text = newText(box, "GameFontNormal")
-  box.text:SetWidth(BOX_WIDTH - 12)
+  box.text:SetWidth(BOX_WIDTH - 36)
   box.text:SetTextColor(1, 0.6, 0.2)
   box.refusal = newText(box, "GameFontHighlightSmall")
   box.refusal:SetWidth(BOX_WIDTH - 12)
@@ -382,7 +389,14 @@ end
 -- The not confirmed box: what happened, the three choices, why the last one was refused, the hint.
 local function drawNotConfirmed(row, nc, below)
   local box = row.ncBox
-  local y = boxLine(box, box.text, nc.text, 6) + 2
+  box.text:ClearAllPoints()
+  box.text:SetPoint("TOPLEFT", box, "TOPLEFT", 14, -12)
+  box.text:SetText(nc.text)
+  local panel = box.text:GetStringHeight() + 16
+  box.warnEdge:ClearAllPoints()
+  box.warnEdge:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
+  box.warnEdge:SetSize(BOX_WIDTH - 12, panel)
+  local y = 6 + panel + 8
   local x = 6
   for i, b in ipairs(box.buttons) do
     local d = nc.buttons[i]
@@ -416,7 +430,11 @@ local function drawList(row, list, below)
     local e = box.entries[i]
     if not e then
       e = { name = newText(box, "GameFontHighlight"), method = newText(box, "GameFontHighlightSmall"),
-        give = tipButton(box, 60) }
+        give = tipButton(box, 60), badge = box:CreateTexture(nil, "ARTWORK", nil, 0),
+        line = box:CreateTexture(nil, "ARTWORK", nil, 0) }
+      e.badge:SetColorTexture(0, 0, 0, 1)
+      e.line:SetColorTexture(0.2, 0.2, 0.2, 1)
+      e.line:SetSize(BOX_WIDTH - 12, 1)
       e.give:SetScript("OnClick", function()
         if e.enabled then giveElse(row, e.char) end
       end)
@@ -427,11 +445,19 @@ local function drawList(row, list, below)
     e.name:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -(y + 4))
     e.name:SetText(person.char)
     e.method:ClearAllPoints()
-    e.method:SetPoint("TOPLEFT", box, "TOPLEFT", 170, -(y + 5))
     e.method:SetText(person.available and person.method:upper() or person.reason)
+    e.badge:ClearAllPoints()
+    e.line:ClearAllPoints()
+    e.line:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -(y + 25))
+    e.line:Show()
     if person.available then
       e.name:SetTextColor(1, 1, 1)
-      e.method:SetTextColor(unpack(BADGE_COLORS[person.kind]))
+      e.method:SetTextColor(1, 1, 1)
+      e.method:SetPoint("TOPLEFT", box, "TOPLEFT", 174, -(y + 5))
+      e.badge:SetPoint("TOPLEFT", box, "TOPLEFT", 170, -(y + 4))
+      e.badge:SetSize(e.method:GetStringWidth() + 8, 16)
+      e.badge:SetColorTexture(unpack(BADGE_COLORS[person.kind]))
+      e.badge:Show()
       e.give:ClearAllPoints()
       e.give:SetPoint("TOPRIGHT", box, "TOPRIGHT", -10, -y)
       setButton(e.give, "Give", person.enabled)
@@ -440,6 +466,8 @@ local function drawList(row, list, below)
     else
       e.name:SetTextColor(0.5, 0.5, 0.5)
       e.method:SetTextColor(0.5, 0.5, 0.5)
+      e.method:SetPoint("TOPLEFT", box, "TOPLEFT", 170, -(y + 5))
+      e.badge:Hide()
       e.give:Hide()
     end
     e.name:Show()
@@ -450,6 +478,8 @@ local function drawList(row, list, below)
     local e = box.entries[i]
     e.name:Hide()
     e.method:Hide()
+    e.badge:Hide()
+    e.line:Hide()
     e.give:Hide()
   end
   box.empty:ClearAllPoints()
