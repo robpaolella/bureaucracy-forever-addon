@@ -267,6 +267,8 @@ local function installGlobals(metadata)
   end
   -- The group: wow.state.group lists its names, the player first; groupIsRaid says if it is a raid.
   _G.IsInRaid = function() return wow.state.groupIsRaid or false end
+  -- wow.state.shift: the Shift key is held.
+  _G.IsShiftKeyDown = function() return wow.state.shift or false end
   -- Raid rights, as wow.state.leader and wow.state.assistant (the player's own); the group
   -- leader's name, as wow.state.groupLeader, for anyone.
   local function leads(name)
