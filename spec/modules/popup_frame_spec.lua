@@ -670,4 +670,85 @@ describe("PopupFrame", function()
       assert.are.same({}, wow.sent)
     end)
   end)
+
+  describe("the roll list (#90)", function()
+    local function click(button)
+      wow.click(function() button.scripts.OnClick(button) end)
+    end
+
+    local function roll(name, n)
+      wow.fire("CHAT_MSG_SYSTEM", name .. " rolls " .. n .. " (1-100)")
+    end
+
+    local function called()
+      setup({ code = "SA0001", reserves = { [1] = { holder("Ashla Brightwater", "HR"),
+        holder("Doran Vale", "HR"), holder("Mirel Stone", "HR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = 1 } })
+      click(shownRows()[1].primary)
+    end
+
+    it("draws the list and redraws as each roll arrives (roll-called)", function()
+      called()
+      local row = shownRows()[1]
+      local box = row.rollBox
+      assert.is_true(box:IsShown())
+      assert.are.same({ "Rolls (hard reserve holders only)", "0 of 3 rolled" },
+        { box.heading:GetText(), box.count:GetText() })
+      assert.are.same({ "Give", false }, { row.primary.label:GetText(), row.primary:IsEnabled() })
+      roll("Mirel Stone", 87)
+      roll("Quill Ashby", 99)
+      roll("Ashla Brightwater", 42)
+      roll("Ashla Brightwater", 96)
+      assert.are.equal("2 of 3 rolled", box.count:GetText())
+      assert.are.same({ "Mirel Stone", "87", "●" },
+        { box.names[1].name:GetText(), box.names[1].roll:GetText(), box.names[1].dot:GetText() })
+      assert.are.same({ "Ashla Brightwater", "42", "○" },
+        { box.names[2].name:GetText(), box.names[2].roll:GetText(), box.names[2].dot:GetText() })
+      assert.are.same({ "Doran Vale", "waiting" },
+        { box.names[3].name:GetText(), box.names[3].roll:GetText() })
+      assert.are.equal("Quill Ashby (not eligible)", box.ignored[1].name:GetText())
+      assert.are.same({ "99", true }, { box.ignored[1].roll:GetText(), box.ignored[1].strike:IsShown() })
+      assert.are.equal("Ashla Brightwater (second roll, the first counts)", box.ignored[2].name:GetText())
+      assert.are.same({ "Give to Mirel Stone (87)", true },
+        { row.primary.label:GetText(), row.primary:IsEnabled() })
+      assert.are.equal("or click another name", row.rollHint:GetText())
+    end)
+
+    it("moves the pick on a click on a name, and gives to it", function()
+      called()
+      roll("Mirel Stone", 87)
+      roll("Ashla Brightwater", 42)
+      click(shownRows()[1].rollBox.names[2])
+      local row = shownRows()[1]
+      assert.are.equal("Give to Ashla Brightwater (42)", row.primary.label:GetText())
+      click(row.primary)
+      assert.are.equal(1, #wow.gives)
+      local award = ns.Records.Ops("raid00001")[1]
+      assert.are.same({ "Ashla Brightwater", 42, "HR" }, { award.char, award.roll, award.method })
+      assert.is_false(shownRows()[1].rollBox:IsShown())
+      assert.is_true(shownRows()[1].box:IsShown()) -- handing out
+    end)
+
+    it("greys Give in a boss fight", function()
+      called()
+      roll("Mirel Stone", 87)
+      wow.bossFight(true)
+      local row = shownRows()[1]
+      assert.is_false(row.primary:IsEnabled())
+      click(row.primary)
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("draws the list in no row before a roll is called", function()
+      setup({ code = "SA0001", reserves = { [1] = { holder("Ashla Brightwater", "HR"),
+        holder("Doran Vale", "HR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = 1 } })
+      assert.is_false(shownRows()[1].rollBox:IsShown())
+      assert.are.equal("Call roll (2)", shownRows()[1].primary.label:GetText())
+    end)
+  end)
 end)
