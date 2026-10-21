@@ -1166,4 +1166,200 @@ describe("Popup", function()
       end)
     end)
   end)
+
+  describe("the roll list (#90)", function()
+    local BOSSES = {
+      { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+      { id = "lb_trash", name = "Trash", trash = true, items = {} },
+    }
+
+    -- Item 1: hard reserved by four; item 2: soft reserved by two; item 3: nobody.
+    local function raid(candidates)
+      setup({ code = "SA0001", bosses = BOSSES, reserves = {
+        [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "HR"), holder("Mirel Stone", "HR"),
+          holder("Tovin Hale", "HR") },
+        [2] = { holder("Bram Ironvein", "SR"), holder("Mirel Stone", "SR") } } })
+      drop({ { id = 1, candidates = candidates }, { id = 2 }, { id = 3 } })
+      assert(ns.Popup.PickBoss("lb_lucifron"))
+    end
+
+    local function call(slot)
+      wow.click(function() assert(ns.Rolls.Start(slot, slot)) end)
+    end
+
+    local function roll(name, n, range)
+      wow.fire("CHAT_MSG_SYSTEM", name .. " rolls " .. n .. " " .. (range or "(1-100)"))
+    end
+
+    local function row(slot) return ns.Popup.Build().rows[slot] end
+
+    local function give(slot)
+      local button = row(slot).buttons[1]
+      local result
+      wow.click(function()
+        result = { ns.Popup.Give(slot, row(slot).item, button.winner, button.roll) }
+      end)
+      return result[1], result[2]
+    end
+
+    it("has no roll list before the roll is called", function()
+      raid()
+      assert.is_nil(row(1).rolls)
+      assert.are.equal("Call roll (4)", row(1).buttons[1].text)
+    end)
+
+    it("lists the rolls highest first, then who is waiting, and pre-selects the highest", function()
+      raid()
+      call(1)
+      roll("Mirel Stone", 87)
+      roll("Quill Ashby", 99)
+      roll("Ashla Brightwater", 42)
+      roll("Ashla Brightwater", 96)
+      local r = row(1)
+      assert.are.same({ "Rolls (hard reserve holders only)", "2 of 4 rolled", "or click another name" },
+        { r.rolls.heading, r.rolls.count, r.rolls.hint })
+      assert.are.same({
+        { name = "Mirel Stone", roll = 87, waiting = false, selected = true },
+        { name = "Ashla Brightwater", roll = 42, waiting = false, selected = false },
+        { name = "Doran Vale", waiting = true, selected = false },
+        { name = "Tovin Hale", waiting = true, selected = false },
+      }, r.rolls.entries)
+      assert.are.same({ { name = "Quill Ashby", roll = 99, reason = "not eligible" },
+        { name = "Ashla Brightwater", roll = 96, reason = "second roll, the first counts" } },
+        r.rolls.ignored)
+      assert.are.same({ "Give to Mirel Stone (87)", "rollgive", true },
+        { r.buttons[1].text, r.buttons[1].action, r.buttons[1].enabled })
+    end)
+
+    it("heads a soft reserve roll-off and an open roll by who may roll", function()
+      raid()
+      call(2)
+      ns.Rolls.End(2, 2)
+      call(3)
+      assert.are.equal("Rolls (soft reserve holders only)", row(2).rolls.heading)
+      assert.are.equal("Rolls (everyone)", row(3).rolls.heading)
+    end)
+
+    it("follows a roll that arrives, and a click on another name moves the pick", function()
+      raid()
+      call(1)
+      roll("Doran Vale", 30)
+      assert.are.equal("Give to Doran Vale (30)", row(1).buttons[1].text)
+      roll("Mirel Stone", 70)
+      assert.are.equal("Give to Mirel Stone (70)", row(1).buttons[1].text)
+      assert.is_true(ns.Popup.PickWinner(1, 1, "Doran Vale"))
+      assert.are.equal("Give to Doran Vale (30)", row(1).buttons[1].text)
+      assert.is_true(row(1).rolls.entries[2].selected)
+      roll("Ashla Brightwater", 99) -- a better roll doesn't take the pick away
+      assert.are.equal("Give to Doran Vale (30)", row(1).buttons[1].text)
+      assert.are.same({ nil, "not listed" }, { ns.Popup.PickWinner(1, 1, "Nobody") })
+      assert.are.same({ nil, "not ready" }, { ns.Popup.PickWinner(2, 2, "Doran Vale") })
+    end)
+
+    it("pre-selects nobody on a tie or a hidden roll, and Give waits for a click", function()
+      raid()
+      call(1)
+      roll("Doran Vale", 50)
+      roll("Mirel Stone", 50)
+      assert.are.same({ "Give", false }, { row(1).buttons[1].text, row(1).buttons[1].enabled })
+      assert.are.same({ nil, "not ready" }, { give(1) })
+      assert.is_true(ns.Popup.PickWinner(1, 1, "Mirel Stone"))
+      assert.are.same({ "Give to Mirel Stone (50)", true },
+        { row(1).buttons[1].text, row(1).buttons[1].enabled })
+      ns.Rolls.End(1, 1)
+      call(2)
+      wow.fire("CHAT_MSG_SYSTEM", wow.secret)
+      assert.are.same({ "Give", false }, { row(2).buttons[1].text, row(2).buttons[1].enabled })
+    end)
+
+    it("gives to the winner, recording the roll and the method in the award and its line", function()
+      raid()
+      call(1)
+      roll("Mirel Stone", 87)
+      roll("Doran Vale", 12)
+      local attempt = assert(give(1))
+      assert.are.same({ { slot = 1, candidate = 5 } }, wow.gives)
+      local award = ns.Records.Get(attempt.awardKey)
+      assert.are.same({ "Mirel Stone", "mirelstone", "HR", 87 },
+        { award.char, award.user, award.method, award.roll })
+      assert.is_truthy(wow.sent[#wow.sent].text:find("<BF1;A;SA0001;" .. attempt.awardKey
+        .. ";1;ifron;HR;87;Mirel Stone>", 1, true))
+      assert.are.same({}, row(1).buttons)
+    end)
+
+    it("gives the name that was clicked, with its own roll", function()
+      raid()
+      call(1)
+      roll("Mirel Stone", 87)
+      roll("Doran Vale", 12)
+      assert(ns.Popup.PickWinner(1, 1, "Doran Vale"))
+      local attempt = assert(give(1))
+      local award = ns.Records.Get(attempt.awardKey)
+      assert.are.same({ "Doran Vale", 12 }, { award.char, award.roll })
+    end)
+
+    it("records a soft reserve roll as SR and an open roll as OPEN_ROLL with its number", function()
+      raid()
+      call(2)
+      roll("Mirel Stone", 55)
+      assert.are.same({ "SR", 55 }, (function()
+        local a = ns.Records.Get(assert(give(2)).awardKey)
+        return { a.method, a.roll }
+      end)())
+      ns.Rolls.End(2, 2)
+      call(3)
+      roll("Bram Ironvein", 91)
+      local award = ns.Records.Get(assert(give(3)).awardKey)
+      assert.are.same({ "OPEN_ROLL", 91, "Bram Ironvein" }, { award.method, award.roll, award.char })
+      assert.is_truthy(wow.sent[#wow.sent].text:find("(open roll, 91)", 1, true))
+    end)
+
+    it("refuses when the button changed after it was drawn", function()
+      raid()
+      call(1)
+      roll("Doran Vale", 30)
+      local shown = row(1).buttons[1]
+      roll("Mirel Stone", 70)
+      local result
+      wow.click(function() result = { ns.Popup.Give(1, 1, shown.winner, shown.roll) } end)
+      assert.are.same({ nil, "changed" }, result)
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("disables the buttons in a boss fight, with the tooltip", function()
+      raid()
+      call(1)
+      roll("Mirel Stone", 87)
+      wow.bossFight(true)
+      local button = row(1).buttons[1]
+      assert.are.same({ false, "Chat is locked until the fight ends" }, { button.enabled, button.tooltip })
+      assert.are.same({ nil, "fight" }, { give(1) })
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("won't give to a roller the game can't hand it to", function()
+      raid({ "Masterlooter", "Ashla Brightwater", "Doran Vale" })
+      call(3)
+      roll("Quill Ashby", 80)
+      local r = row(3)
+      assert.is_false(r.buttons[1].enabled)
+      assert.is_truthy(r.rolls.unavailable:find("Quill Ashby can't be given it", 1, true))
+      assert.are.same({ nil, "not ready" }, { give(3) })
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("clears the pick with the loot window", function()
+      raid()
+      call(1)
+      roll("Doran Vale", 30)
+      roll("Mirel Stone", 70)
+      assert(ns.Popup.PickWinner(1, 1, "Doran Vale"))
+      wow.closeLoot()
+      raid()
+      call(1)
+      roll("Doran Vale", 30)
+      roll("Mirel Stone", 70)
+      assert.are.equal("Give to Mirel Stone (70)", row(1).buttons[1].text)
+    end)
+  end)
 end)

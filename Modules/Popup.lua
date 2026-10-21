@@ -5,6 +5,8 @@
 -- A hand-out the game doesn't confirm is recorded as not confirmed, and the officer resolves it
 -- with TryAgain, GiveElse (from GiveElseList) or NotHandedOut (#12). Build shows the row of such a
 -- hand-out as not confirmed, with those three choices (#95).
+-- Once a roll is called the row carries the roll list (#90): who rolled what, the winner pre-selected
+-- (the officer may pick another name), and the Give button that follows the pick.
 -- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
 local _, ns = ...
 
@@ -59,8 +61,14 @@ local chosenBoss -- the boss row id the officer picked for this loot window
 local sessionPick -- the D/B pick while no raid is loaded: kept until the game closes, never saved
 local dbNotes = {} -- per slot, why the last D/B click handed nothing out
 local refusals = {} -- per award key, why the last not-confirmed choice was refused
+local picks = {} -- per slot, the name the officer clicked in the roll list: { item, name }
+local METHODS = { hr = "HR", sr = "SR", open = "OPEN_ROLL" }
+local ROLL_HEADINGS = { hr = "Rolls (hard reserve holders only)", sr = "Rolls (soft reserve holders only)",
+  open = "Rolls (everyone)" }
+local NOT_RECEIVE = " can't be given it: the game won't let them receive it (usually: not nearby when"
+  .. " the boss died)."
 
-ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes, refusals = nil, {}, {} end)
+ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes, refusals, picks = nil, {}, {}, {} end)
 
 -- Whether the game locks chat for add-ons now (a boss fight). A call that fails counts as no lock.
 function Popup.ChatLocked()
@@ -199,7 +207,11 @@ local function resolveRow(it, ctx, earlier, copyNote, pendingKey)
   local mode = resolved.mode
   row.skipped = skippedList(resolved, earlier)
   row.contenders = {}
-  for _, h in ipairs(resolved.contenders) do row.contenders[#row.contenders + 1] = h.char end
+  row.users = {}
+  for _, h in ipairs(resolved.contenders) do
+    row.contenders[#row.contenders + 1] = h.char
+    row.users[bare(h.char)] = h.user
+  end
   if mode == "hr-single" or (mode == "sr" and #resolved.contenders == 1) then
     local winner = resolved.contenders[1]
     row.winner, row.user, row.action = winner.char, winner.user, "give"
@@ -247,16 +259,61 @@ local function resolveRow(it, ctx, earlier, copyNote, pendingKey)
   return row
 end
 
+-- The roll list of a row whose roll is called (result: Rolls.Result): the entries by roll, highest
+-- first, then those still waiting; the ignored rolls; and the Give button for the picked name, or
+-- for the highest roller when none is picked (nobody on a tie or a hidden roll). Returns the list and
+-- the Give button.
+local function rollList(row, result, boss, locked)
+  local entries = {}
+  for _, e in ipairs(result.entries) do entries[#entries + 1] = e end
+  table.sort(entries, function(a, b)
+    if (a.roll ~= nil) ~= (b.roll ~= nil) then return a.roll ~= nil end
+    return (a.roll or 0) > (b.roll or 0)
+  end)
+  local picked = picks[row.slot]
+  picked = picked and picked.item == row.item and picked.name or result.winner
+  local list = { heading = ROLL_HEADINGS[result.kind], entries = {}, ignored = {},
+    hint = "or click another name" }
+  list.count = result.total and (result.rolled .. " of " .. result.total .. " rolled")
+    or (result.rolled .. " rolled")
+  local chosen
+  for _, e in ipairs(entries) do
+    local selected = picked ~= nil and bare(e.name) == bare(picked)
+    if selected then chosen = e end
+    list.entries[#list.entries + 1] = { name = e.name, roll = e.roll, waiting = e.roll == nil,
+      selected = selected }
+  end
+  for _, i in ipairs(result.ignored) do
+    list.ignored[#list.ignored + 1] = { name = i.name, roll = i.roll, reason = i.reason }
+  end
+  local button = { text = "Give", action = "rollgive", enabled = false }
+  if chosen then
+    button.winner, button.roll = chosen.name, chosen.roll
+    button.text = "Give to " .. chosen.name .. (chosen.roll and (" (" .. chosen.roll .. ")") or "")
+    local cands = candidates(row.slot)
+    local listed = not cands
+    for _, name in ipairs(cands or {}) do
+      listed = listed or name == "Unknown" or bare(name) == bare(chosen.name)
+    end
+    button.enabled = boss.resolved and listed
+    if not listed then list.unavailable = chosen.name .. NOT_RECEIVE end
+  end
+  if locked then button.enabled, button.tooltip = false, FIGHT_TOOLTIP end
+  return list, button
+end
+
 -- The buttons of a row, once the boss is known: Give and D/B need a boss picked. In a boss fight
 -- the Give and roll buttons wait, with a tooltip saying why. A row being handed out, or not
 -- confirmed, has none (a not confirmed row's choices are in row.notConfirmed).
-local function addButtons(row, boss, locked)
+local function addButtons(row, boss, locked, result)
   if row.handout or row.notConfirmed then
     row.buttons = {}
     return
   end
   local primary
-  if row.action == "give" then
+  if result and (row.action == "roll" or row.action == "openroll") then
+    row.rolls, primary = rollList(row, result, boss, locked)
+  elseif row.action == "give" then
     primary = { text = "Give to " .. row.winner, action = "give",
       enabled = boss.resolved and not row.unavailable }
     if row.unavailable then primary.text = "Give to Unknown" end
@@ -344,8 +401,11 @@ end
 -- "no items". Fields: title, boss ({ name, id, resolved, notice, menuTitle, menu = { { id, name,
 -- selected, killed } } }), notice (no reserves), fight (the boss fight note, while chat is locked),
 -- syncLink, rows (every item of every loot-window page; each: slot, item, link, copy, mode, label,
--- contenders, winner, user, skipped, skippedText, note, text, action, unavailable, dbNote (why the
--- last D/B click handed nothing out), handout (while the game confirms a hand-out: { text, note }),
+-- contenders, users, winner, user, rolls (once a roll is called: { heading, count, entries = { { name,
+-- roll, waiting, selected } }, ignored = { { name, roll, reason } }, hint, unavailable }, whose Give
+-- button is buttons[1], action "rollgive", with winner and roll), skipped, skippedText, note, text,
+-- action, unavailable, dbNote (why the last D/B click handed nothing out), handout (while the game
+-- confirms a hand-out: { text, note }),
 -- notConfirmed (once the game gave up on its hand-out: { key, text, hint, refusal (why the last
 -- choice was refused), buttons (Try again, Give to someone else, Not handed out: text, action,
 -- enabled, tooltip), list = { title, people = { { char, method, kind, available, reason, enabled,
@@ -399,7 +459,7 @@ function Popup.Build()
     end
     if gaveUp and not handout then row.notConfirmed = notConfirmed(gaveUp, locked) end
     row.dbNote = dbNotes[it.slot]
-    addButtons(row, boss, locked)
+    addButtons(row, boss, locked, ns.Rolls.Result(it.slot, it.item))
     model.recheck = model.recheck or row.recheck
     model.rows[#model.rows + 1] = row
   end
@@ -418,8 +478,8 @@ end
 function Popup.DBPick(raidId)
   raidId = raidId or ns.Selection.Status().activeRaid
   if not raidId then return sessionPick end
-  local picks = ns.db.dbPick
-  return type(picks) == "table" and picks[raidId] or nil
+  local saved = ns.db.dbPick
+  return type(saved) == "table" and saved[raidId] or nil
 end
 
 -- The officer chose a name in the D/B list: it is remembered for the raid, and nothing is handed
@@ -472,22 +532,32 @@ end
 -- the row now names another item or winner, nothing happens. Returns the hand-out (Tracking's
 -- attempt, with awardKey and announced), or nil and why: "fight" (chat is locked), "not ready"
 -- (no Give enabled for the slot), "changed", "not a candidate" or Tracking.Give's reasons.
-function Popup.Give(slot, item, winner)
+-- A row with a roll list is given to the name picked there, with its roll (the one the button
+-- showed): winner and roll are what the clicked button showed.
+function Popup.Give(slot, item, winner, roll)
   if Popup.ChatLocked() then return nil, "fight" end
   local model = Popup.Build()
   local row
   for _, r in ipairs(model and model.rows or {}) do
     if r.slot == slot then row = r end
   end
-  if not (row and row.action == "give" and row.buttons[1] and row.buttons[1].enabled) then
+  local button = row and row.buttons[1]
+  local fromRolls = row and row.rolls and button.action == "rollgive"
+  if not (row and (row.action == "give" or fromRolls) and button and button.enabled) then
     return nil, "not ready"
   end
-  if row.item ~= item or row.winner ~= winner then return nil, "changed" end
+  if fromRolls then
+    if row.item ~= item or button.winner ~= winner or button.roll ~= roll then return nil, "changed" end
+  else
+    if row.item ~= item or row.winner ~= winner then return nil, "changed" end
+    roll = nil
+  end
+  local chosen = fromRolls and winner or row.winner
   local index
   for i = 1, MAX_CANDIDATES do
     local name = GetMasterLootCandidate(slot, i)
     if not name then break end
-    if bare(name) == bare(row.winner) then
+    if bare(name) == bare(chosen) then
       index = i
       break
     end
@@ -495,19 +565,38 @@ function Popup.Give(slot, item, winner)
   if not index then return nil, "not a candidate" end
   local attempt, reason = ns.Tracking.Give(slot, index)
   if not attempt then return nil, reason end
-  local method = row.mode == "hr" and "HR" or "SR"
-  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = row.winner,
-    user = row.user, method = method })
+  local method = fromRolls and METHODS[row.mode] or (row.mode == "hr" and "HR" or "SR")
+  local user = fromRolls and row.users[bare(chosen)] or row.user
+  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = chosen,
+    user = user, method = method, roll = roll })
   local data
   if op then
     attempt.awardKey = op.id
     local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
     data = { raid = snapshot.code, key = op.id, item = row.item, link = row.link, boss = model.boss.id,
-      method = method, winner = row.winner, practice = op.practice }
+      method = method, roll = roll, winner = chosen, practice = op.practice }
   end
   attempt.announced = post("award", data, why, "Award line for " .. row.link,
-    row.link .. " is being handed to " .. row.winner .. ", but its raid chat line couldn't be posted.")
+    row.link .. " is being handed to " .. chosen .. ", but its raid chat line couldn't be posted.")
   return attempt
+end
+
+-- The officer clicked a name in a row's roll list: the Give button follows. Returns true, or nil and
+-- why: "not ready" (the row has no roll list) or "not listed".
+function Popup.PickWinner(slot, item, name)
+  local model = Popup.Build()
+  for _, r in ipairs(model and model.rows or {}) do
+    if r.slot == slot and r.item == item and r.rolls then
+      for _, e in ipairs(r.rolls.entries) do
+        if bare(e.name) == bare(name) then
+          picks[slot] = { item = item, name = e.name }
+          return true
+        end
+      end
+      return nil, "not listed"
+    end
+  end
+  return nil, "not ready"
 end
 
 -- The newest hand-out of the award still followed (waiting, or given up on), or nil.

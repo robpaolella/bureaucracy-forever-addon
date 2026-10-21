@@ -1,8 +1,9 @@
 -- PopupFrame: draws the loot pop-up (#77) from the content model Popup.Build() makes (#10).
 -- It opens on LOOT_OPENED for the loot master, closes on LOOT_CLOSED, and redraws when the officer
 -- picks a boss, while a candidate's name is still loading, when a boss fight starts or ends and when
--- the game confirms a hand-out or gives up on it. Give hands out (#38) and Call roll starts a
--- roll-off (#13). D/B (#39)
+-- the game confirms a hand-out or gives up on it, and as each roll arrives (#90). Give hands out
+-- (#38) and Call roll starts a roll-off (#13); then the row lists the rolls and Give follows the
+-- name picked there. D/B (#39)
 -- gives to the raid's pick in one click; a right-click or Shift-click, or a click with no pick yet,
 -- opens the list to choose one. A hand-out the game didn't confirm shows its three choices (#95).
 local _, ns = ...
@@ -274,6 +275,19 @@ local function newList(row)
   return box
 end
 
+-- The roll list box: its heading and count, a button per name, the ignored rolls struck through.
+local function newRollBox(row)
+  local box = newBox(row)
+  box.heading = newText(box, "GameFontNormal")
+  box.count = newText(box, "GameFontHighlightSmall")
+  box.unavailable = newText(box, "GameFontHighlightSmall")
+  box.unavailable:SetTextColor(1, 0.6, 0.2)
+  box.unavailable:SetWidth(BOX_WIDTH - 12)
+  box.hint = newText(box, "GameFontDisableSmall")
+  box.names, box.ignored = {}, {}
+  return box
+end
+
 local function newRow()
   local row = CreateFrame("Frame", nil, frame)
   row:SetSize(WIDTH - 2 * PAD, ROW_MIN)
@@ -293,6 +307,8 @@ local function newRow()
   row.box = newBox(row)
   row.ncBox = newNotConfirmed(row)
   row.list = newList(row)
+  row.rollBox = newRollBox(row)
+  row.rollHint = newText(row, "GameFontDisableSmall")
   row.spinner = row.box:CreateTexture(nil, "ARTWORK")
   row.spinner:SetSize(14, 14)
   row.spinner:SetPoint("TOPLEFT", row.box, "TOPLEFT", 6, -6)
@@ -321,6 +337,12 @@ local function newRow()
     if button.action == "roll" or button.action == "openroll" then
       local result, why = ns.Rolls.Start(row.data.slot, row.data.item)
       if not result then ns.Log("Roll call for " .. row.data.link .. " refused: " .. tostring(why)) end
+      PopupFrame.Refresh()
+      return
+    end
+    if button.action == "rollgive" then
+      local ok, why = ns.Popup.Give(row.data.slot, row.data.item, button.winner, button.roll)
+      if not ok then ns.Log("Give for " .. row.data.link .. " refused: " .. tostring(why)) end
       PopupFrame.Refresh()
       return
     end
@@ -500,6 +522,89 @@ local function drawList(row, list, below)
   return below + y + 8
 end
 
+-- The roll list box: heading and "N of M rolled", one clickable line per name (the picked one gold
+-- with a dot), then the ignored rolls in grey, struck through. Returns the new y.
+local function drawRolls(row, rolls, below)
+  local box = row.rollBox
+  box.heading:ClearAllPoints()
+  box.heading:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
+  box.heading:SetText(rolls.heading)
+  box.count:ClearAllPoints()
+  box.count:SetPoint("TOPRIGHT", box, "TOPRIGHT", -6, -7)
+  box.count:SetText(rolls.count)
+  local y = 26
+  for i, e in ipairs(rolls.entries) do
+    local line = box.names[i]
+    if not line then
+      line = tipButton(box, BOX_WIDTH - 12)
+      line.name = newText(line, "GameFontHighlight")
+      line.name:SetPoint("LEFT", line, "LEFT", 22, 0)
+      line.roll = newText(line, "GameFontHighlight")
+      line.roll:SetPoint("RIGHT", line, "RIGHT", -6, 0)
+      line.dot = newText(line, "GameFontNormal")
+      line.dot:SetPoint("LEFT", line, "LEFT", 4, 0)
+      line.label:Hide()
+      line:SetScript("OnClick", function()
+        local ok, why = ns.Popup.PickWinner(row.data.slot, row.data.item, line.pick)
+        if not ok then ns.Log("Pick for " .. row.data.link .. " refused: " .. tostring(why)) end
+        PopupFrame.Refresh()
+      end)
+      box.names[i] = line
+    end
+    line.pick = e.name
+    line:ClearAllPoints()
+    line:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -y)
+    line.background:SetColorTexture(0.04, 0.04, 0.04, 1)
+    if e.selected then line.background:SetColorTexture(0.2, 0.15, 0.02, 1) end
+    line.dot:SetText(e.selected and "●" or "○")
+    line.name:SetText(e.name)
+    line.roll:SetText(e.waiting and "waiting" or tostring(e.roll))
+    local color = e.selected and GOLD or (e.waiting and { 0.5, 0.5, 0.5 } or { 1, 1, 1 })
+    line.dot:SetTextColor(unpack(color))
+    line.name:SetTextColor(unpack(color))
+    line.roll:SetTextColor(unpack(color))
+    line:Enable()
+    line:Show()
+    y = y + 20
+  end
+  for i = #rolls.entries + 1, #box.names do box.names[i]:Hide() end
+  for i, ig in ipairs(rolls.ignored) do
+    local line = box.ignored[i]
+    if not line then
+      line = { name = newText(box, "GameFontDisableSmall"), roll = newText(box, "GameFontDisableSmall"),
+        strike = box:CreateTexture(nil, "ARTWORK") }
+      line.strike:SetColorTexture(0.5, 0.5, 0.5, 1)
+      line.strike:SetHeight(1)
+      box.ignored[i] = line
+    end
+    line.name:ClearAllPoints()
+    line.name:SetPoint("TOPLEFT", box, "TOPLEFT", 28, -(y + 4))
+    line.name:SetText(ig.name .. " (" .. ig.reason .. ")")
+    line.roll:ClearAllPoints()
+    line.roll:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, -(y + 4))
+    line.roll:SetText(tostring(ig.roll))
+    line.strike:ClearAllPoints()
+    line.strike:SetPoint("LEFT", line.roll, "LEFT", 0, 0)
+    line.strike:SetWidth(line.roll:GetStringWidth())
+    line.name:Show()
+    line.roll:Show()
+    line.strike:Show()
+    y = y + 18
+  end
+  for i = #rolls.ignored + 1, #box.ignored do
+    local line = box.ignored[i]
+    line.name:Hide()
+    line.roll:Hide()
+    line.strike:Hide()
+  end
+  y = boxLine(box, box.unavailable, rolls.unavailable, y + 2)
+  box:ClearAllPoints()
+  box:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
+  box:SetSize(BOX_WIDTH, y + 4)
+  box:Show()
+  return below + y + 8
+end
+
 local function drawRow(row, data, y)
   row:ClearAllPoints()
   row:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
@@ -511,7 +616,7 @@ local function drawRow(row, data, y)
   row.badge:SetColorTexture(unpack(BADGE_COLORS[data.mode]))
   row.beside:ClearAllPoints()
   row.beside:SetPoint("LEFT", row.badge, "RIGHT", 6, 0)
-  local contenders = data.action == "roll"
+  local contenders = data.action == "roll" and not data.rolls
   row.beside:SetText(contenders and "" or data.text)
   local below = 40
   below = addLine(row, row.detail, contenders and data.text or nil, below)
@@ -541,6 +646,23 @@ local function drawRow(row, data, y)
   else
     box:Hide()
     row:SetScript("OnUpdate", nil)
+  end
+  row.rollBox:Hide()
+  row.rollHint:Hide()
+  row.primary:ClearAllPoints()
+  if data.rolls then
+    below = drawRolls(row, data.rolls, below)
+    -- The Give button sits under the list, as the design draws it, with its hint beside it.
+    row.primary:SetWidth(240)
+    row.primary:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
+    row.rollHint:ClearAllPoints()
+    row.rollHint:SetPoint("LEFT", row.primary, "RIGHT", 8, 0)
+    row.rollHint:SetText(data.rolls.hint)
+    row.rollHint:Show()
+    below = below + 26
+  else
+    row.primary:SetWidth(150)
+    row.primary:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -2)
   end
   local nc = data.notConfirmed
   row.ncBox:Hide()
@@ -763,6 +885,7 @@ local function redraw()
   if open then PopupFrame.Refresh() end
 end
 ns.On("ADDON_RESTRICTION_STATE_CHANGED", redraw)
+ns.On("CHAT_MSG_SYSTEM", redraw) -- a roll (counted or ignored): Rolls, loaded earlier, reads it first
 ns.Tracking.On("confirmed", redraw)
 ns.Tracking.On("unconfirmed", redraw)
 ns.Tracking.On("late", redraw)
