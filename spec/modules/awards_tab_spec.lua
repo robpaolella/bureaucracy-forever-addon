@@ -783,6 +783,19 @@ describe("the Awards tab's Undo", function()
     assert.is_false(row.undo:IsEnabled())
   end)
 
+  it("refuses a player no longer the loot master before the tab redraws, changing nothing", function()
+    local key = given()
+    local tab = openTab()
+    wow.state.lootMethod = { "master", nil, 2 }
+    local sent = #wow.sent
+    click(rowOf(tab, "Ana Vale").undo)
+    assert.is_nil(ns.Records.Get(key).voided)
+    assert.are.equal(sent, #wow.sent)
+    local row = rowOf(tab, "Ana Vale")
+    assert.are.equal("Only the loot master can undo awards.", row.refusal:GetText())
+    assert.is_false(row.undo:IsEnabled())
+  end)
+
   it("is greyed for another officer, doing nothing", function()
     wow.state.lootMethod = { "master", nil, 2 }
     given()

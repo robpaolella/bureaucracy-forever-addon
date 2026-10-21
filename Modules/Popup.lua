@@ -59,6 +59,7 @@ local REFUSALS = {
   ["handing out"] = "A hand-out of it is still waiting for the game.",
   ["not undoable"] = "Only a confirmed award can be undone.",
   ["undo fight"] = "Chat is locked in the boss fight. Undo waits until it ends.",
+  ["undo not loot master"] = "Only the loot master can undo awards.",
   unknown = "The game can't name them yet. Try again in a moment.",
   grey = "Grey items can only go to you.",
   empty = "That item is gone from the loot window.",
@@ -567,8 +568,9 @@ end
 function Popup.Refusal(key) return refusals[key] end
 
 -- Posts the operation's chat line, built from data, in raid (or party) chat. With no data (the
--- record wasn't saved; why says why) or a line that can't be built, nothing is posted: the log
--- says why under `what`, and the officer is told `told`. Returns true once posted.
+-- record wasn't saved; why says why), a line that can't be built or a send the game refuses with an
+-- error, nothing is posted: the log says why under `what`, and the officer is told `told`.
+-- Returns true once posted.
 local function post(operation, data, why, what, told)
   local line, problem
   if data then
@@ -577,8 +579,9 @@ local function post(operation, data, why, what, told)
     problem = "the record wasn't saved (" .. tostring(why) .. ")"
   end
   if line then
-    C_ChatInfo.SendChatMessage(line, IsInRaid() and "RAID" or "PARTY")
-    return true
+    local sent, err = pcall(C_ChatInfo.SendChatMessage, line, IsInRaid() and "RAID" or "PARTY")
+    if sent then return true end
+    problem = "the game refused it (" .. tostring(err) .. ")"
   end
   ns.Log(what .. " not posted: " .. problem)
   ns.Print(told .. " Type /bf log for why.")
@@ -998,10 +1001,11 @@ end
 -- Undo on a confirmed award (or one made by hand on the site) in the Awards tab (#40): voids it and
 -- posts its undo line. As NotHandedOut: no loot window needed, and a line that can't be built is not
 -- posted, the officer told and the void standing. Returns the void operation, or nil and why:
--- "fight", "not undoable" (not confirmed, or already voided), "handing out" or Records.Void's
--- reasons. A refusal changes nothing and posts nothing.
+-- "fight", "not loot master", "not undoable" (not confirmed, or already voided), "handing out" or
+-- Records.Void's reasons. A refusal changes nothing and posts nothing.
 function Popup.Undo(key)
   if Popup.ChatLocked() then return nil, "fight" end
+  if not isLootMaster() then return nil, "not loot master" end
   local award = ns.Records.Get(key)
   if not (award and (award.state == "confirmed" or award.state == "manual") and not award.voided) then
     return nil, "not undoable"
@@ -1081,7 +1085,7 @@ function Popup.Choose(key, action, char)
     ok, why = Popup.TryAgain(key)
   elseif action == "undo" then
     ok, why = Popup.Undo(key)
-    if why == "fight" then why = "undo fight" end
+    if REFUSALS["undo " .. tostring(why)] then why = "undo " .. why end
   else
     ok, why = Popup.NotHandedOut(key)
   end

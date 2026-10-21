@@ -1980,6 +1980,20 @@ describe("Popup.Undo", function()
       .. " Brightwater <BF1;V;SA0001;" .. op.id .. ";" .. key .. ">" }, wow.sent[#wow.sent])
   end)
 
+  it("keeps the void when the game refuses the line with an error, logging it and telling the officer",
+    function()
+      local key = given()
+      assert(ns.Records.Confirm(key))
+      _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
+      local printed = #wow.printed
+      assert.is_truthy(undo(key)[1])
+      assert.is_true(ns.Records.Get(key).voided)
+      assert.are.equal(0, #wow.sent)
+      assert.is_truthy(ns.log[#ns.log].text:find("^Undo line for .* not posted: the game refused it %("))
+      assert.is_truthy(wow.printed[printed + 1]:find("is no longer awarded to Ashla Brightwater, but its raid"
+        .. " chat line couldn't be posted. Type /bf log for why.", 1, true))
+    end)
+
   it("undoes a Disenchant/bank award with the line naming no winner", function()
     local key = given({ boss = "luc", item = 1, method = "DISENCHANT_BANK" })
     assert(ns.Records.Confirm(key))
