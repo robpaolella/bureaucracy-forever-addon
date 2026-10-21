@@ -497,6 +497,46 @@ describe("Records", function()
     end)
   end)
 
+  describe("an operation's author (spec 10.2)", function()
+    before_each(function() selectRaid() end)
+
+    it("is an award's or a replacement's sender", function()
+      local award = Records.Award(ana({ id = "aw-9d2f6h1j", sender = "Zoé Brûlé", author = "Bo Marsh" }))
+      local replace = Records.Replace(award.id, ana({ id = "aw-8d3c5n2a", sender = "Dee Holt" }),
+        { id = "rp-3n7b5x0c", author = "Bo Marsh" })
+      assert.are.same({ "Zoé Brûlé", "Dee Holt" }, { Records.Author(award), Records.Author(replace) })
+      assert.is_nil(ns.db.authors)
+    end)
+
+    it("of a received confirm, not-confirmed or void is kept apart from it, the first one standing", function()
+      local key = Records.Award(ana()).id
+      local confirm = Records.Confirm(key, { id = "cf-1x8p4d2s", author = "Zoé Brûlé" })
+      local notConfirmed = Records.NotConfirmed(key, { id = "nc-1x8p4d2s", author = "Bo Marsh" })
+      local void = Records.Void(key, { id = "vd-5b2n8c1w", author = "Dee Holt", via = "Bo Marsh" })
+      Records.Void(key, { id = "vd-5b2n8c1w", author = "Bo Marsh" })
+      assert.are.same({ "Zoé Brûlé", "Bo Marsh", "Dee Holt" },
+        { Records.Author(confirm), Records.Author(notConfirmed), Records.Author(void) })
+      for _, op in ipairs(Records.Ops(RAID)) do assert.is_nil(op.author) end
+      assert.is_nil(assert(ns.Sync.CopyOut(RAID)):find("Dee Holt", 1, true))
+    end)
+
+    it("is this officer for an operation made here", function()
+      local award = Records.Award(ana())
+      assert.are.same({ "Rae Quill", "Rae Quill" },
+        { Records.Author(award), Records.Author(Records.Confirm(award.id)) })
+      assert.is_nil(ns.db.authors)
+    end)
+
+    it("is dropped with a discarded no-raid operation", function()
+      ns.db.activeRaid = nil
+      local award = Records.Award(ana())
+      Records.Confirm(award.id, { id = "cf-1x8p4d2s", author = "Zoé Brûlé" })
+      assert.are.same({ ["cf-1x8p4d2s"] = "Zoé Brûlé" }, ns.db.authors)
+      Records.Discard()
+      assert.are.same({}, ns.db.authors)
+    end)
+  end)
+
   it("keeps records through a save and reload", function()
     selectRaid()
     local key = Records.Award(ana()).id

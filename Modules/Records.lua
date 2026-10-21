@@ -7,7 +7,9 @@
 -- catch-up (Merge, spec 3.4) are records with no operation: they are the site's already. Its
 -- voids for awards not held yet wait in .siteVoids[key] = { raid, env, reason, at } (spec 4.4),
 -- never as operations. An operation another officer forwarded keeps the forwarder's bare name in
--- .via[id] (spec 10.2): apart from the operation, so it is never uploaded or copied out.
+-- .via[id] (spec 10.2): apart from the operation, so it is never uploaded or copied out. The author
+-- of a received confirm, not-confirmed or void, whose text names none, is kept the same way in
+-- .authors[id], for catch-up replies.
 local _, ns = ...
 
 local Records = {}
@@ -192,12 +194,18 @@ local function record(raidId, op)
   return op, effect(awards, ops, op) and "recorded" or "pending"
 end
 
--- Keeps via, the bare name of whoever forwarded a newly saved operation; a copy already held
--- keeps what it had.
-local function keepVia(via, op, outcome)
-  if op and via and outcome ~= "replayed" then
-    ns.db.via = ns.db.via or {}
-    ns.db.via[op.id] = via
+-- Keeps fields.via, the bare name of whoever forwarded a newly saved operation, and fields.author,
+-- who made it, when its text names no sender; a copy already held keeps what it had.
+local function keepVia(fields, op, outcome)
+  if op and outcome ~= "replayed" then
+    if fields.via then
+      ns.db.via = ns.db.via or {}
+      ns.db.via[op.id] = fields.via
+    end
+    if fields.author and not (op.sender or op.award) then
+      ns.db.authors = ns.db.authors or {}
+      ns.db.authors[op.id] = fields.author
+    end
   end
   return op, outcome
 end
@@ -246,7 +254,8 @@ end
 -- A hand-out was announced. fields: boss, item, char, user, method, roll, note, practice, and
 -- optionally id, at, sender (this officer by default) and raid. It goes to the raid named, else
 -- the selected raid, or is held as no raid while none is loaded. Each operation below also takes
--- fields.via: the bare name of the officer who forwarded it, when it came forwarded.
+-- fields.via: the bare name of the officer who forwarded it, when it came forwarded; and
+-- fields.author: the bare name of the officer who made it, when it came from another.
 function Records.Award(fields)
   local reason = refusal(fields, "award")
   if reason then return nil, reason end
@@ -256,7 +265,7 @@ function Records.Award(fields)
     local held, heldRaid = locate(fields.id)
     if held then raidId = heldRaid end
   end
-  return keepVia(fields.via, record(raidId, awardOp(raidId, envOf(raidId), fields.practice, fields)))
+  return keepVia(fields, record(raidId, awardOp(raidId, envOf(raidId), fields.practice, fields)))
 end
 
 -- An operation naming an award by key goes where the award is held; for an award not held yet,
@@ -279,7 +288,7 @@ local function keyOp(kind, key, fields, extra)
     reason = extra(op, raidId, env, practice)
     if reason then return nil, reason end
   end
-  return keepVia(fields.via, record(raidId, op))
+  return keepVia(fields, record(raidId, op))
 end
 
 -- fields (optional): id, at, via, practice (used only for an award not held yet).
@@ -351,6 +360,7 @@ function Records.Discard()
   end
   for _, op in ipairs(ops) do
     if ns.db.via then ns.db.via[op.id] = nil end
+    if ns.db.authors then ns.db.authors[op.id] = nil end
   end
   ns.db.noRaid, ns.db.noRaidOps = nil, nil
   return #awards
@@ -416,4 +426,11 @@ Records.Get = locate
 -- The bare name of the officer who forwarded the operation with this id, or nil.
 function Records.Via(id)
   return (ns.db.via or {})[id]
+end
+
+-- The bare name of the officer who made op (spec 10.2's author): an award's or replacement's
+-- sender, else the author kept for it, else this officer.
+function Records.Author(op)
+  local sender = op.sender or (op.award and op.award.sender)
+  return sender or (ns.db.authors or {})[op.id] or ns.Rules.Bare(UnitName("player"))
 end
