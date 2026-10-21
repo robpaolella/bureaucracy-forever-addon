@@ -823,6 +823,21 @@ describe("Hub officers and the selection", function()
       assert.are.equal("S;SA0001;", sent()[1][1]:sub(1, 9))
     end)
 
+    it("this officer's, and the answers to P, are queued even when the queue is full", function()
+      wow.bossFight(true)
+      for i = 1, 100 do
+        assert.is_true(Hub.SendOp(assert(ns.Records.Award({ boss = "lb_lucifron", item = 16805,
+          char = "Ana Vale", user = "u_ana", method = "HR", id = string.format("aw-%08d", i) })), RAID))
+      end
+      Selection.ChooseOff()
+      receive("P;1", ZOE)
+      wow.bossFight(false)
+      for _ = 1, 110 do wow.advance(1) end
+      local last = {}
+      for i = #wow.addonMessages - 2, #wow.addonMessages do last[#last + 1] = wow.addonMessages[i].text end
+      assert.are.same({ "S;-;1792000000;Rae Quill", "P;0", "S;-;1792000000;Rae Quill" }, last)
+    end)
+
     it("and P keep flowing while not a guild run", function()
       wow.state.time = 1792000100
       Selection.ChooseOff()
@@ -849,6 +864,17 @@ describe("Hub officers and the selection", function()
       wow.fire("GROUP_ROSTER_UPDATE")
       assert.are.same({ "P;1", "PARTY" }, sent()[3])
       assert.are.same({ "none" }, status())
+    end)
+
+    it("left drops what was queued for it, so a quick new group gets none of it", function()
+      wow.fire("PLAYER_ENTERING_WORLD", false, true)
+      Selection.ChooseOff()
+      wow.state.group, wow.state.groupIsRaid = nil, false
+      wow.fire("GROUP_ROSTER_UPDATE")
+      wow.state.group, wow.state.groupIsRaid = { "Rae Quill", BO }, true
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.same({ { "P;1", "RAID" }, { "P;1", "RAID" } }, sent())
+      assert.is_true(logged("not in a group, so 1 messages weren't sent"))
     end)
 
     it("clears a saved selection at login outside a group", function()

@@ -224,13 +224,18 @@ local function succeeded(result)
   return result == true or result == ((results and results.Success) or 0)
 end
 
+-- Out of the group: nothing more is sent, and catch-up covers what was waiting.
+local function dropQueue()
+  if #queue == 0 then return end
+  ns.Log("Sync: not in a group, so " .. #queue .. " messages weren't sent; catch-up covers them.")
+  queue = {}
+end
+
 -- Sends the message at the head of the queue, and says how long to wait before the next.
 local function sendHead()
   local channel = groupChannel()
   if not channel then
-    -- Out of the group: nothing more is sent, and catch-up covers what was waiting.
-    ns.Log("Sync: not in a group, so " .. #queue .. " messages weren't sent; catch-up covers them.")
-    queue = {}
+    dropQueue()
     return 0
   end
   local message = queue[1]
@@ -262,10 +267,10 @@ pump = function()
 end
 
 -- Queues messages (a list of { body, target }), all or none. Returns false and why not: "not in
--- a group" or "the sending queue is full".
-local function enqueue(messages)
+-- a group" or "the sending queue is full"; uncapped ones are never refused for a full queue.
+local function enqueue(messages, uncapped)
   if not groupChannel() then return false, "not in a group" end
-  if #queue + #messages > QUEUE_SIZE then return false, "the sending queue is full" end
+  if not uncapped and #queue + #messages > QUEUE_SIZE then return false, "the sending queue is full" end
   for _, message in ipairs(messages) do queue[#queue + 1] = message end
   if not waiting then pump() end
   return true
@@ -328,9 +333,10 @@ local roster = {}
 -- Whether the player was in a group at the last look; nil until the first PLAYER_ENTERING_WORLD.
 local grouped
 
--- Queues a P or S body to the group, or as a whisper to target, paced with the rest.
+-- Queues a P or S body to the group, or as a whisper to target, paced with the rest. A full queue
+-- never refuses one: no catch-up covers a lost selection, and each is a single short message.
 local function sendBody(body, target)
-  local queued, why = enqueue({ { body = body, target = target } })
+  local queued, why = enqueue({ { body = body, target = target } }, true)
   if not queued then ns.Log("Sync: " .. why .. ", so " .. body .. " wasn't sent.") end
 end
 
@@ -457,6 +463,8 @@ ns.On("GROUP_ROSTER_UPDATE", function()
       if not inGroup(name) then roster[name] = nil end
     end
   elseif grouped then
+    -- What was queued for the old group, a selection included, never reaches the next one.
+    dropQueue()
     roster = {}
     ns.Selection.Clear()
     ns.UI.RefreshSync()
