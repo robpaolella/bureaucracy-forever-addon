@@ -437,6 +437,66 @@ describe("Records", function()
     end)
   end)
 
+  describe("a forwarded operation (spec 10.2)", function()
+    before_each(function() selectRaid() end)
+
+    it("keeps its author as sender and its forwarder as via, saved apart from the operation", function()
+      local award = Records.Award(ana({ id = "aw-9d2f6h1j", sender = "Zoé Brûlé", via = "Bo Marsh" }))
+      local void = Records.Void("aw-9d2f6h1j",
+        { id = "vd-5b2n8c1w", reason = "wrong winner", via = "Bo Marsh" })
+      local replace = Records.Replace("aw-9d2f6h1j", ana({ id = "aw-6k1m4v8z", sender = "Zoé Brûlé" }),
+        { id = "rp-3n7b5x0c", via = "Dee Holt" })
+      assert.are.equal("Zoé Brûlé", Records.Get("aw-9d2f6h1j").sender)
+      assert.are.same({ [award.id] = "Bo Marsh", [void.id] = "Bo Marsh", [replace.id] = "Dee Holt" },
+        ns.db.via)
+      assert.are.same({ "Bo Marsh", "Dee Holt" }, { Records.Via(award.id), Records.Via(replace.id) })
+      -- What the helper uploads and what is copied out carry no via.
+      for _, op in ipairs(Records.Ops(RAID)) do
+        assert.is_nil(op.via)
+        assert.is_nil(op.award and op.award.via)
+      end
+      for _, held in ipairs(ns.Raids.Awards(RAID)) do assert.is_nil(held.via) end
+      local text = assert(ns.Sync.CopyOut(RAID))
+      assert.is_nil(text:find("Bo Marsh", 1, true))
+      assert.is_nil(text:find("Dee Holt", 1, true))
+    end)
+
+    it("replays the same operation sent directly, or by another forwarder, keeping the first via", function()
+      Records.Award(ana({ id = "aw-9d2f6h1j", sender = "Zoé Brûlé", via = "Bo Marsh" }))
+      assert.are.equal("replayed",
+        select(2, Records.Award(ana({ id = "aw-9d2f6h1j", sender = "Zoé Brûlé" }))))
+      assert.are.equal("replayed",
+        select(2, Records.Award(ana({ id = "aw-9d2f6h1j", sender = "Zoé Brûlé", via = "Dee Holt" }))))
+      Records.Award(ana({ id = "aw-8d3c5n2a", sender = "Zoé Brûlé" }))
+      Records.Award(ana({ id = "aw-8d3c5n2a", sender = "Zoé Brûlé", via = "Bo Marsh" }))
+      assert.are.same({ ["aw-9d2f6h1j"] = "Bo Marsh" }, ns.db.via)
+      assert.are.equal(2, #Records.Ops(RAID))
+    end)
+
+    it("keeps via for an operation waiting for its award", function()
+      Records.Void("aw-7f3k2m9q", { id = "vd-5b2n8c1w", via = "Bo Marsh" })
+      assert.are.equal("Bo Marsh", Records.Via("vd-5b2n8c1w"))
+    end)
+
+    it("saves no via for a refused operation, nor for one made here", function()
+      Records.Award(ana({ id = "aw-9d2f6h1j" }))
+      assert.is_nil(Records.Award(ana({ id = "aw-9d2f6h1j", char = "Dee Holt", via = "Bo Marsh" })))
+      assert.is_nil(Records.Award(ana({ id = "bad", via = "Bo Marsh" })))
+      assert.is_nil(ns.db.via)
+    end)
+
+    it("is dropped with a discarded no-raid operation, and kept through a reload", function()
+      Records.Award(ana({ id = "aw-9d2f6h1j", sender = "Zoé Brûlé", via = "Bo Marsh" }))
+      ns.db.activeRaid = nil
+      local mine = Records.Award(ana())
+      Records.Void(mine.id, { id = "vd-5b2n8c1w", via = "Dee Holt" })
+      assert.are.equal(1, Records.Discard())
+      assert.are.same({ ["aw-9d2f6h1j"] = "Bo Marsh" }, ns.db.via)
+      ns = wow.start({ saved = { BureaucracyForeverDB = copy(BureaucracyForeverDB) } })
+      assert.are.equal("Bo Marsh", ns.Records.Via("aw-9d2f6h1j"))
+    end)
+  end)
+
   it("keeps records through a save and reload", function()
     selectRaid()
     local key = Records.Award(ana()).id

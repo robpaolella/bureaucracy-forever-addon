@@ -110,10 +110,11 @@ local function awardName(op)
   return "award " .. key
 end
 
--- Applies a whole operation to its raid through Records, with the author as its sender.
-local function apply(op, raidId, author)
+-- Applies a whole operation to its raid through Records, with the author as its sender; via is
+-- the bare name of whoever forwarded it (a catch-up reply, #20), nil for a direct message.
+function Hub.Apply(op, raidId, author, via)
   local Records = ns.Records
-  local fields = { id = op.id, at = op.at, practice = op.practice, raid = raidId }
+  local fields = { id = op.id, at = op.at, practice = op.practice, raid = raidId, via = via }
   local ok, why
   if op.type == "award" then
     for _, field in ipairs({ "boss", "item", "char", "user", "method", "roll", "note" }) do
@@ -152,7 +153,7 @@ local function complete(entry, raidId)
   if not op then
     return ns.Log("Sync: dropped " .. entry.sender .. "'s message " .. entry.msgid .. " (malformed).")
   end
-  apply(op, raidId, entry.author)
+  Hub.Apply(op, raidId, entry.author)
 end
 
 Hub.Register("O", function(body, sender)
