@@ -4,6 +4,7 @@
 -- Give is the officer's click on a Give button (#38): it hands out, records and announces.
 -- A hand-out the game doesn't confirm is recorded as not confirmed, and the officer resolves it
 -- with TryAgain, GiveElse (from GiveElseList) or NotHandedOut (#12; drawn by #95).
+-- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
 local _, ns = ...
 
 local Popup = {}
@@ -29,11 +30,15 @@ local OPEN_WINDOW = "Open the loot window to hand it out."
 local CHAT_LIMITS = { "Encounter", "Chat" }
 local UNKNOWN_BOSS_NOTICE = "These items drop from more than one boss. Pick the boss before awarding."
 local NO_RESERVES_NOTICE = "No reserves loaded, so every item is an open roll."
+local DB_TITLE = "Disenchant/bank: give to"
+local DB_CHOOSE_TIP = "Disenchant/bank: choose the character to give to."
 
 local bare = ns.Rules.Bare
 local chosenBoss -- the boss row id the officer picked for this loot window
+local sessionPick -- the D/B pick while no raid is loaded: kept until the game closes, never saved
+local dbNotes = {} -- per slot, why the last D/B click handed nothing out
 
-ns.On("LOOT_CLOSED", function() chosenBoss = nil end)
+ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes = nil, {} end)
 
 -- Whether the game locks chat for add-ons now (a boss fight). A call that fails counts as no lock.
 function Popup.ChatLocked()
@@ -238,9 +243,28 @@ local function addButtons(row, boss, locked)
     primary = { text = "Call open roll", action = "openroll", enabled = true }
   end
   if locked then primary.enabled, primary.tooltip = false, FIGHT_TOOLTIP end
-  local pick = ns.db.dbPick -- chosen by #39
-  row.buttons = { primary, { text = "D/B: " .. (pick and pick:match("^%S+") or "choose") .. " ▾",
-    action = "db", enabled = boss.resolved } }
+  local pick = Popup.DBPick()
+  local db = { text = "D/B: " .. (pick and pick:match("^%S+") or "choose") .. " ▾", action = "db",
+    pick = pick, enabled = boss.resolved and not locked }
+  if locked then
+    db.tooltip = FIGHT_TOOLTIP
+  elseif pick then
+    db.tooltip = "Disenchant/bank: give to " .. pick .. ". Right-click or Shift-click to choose someone else."
+  else
+    db.tooltip = DB_CHOOSE_TIP
+  end
+  row.buttons = { primary, db }
+end
+
+-- The D/B list: the group's members by name, the pick ticked. members: { { name, selected } }.
+local function dbMenu(raidId)
+  local pick, names, members = Popup.DBPick(), roster(), {}
+  table.sort(names, function(a, b) return bare(a):lower() < bare(b):lower() end)
+  for i, name in ipairs(names) do
+    members[i] = { name = name, selected = pick ~= nil and bare(name) == bare(pick) }
+  end
+  return { title = DB_TITLE, members = members,
+    note = raidId and "Remembered for this raid." or "Remembered until you close the game." }
 end
 
 local function footLine(raidId, snapshot)
@@ -257,9 +281,10 @@ end
 -- "no items". Fields: title, boss ({ name, id, resolved, notice, menuTitle, menu = { { id, name,
 -- selected, killed } } }), notice (no reserves), fight (the boss fight note, while chat is locked),
 -- syncLink, rows (every item of every loot-window page; each: slot, item, link, copy, mode, label,
--- contenders, winner, user, skipped, skippedText, note, text, action, unavailable, handout (while
--- the game confirms a hand-out: { text, note }), buttons (each: text, action, enabled, tooltip)),
--- count, foot, recheck.
+-- contenders, winner, user, skipped, skippedText, note, text, action, unavailable, dbNote (why the
+-- last D/B click handed nothing out), handout (while the game confirms a hand-out: { text, note }),
+-- buttons (each: text, action, enabled, tooltip; the D/B button's also pick)), dbMenu ({ title,
+-- members = { { name, selected } }, note }), count, foot, recheck.
 function Popup.Build()
   if not isLootMaster() then return nil, "not loot master" end
   if ns.Selection.IsQuiet() then return nil, "not a guild run" end
@@ -301,6 +326,7 @@ function Popup.Build()
       row.handout = { text = "Handing out to " .. handout.winner .. "…",
         note = handout.announced and ANNOUNCED or NOT_ANNOUNCED }
     end
+    row.dbNote = dbNotes[it.slot]
     addButtons(row, boss, locked)
     model.recheck = model.recheck or row.recheck
     model.rows[#model.rows + 1] = row
@@ -310,7 +336,36 @@ function Popup.Build()
     model.notice, model.syncLink = NO_RESERVES_NOTICE, "Sync"
   end
   if locked then model.fight = FIGHT_NOTICE end
+  model.dbMenu = dbMenu(raidId)
   return model
+end
+
+-- The raid's remembered disenchanter or bank character (D/B), or nil. Saved per raid in
+-- BureaucracyForeverDB.dbPick[raidId]; with no raid loaded it lasts until the game closes.
+function Popup.DBPick()
+  local raidId = ns.Selection.Status().activeRaid
+  if not raidId then return sessionPick end
+  local picks = ns.db.dbPick
+  return type(picks) == "table" and picks[raidId] or nil
+end
+
+-- The officer chose a name in the D/B list: it is remembered for the raid, and nothing is handed
+-- out. Returns true, or nil and "not in raid".
+function Popup.SetDBPick(name)
+  local found
+  for _, member in ipairs(roster()) do
+    if name and bare(member) == bare(name) then found = member end
+  end
+  if not found then return nil, "not in raid" end
+  local raidId = ns.Selection.Status().activeRaid
+  if raidId then
+    if type(ns.db.dbPick) ~= "table" then ns.db.dbPick = {} end
+    ns.db.dbPick[raidId] = found
+  else
+    sessionPick = found
+  end
+  dbNotes = {}
+  return true
 end
 
 -- Posts the operation's chat line, built from data, in raid (or party) chat. With no data (the
@@ -426,6 +481,51 @@ local function candidateIndex(slot, char)
     if not name then return end
     if bare(name) == bare(char) then return i end
   end
+end
+
+-- The officer clicked a row's D/B button: hands the item to the raid's pick, found by name among
+-- this corpse's candidates, records the award as Disenchant/bank with no winner (spec 9.2) and
+-- posts its line. A line that can't be built is not posted, and the officer is told; the hand-out
+-- and the award stand. item and pick are what the clicked button showed. A pick who can't receive
+-- the item hands nothing out, and the row says why. Returns the hand-out (Tracking's attempt, with
+-- awardKey and announced), or nil and why: "fight", "not ready" (no D/B enabled for the slot),
+-- "no pick", "changed", "not a candidate" or Tracking.Give's reasons.
+function Popup.GiveDB(slot, item, pick)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local model = Popup.Build()
+  local row
+  for _, r in ipairs(model and model.rows or {}) do
+    if r.slot == slot then row = r end
+  end
+  local button = row and row.buttons[2]
+  if not (button and button.enabled) then return nil, "not ready" end
+  if not button.pick then return nil, "no pick" end
+  if row.item ~= item or button.pick ~= pick then return nil, "changed" end
+  local index = candidateIndex(slot, pick)
+  if not index then
+    local inRaid
+    for _, member in ipairs(roster()) do inRaid = inRaid or bare(member) == bare(pick) end
+    dbNotes[slot] = inRaid and ("The game won't let " .. pick .. " receive this item (usually: not"
+      .. " nearby when the boss died). Right-click D/B to choose someone else.")
+      or (pick .. " isn't in the raid. Right-click D/B to choose someone else.")
+    return nil, "not a candidate"
+  end
+  local attempt, reason = ns.Tracking.Give(slot, index)
+  if not attempt then return nil, reason end
+  dbNotes[slot] = nil
+  ns.Rolls.End(slot, item)
+  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, method = "DISENCHANT_BANK" })
+  local data
+  if op then
+    attempt.awardKey = op.id
+    local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
+    data = { raid = snapshot and snapshot.code, key = op.id, item = row.item, link = row.link,
+      boss = model.boss.id, method = "DISENCHANT_BANK", practice = op.practice }
+  end
+  attempt.announced = post("award", data, why, "Award line for " .. row.link,
+    row.link .. " is being handed to " .. pick .. " to disenchant or bank, but its raid chat line"
+      .. " couldn't be posted.")
+  return attempt
 end
 
 -- The checks every hand-out choice shares. Returns the award and the slot, or nil and why.
