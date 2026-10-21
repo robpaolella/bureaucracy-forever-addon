@@ -726,6 +726,131 @@ describe("Popup", function()
         assert.are.same({ "not-confirmed", nil }, { award.state, award.voided })
       end
 
+      describe("the not confirmed row (#95)", function()
+        local RESERVES = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR"),
+          holder("Mirel Stone", "SR"), holder("Tovin Hale", "SR", { trial = true }) } }
+
+        local function row1() return ns.Popup.Build().rows[1] end
+
+        it("shows the three choices in place of the buttons, keeping the winner", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          local row = row1()
+          assert.are.same({ "Ashla Brightwater", "give", "Ashla Brightwater" },
+            { row.winner, row.action, row.text })
+          assert.are.same({}, row.buttons)
+          assert.is_nil(row.handout)
+          local nc = row.notConfirmed
+          assert.are.equal(key, nc.key)
+          assert.are.equal("The game didn't confirm that Ashla Brightwater got it. They may be too far away,"
+            .. " or their bags are full.", nc.text)
+          assert.are.equal("Try again posts nothing. Give to someone else posts one correction line, and"
+            .. " Not handed out posts an undo line. If you close this, it waits in the Awards tab as"
+            .. " \"not confirmed\".", nc.hint)
+          assert.are.same({ { "Try again", "tryagain", true }, { "Give to someone else", "giveelse", true },
+            { "Not handed out", "nothandedout", true } }, (function()
+            local list = {}
+            for i, b in ipairs(nc.buttons) do list[i] = { b.text, b.action, b.enabled } end
+            return list
+          end)())
+        end)
+
+        it("names who the hand-out went to for a Disenchant/bank award", function()
+          raid()
+          drop({ { id = 1 } })
+          ns.Popup.SetDBPick("Bram Ironvein")
+          wow.click(function() assert(ns.Popup.GiveDB(1, 1, "Bram Ironvein")) end)
+          wow.advance(ns.Tracking.confirmWait)
+          assert.is_truthy(row1().notConfirmed.text:find("confirm that Bram Ironvein got it", 1, true))
+        end)
+
+        it("lists the other contenders with their methods, greying one not in the raid", function()
+          unconfirmed({ reserves = RESERVES }, GROUP)
+          local list = row1().notConfirmed.list
+          assert.are.equal("Give " .. link(1) .. " to someone else", list.title)
+          assert.are.same({
+            { "Doran Vale", "Soft reserve", true, true, nil },
+            { "Mirel Stone", "Soft reserve", false, false, "not in raid" },
+          }, (function()
+            local out = {}
+            for i, p in ipairs(list.people) do
+              out[i] = { p.char, p.method, p.available, p.enabled, p.reason }
+            end
+            return out
+          end)())
+          assert.is_nil(list.empty)
+          assert.are.equal("Posts one correction line: Correction: " .. link(1)
+            .. " → their name, not Ashla Brightwater.", list.hint)
+        end)
+
+        it("says so when nobody else reserved it, and draws no open roll or disenchant line", function()
+          unconfirmed(nil, GROUP)
+          local list = row1().notConfirmed.list
+          assert.are.same({}, list.people)
+          assert.are.equal("No one else reserved it.", list.empty)
+        end)
+
+        it("waits on the lines in a boss fight, but leaves Try again", function()
+          unconfirmed({ reserves = RESERVES }, GROUP)
+          wow.bossFight(true)
+          local nc = row1().notConfirmed
+          assert.are.same({ true, false, false }, { nc.buttons[1].enabled, nc.buttons[2].enabled,
+            nc.buttons[3].enabled })
+          assert.are.equal("Posts a line, so it waits until the boss fight ends", nc.buttons[2].tooltip)
+          assert.is_nil(nc.buttons[1].tooltip)
+          assert.are.same({ false, "Posts a line, so it waits until the boss fight ends" },
+            { nc.list.people[1].enabled, nc.list.people[1].tooltip })
+          wow.bossFight(false)
+          assert.is_true(row1().notConfirmed.buttons[2].enabled)
+        end)
+
+        it("shows why a choice was refused until the next one or the window closing", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          ns.Popup.Refused(key, "window")
+          assert.are.equal("The loot window is closed. Open it to hand the item out.",
+            row1().notConfirmed.refusal)
+          ns.Popup.Refused(key, "fight")
+          assert.is_truthy(row1().notConfirmed.refusal:find("Chat is locked in the boss fight", 1, true))
+          ns.Popup.Refused(key, "something new")
+          assert.are.equal("It couldn't be done (something new).", row1().notConfirmed.refusal)
+          ns.Popup.Refused(key, nil)
+          assert.is_nil(row1().notConfirmed.refusal)
+          ns.Popup.Refused(key, "changed")
+          wow.fire("LOOT_CLOSED")
+          drop({ { id = 1 } })
+          assert.is_nil(row1().notConfirmed.refusal)
+        end)
+
+        it("shows the row waiting again after Try again, and the state again if it fails again", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          assert(click(ns.Popup.TryAgain, key))
+          assert.is_nil(row1().notConfirmed)
+          assert.is_table(row1().handout)
+          wow.advance(ns.Tracking.confirmWait)
+          assert.is_table(row1().notConfirmed)
+          assert.is_nil(row1().handout)
+        end)
+
+        it("clears the state when the game confirms late", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          wow.fire("LOOT_SLOT_CLEARED", 1)
+          wow.fire("CHAT_MSG_LOOT", "Ashla Brightwater receives loot: " .. link(1) .. ".")
+          assert.are.equal("confirmed", ns.Records.Get(key).state)
+          assert.is_nil(row1().notConfirmed)
+        end)
+
+        it("clears the state when the award is voided", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          assert(click(ns.Popup.NotHandedOut, key))
+          assert.is_nil(row1().notConfirmed)
+        end)
+
+        it("shows it only on the row holding the same item", function()
+          unconfirmed({ reserves = RESERVES }, GROUP)
+          wow.state.loot[1].link = link(2)
+          assert.is_nil(row1().notConfirmed)
+        end)
+      end)
+
       describe("a Disenchant/bank award (#39)", function()
         -- Gives item 1 to the D/B pick and lets the wait run out. Returns the award key.
         local function unconfirmedDB(fields)

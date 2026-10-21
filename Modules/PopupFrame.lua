@@ -1,9 +1,10 @@
 -- PopupFrame: draws the loot pop-up (#77) from the content model Popup.Build() makes (#10).
 -- It opens on LOOT_OPENED for the loot master, closes on LOOT_CLOSED, and redraws when the officer
 -- picks a boss, while a candidate's name is still loading, when a boss fight starts or ends and when
--- the game confirms a hand-out. Give hands out (#38) and Call roll starts a roll-off (#13). D/B (#39)
+-- the game confirms a hand-out or gives up on it. Give hands out (#38) and Call roll starts a
+-- roll-off (#13). D/B (#39)
 -- gives to the raid's pick in one click; a right-click or Shift-click, or a click with no pick yet,
--- opens the list to choose one.
+-- opens the list to choose one. A hand-out the game didn't confirm shows its three choices (#95).
 local _, ns = ...
 
 local PopupFrame = {}
@@ -22,6 +23,7 @@ local GOLD = { 1, 0.82, 0 }
 local TICK = "Interface\\Buttons\\UI-CheckBox-Check"
 local ARROW_DOWN = "|TInterface\\Buttons\\Arrow-Down-Up:12:12|t"
 local ARROW_UP = "|TInterface\\Buttons\\Arrow-Up-Up:12:12|t"
+local NC_WIDTHS = { 90, 150, 120 } -- the three choices of a not confirmed row
 local DB_SHOWN = 12 -- names the D/B list shows at once; the wheel scrolls the rest
 
 local frame, menu, dbList
@@ -29,6 +31,7 @@ local rows, entries, dbEntries = {}, {}, {} -- widgets reused from one draw to t
 local dbRow, dbOffset = nil, 0 -- the row whose D/B list is open, and how far it is scrolled
 local generation = 0 -- bumped by every LOOT_OPENED and LOOT_CLOSED, so a stale wait does nothing
 local open = false -- the loot window is open and the pop-up belongs to it
+local elseOpen -- the award key whose Give to someone else list is open
 local dismissed = false -- the officer closed the pop-up with its X; it stays shut for this loot window
 
 -- A piece of text styled like a game font. If the client has no font by that name the text still
@@ -169,6 +172,101 @@ local function toggleDBList(row)
   PopupFrame.Refresh()
 end
 
+-- A bordered box like the design's: a grey edge round a dark inside, hidden until drawn.
+local function newBox(row)
+  local box = CreateFrame("Frame", nil, row)
+  box.edge = box:CreateTexture(nil, "BACKGROUND")
+  box.edge:SetAllPoints()
+  box.edge:SetColorTexture(0.5, 0.5, 0.5, 1)
+  box.inside = box:CreateTexture(nil, "BORDER")
+  box.inside:SetPoint("TOPLEFT", box, "TOPLEFT", 1, -1)
+  box.inside:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -1, 1)
+  box.inside:SetColorTexture(0.04, 0.04, 0.04, 1)
+  box:Hide()
+  return box
+end
+
+-- A button in a box that shows its tooltip, even greyed.
+local function tipButton(parent, width)
+  local b = newButton(parent, width, 20)
+  if b.SetMotionScriptsWhileDisabled then b:SetMotionScriptsWhileDisabled(true) end
+  b:SetScript("OnEnter", function(self)
+    if not self.tip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(self.tip, 1, 1, 1)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  return b
+end
+
+-- What a click on one of a not confirmed row's three buttons does.
+local function choose(row, action)
+  local nc = row.data.notConfirmed
+  if action == "giveelse" then
+    elseOpen = elseOpen ~= nc.key and nc.key or nil
+    PopupFrame.Refresh()
+    return
+  end
+  local fn = action == "tryagain" and ns.Popup.TryAgain or ns.Popup.NotHandedOut
+  local ok, why = fn(nc.key)
+  if not ok then
+    ns.Log("Not confirmed choice " .. action .. " for " .. row.data.link .. " refused: " .. tostring(why))
+  end
+  ns.Popup.Refused(nc.key, not ok and why or nil)
+  PopupFrame.Refresh()
+end
+
+-- The Give button of a name in the Give to someone else list.
+local function giveElse(row, char)
+  local key = row.data.notConfirmed.key
+  local ok, why = ns.Popup.GiveElse(key, char)
+  if not ok then
+    ns.Log("Give to " .. char .. " instead for " .. row.data.link .. " refused: " .. tostring(why))
+  end
+  ns.Popup.Refused(key, not ok and why or nil)
+  if ok then elseOpen = nil end
+  PopupFrame.Refresh()
+end
+
+local function newNotConfirmed(row)
+  local box = newBox(row)
+  box.text = newText(box, "GameFontNormal")
+  box.text:SetWidth(BOX_WIDTH - 12)
+  box.text:SetTextColor(1, 0.6, 0.2)
+  box.refusal = newText(box, "GameFontHighlightSmall")
+  box.refusal:SetWidth(BOX_WIDTH - 12)
+  box.refusal:SetTextColor(1, 0.35, 0.35)
+  box.hint = newText(box, "GameFontDisableSmall")
+  box.hint:SetWidth(BOX_WIDTH - 12)
+  box.buttons = {}
+  for i, width in ipairs(NC_WIDTHS) do
+    local b = tipButton(box, width)
+    b:SetScript("OnClick", function()
+      local d = row.data and row.data.notConfirmed
+      if d and d.buttons[i].enabled then choose(row, d.buttons[i].action) end
+    end)
+    box.buttons[i] = b
+  end
+  return box
+end
+
+local function newList(row)
+  local box = newBox(row)
+  box.title = newText(box, "GameFontNormal")
+  box.title:SetWidth(BOX_WIDTH - 90)
+  box.back = tipButton(box, 60)
+  box.back:SetScript("OnClick", function()
+    elseOpen = nil
+    PopupFrame.Refresh()
+  end)
+  box.empty = newText(box, "GameFontHighlightSmall")
+  box.hint = newText(box, "GameFontDisableSmall")
+  box.hint:SetWidth(BOX_WIDTH - 12)
+  box.entries = {}
+  return box
+end
+
 local function newRow()
   local row = CreateFrame("Frame", nil, frame)
   row:SetSize(WIDTH - 2 * PAD, ROW_MIN)
@@ -184,16 +282,10 @@ local function newRow()
   row.beside = newText(row, "GameFontHighlightSmall")
   row.detail = newText(row, "GameFontHighlightSmall")
   row.skipped = newText(row, "GameFontDisableSmall")
-  -- The hand-out box, as the design draws it: a grey edge round a dark inside.
-  row.box = CreateFrame("Frame", nil, row)
-  row.box.edge = row.box:CreateTexture(nil, "BACKGROUND")
-  row.box.edge:SetAllPoints()
-  row.box.edge:SetColorTexture(0.5, 0.5, 0.5, 1)
-  row.box.inside = row.box:CreateTexture(nil, "BORDER")
-  row.box.inside:SetPoint("TOPLEFT", row.box, "TOPLEFT", 1, -1)
-  row.box.inside:SetPoint("BOTTOMRIGHT", row.box, "BOTTOMRIGHT", -1, 1)
-  row.box.inside:SetColorTexture(0.04, 0.04, 0.04, 1)
-  row.box:Hide()
+  -- The hand-out box, as the design draws it.
+  row.box = newBox(row)
+  row.ncBox = newNotConfirmed(row)
+  row.list = newList(row)
   row.spinner = row.box:CreateTexture(nil, "ARTWORK")
   row.spinner:SetSize(14, 14)
   row.spinner:SetPoint("TOPLEFT", row.box, "TOPLEFT", 6, -6)
@@ -273,6 +365,111 @@ local function addLine(row, line, text, y, color)
   return y + line:GetStringHeight() + 4
 end
 
+-- A line inside a box, wrapped to its width; empty text hides it. Returns the new y.
+local function boxLine(box, line, text, y)
+  line:ClearAllPoints()
+  if not text then
+    line:SetText("")
+    line:Hide()
+    return y
+  end
+  line:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -y)
+  line:SetText(text)
+  line:Show()
+  return y + line:GetStringHeight() + 4
+end
+
+-- The not confirmed box: what happened, the three choices, why the last one was refused, the hint.
+local function drawNotConfirmed(row, nc, below)
+  local box = row.ncBox
+  local y = boxLine(box, box.text, nc.text, 6) + 2
+  local x = 6
+  for i, b in ipairs(box.buttons) do
+    local d = nc.buttons[i]
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT", box, "TOPLEFT", x, -y)
+    x = x + NC_WIDTHS[i] + 6
+    setButton(b, d.text, d.enabled)
+    b.tip = d.tooltip
+  end
+  y = boxLine(box, box.refusal, nc.refusal, y + 26)
+  y = boxLine(box, box.hint, nc.hint, y)
+  box:ClearAllPoints()
+  box:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
+  box:SetSize(BOX_WIDTH, y + 4)
+  box:Show()
+  return below + y + 8
+end
+
+-- The Give to someone else list: each other contender with the method they hold and a Give
+-- button; one who can't receive is greyed with the reason and has no button.
+local function drawList(row, list, below)
+  local box = row.list
+  box.title:ClearAllPoints()
+  box.title:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
+  box.title:SetText(list.title)
+  box.back:ClearAllPoints()
+  box.back:SetPoint("TOPRIGHT", box, "TOPRIGHT", -6, -4)
+  setButton(box.back, list.back, true)
+  local y = 30
+  for i, person in ipairs(list.people) do
+    local e = box.entries[i]
+    if not e then
+      e = { name = newText(box, "GameFontHighlight"), method = newText(box, "GameFontHighlightSmall"),
+        give = tipButton(box, 60) }
+      e.give:SetScript("OnClick", function()
+        if e.enabled then giveElse(row, e.char) end
+      end)
+      box.entries[i] = e
+    end
+    e.char, e.enabled = person.char, person.enabled
+    e.name:ClearAllPoints()
+    e.name:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -(y + 4))
+    e.name:SetText(person.char)
+    e.method:ClearAllPoints()
+    e.method:SetPoint("TOPLEFT", box, "TOPLEFT", 170, -(y + 5))
+    e.method:SetText(person.available and person.method:upper() or person.reason)
+    if person.available then
+      e.name:SetTextColor(1, 1, 1)
+      e.method:SetTextColor(unpack(BADGE_COLORS[person.kind]))
+      e.give:ClearAllPoints()
+      e.give:SetPoint("TOPRIGHT", box, "TOPRIGHT", -10, -y)
+      setButton(e.give, "Give", person.enabled)
+      e.give.tip = person.tooltip
+      e.give:Show()
+    else
+      e.name:SetTextColor(0.5, 0.5, 0.5)
+      e.method:SetTextColor(0.5, 0.5, 0.5)
+      e.give:Hide()
+    end
+    e.name:Show()
+    e.method:Show()
+    y = y + 26
+  end
+  for i = #list.people + 1, #box.entries do
+    local e = box.entries[i]
+    e.name:Hide()
+    e.method:Hide()
+    e.give:Hide()
+  end
+  box.empty:ClearAllPoints()
+  if list.empty then
+    box.empty:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -(y + 4))
+    box.empty:SetText(list.empty)
+    box.empty:Show()
+    y = y + 26
+  else
+    box.empty:SetText("")
+    box.empty:Hide()
+  end
+  y = boxLine(box, box.hint, list.hint, y + 2)
+  box:ClearAllPoints()
+  box:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
+  box:SetSize(BOX_WIDTH, y + 4)
+  box:Show()
+  return below + y + 8
+end
+
 local function drawRow(row, data, y)
   row:ClearAllPoints()
   row:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
@@ -314,6 +511,14 @@ local function drawRow(row, data, y)
   else
     box:Hide()
     row:SetScript("OnUpdate", nil)
+  end
+  local nc = data.notConfirmed
+  row.ncBox:Hide()
+  row.list:Hide()
+  if nc and elseOpen == nc.key then
+    below = drawList(row, nc.list, below)
+  elseif nc then
+    below = drawNotConfirmed(row, nc, below)
   end
   local height = math.max(ROW_MIN, below + 4)
   row:SetHeight(height)
@@ -475,6 +680,12 @@ function PopupFrame.Refresh()
   frame.count:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PAD, -(y + 4))
   frame.count:SetText(model.count .. (model.count == 1 and " item" or " items"))
   y = y + 28
+  -- The list stays open only while its award still waits as not confirmed.
+  local listed
+  for _, data in ipairs(model.rows) do
+    listed = listed or (data.notConfirmed and data.notConfirmed.key == elseOpen)
+  end
+  if not listed then elseOpen = nil end
   for i, data in ipairs(model.rows) do
     rows[i] = rows[i] or newRow()
     y = drawRow(rows[i], data, y)
@@ -513,7 +724,7 @@ end)
 
 ns.On("LOOT_CLOSED", function()
   generation = generation + 1
-  open = false
+  open, elseOpen = false, nil
   if frame then frame:Hide() end
 end)
 
@@ -524,3 +735,4 @@ end
 ns.On("ADDON_RESTRICTION_STATE_CHANGED", redraw)
 ns.Tracking.On("confirmed", redraw)
 ns.Tracking.On("unconfirmed", redraw)
+ns.Tracking.On("late", redraw)
