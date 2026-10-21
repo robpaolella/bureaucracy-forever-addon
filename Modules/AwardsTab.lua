@@ -1,7 +1,8 @@
 -- The Awards tab and the footer's loot master line (#14): the selected raid's awards, grouped by
 -- boss, read only. A not confirmed row has three buttons: for the loot master they are the pop-up's
 -- three choices (#101), with its Give to someone else list and refusal text; another officer sees
--- them greyed. Draws into UI.tabs.Awards and UI.footer.
+-- them greyed. A confirmed award has Undo (#40), and one undone after it left the corpse is followed
+-- by its NEEDS A WINNER row. Draws into UI.tabs.Awards and UI.footer.
 local _, ns = ...
 
 local UI = ns.UI
@@ -15,6 +16,7 @@ local COLUMNS = { time = { 0, 44 }, item = { 48, 190 }, winner = { 242, 170 }, h
   roll = { 514, 30 }, note = { 548, 68 } } -- x and width
 local ROW_GAP, HEADING_HEIGHT, BUTTON_HEIGHT = 4, 22, 20
 local AMBER, GREY = "|cffffa000%s|r", "|cff808080%s|r"
+local UNDO_WIDTH, PICK_WIDTH = 60, 80
 local HOW = { HR = "Hard reserve", SR = "Soft reserve", OPEN_ROLL = "Open roll",
   DISENCHANT_BANK = "Disenchant/bank" }
 local BANNER = "Only the loot master (%s) can change awards."
@@ -22,6 +24,7 @@ local EMPTY_TITLE = "No awards yet this raid"
 local EMPTY_HINT = "Items you hand out with the pop-up, or from the game's loot menu, show up here "
   .. "with the time, boss, winner and how they won."
 local BUTTONS = { "Try again", "Someone else", "Not handed out" }
+local NEEDS_WINNER = AMBER:format("NEEDS A WINNER") .. " Undone after it left the corpse"
 
 local tab = {} -- the tab's pieces
 UI.awards = tab
@@ -59,19 +62,41 @@ local function row(snapshot, award)
     boss = bossName(snapshot, award.boss), item = parts.itemText(award.item), winner = plain(award.char),
     how = HOW[award.method] or plain(award.method), roll = award.roll,
     notConfirmed = award.state == "not-confirmed" and not award.voided,
+    undoable = (award.state == "confirmed" or award.state == "manual") and not award.voided,
+    -- Undone after the game confirmed it, and not yet given to anyone: the item left the corpse.
+    needsWinner = award.voided and award.state == "confirmed" and not award.replacedBy or nil,
     voided = award.voided and true or false,
     note = award.voided and (award.voidReason and plain(award.voidReason)
       or ("Undone " .. date("%H:%M", award.voidedAt or award.at))) or nil,
-    at = award.at }
+    at = award.at, voidedAt = award.voidedAt }
 end
 
 local function byTime(a, b) return a.at < b.at end
+
+-- The rows in time order, each award that needs a winner followed by its NEEDS A WINNER row
+-- (timed when it was undone).
+local function ordered(rows)
+  table.sort(rows, byTime)
+  local out = {}
+  for _, r in ipairs(rows) do
+    out[#out + 1] = r
+    if r.needsWinner then
+      local at = r.voidedAt or r.at
+      out[#out + 1] = { key = r.key, winnerNeeded = true, boss = r.boss, item = r.item, at = at,
+        time = date("%H:%M", at), practiceTime = date("%a %H:%M", at) }
+    end
+  end
+  return out
+end
 
 -- What the tab shows: { empty = true } with nothing to list; otherwise { summary, banner (for
 -- another officer), readOnly, groups = { { heading, rows } }, practice = { heading, rows } or nil }.
 -- A row has its award's `key`. A not confirmed row has `notConfirmed`, `refusal` (why the last
 -- choice was refused, even for a player no longer loot master), and for the loot master `choices`
--- (Popup.Choices); a voided one `voided` and its `note`.
+-- (Popup.Choices); a voided one `voided` and its `note`. A confirmed one (or one made on the site)
+-- has `undoable`, its `refusal`, and for the loot master `undo` (Popup.UndoButton: enabled,
+-- tooltip). A voided confirmed award not replaced has `needsWinner`, and is followed by a row with
+-- `winnerNeeded`, its key, boss, item and time.
 function UI.AwardsView()
   local raidId = ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
@@ -80,7 +105,8 @@ function UI.AwardsView()
   for _, award in ipairs(ns.Raids.Awards(raidId)) do
     local r = row(snapshot, award)
     if me and r.notConfirmed then r.choices = ns.Popup.Choices(r.key) end
-    if r.notConfirmed then r.refusal = ns.Popup.Refusal(r.key) end
+    if me and r.undoable then r.undo = ns.Popup.UndoButton(r.key) end
+    if r.notConfirmed or r.undoable then r.refusal = ns.Popup.Refusal(r.key) end
     if award.practice then practice[#practice + 1] = r else rows[#rows + 1] = r end
   end
   local view = { readOnly = not me, banner = name and not me and BANNER:format(plain(name)) or nil }
@@ -88,11 +114,12 @@ function UI.AwardsView()
     view.empty = true
     return view
   end
-  table.sort(rows, byTime)
-  local standing, unconfirmed = 0, 0
+  rows = ordered(rows)
+  local standing, unconfirmed, needed = 0, 0, 0
   for _, r in ipairs(rows) do
-    if not r.voided then standing = standing + 1 end
+    if not (r.voided or r.winnerNeeded) then standing = standing + 1 end
     if r.notConfirmed then unconfirmed = unconfirmed + 1 end
+    if r.winnerNeeded then needed = needed + 1 end
     local group = byBoss[r.boss]
     if not group then
       group = { boss = r.boss, rows = {} }
@@ -108,11 +135,11 @@ function UI.AwardsView()
   local counts = {}
   if standing > 0 then counts[#counts + 1] = plural(standing, "award", "awards") end
   if unconfirmed > 0 then counts[#counts + 1] = unconfirmed .. " not confirmed" end
+  if needed > 0 then counts[#counts + 1] = needed .. " needs a winner" end
   view.summary = table.concat(counts, " · ")
   if #practice > 0 then
-    table.sort(practice, byTime)
     view.practice = { heading = "Practice awards (" .. #practice .. ") · never sent to the guild site",
-      rows = practice }
+      rows = ordered(practice) }
   end
   return view
 end
@@ -135,19 +162,60 @@ local function put(text, column, y, value)
   text:SetText(value)
 end
 
--- The three change buttons of a not confirmed row: greyed, with nothing behind them.
-local function greyButton(index, x, y)
-  local b = tab.buttons[index]
+-- A button greyed for another officer, with nothing behind it, from pool.
+local function greyIn(pool, index, label, width, x, y)
+  local b = pool[index]
   if not b then
-    b = newButton(tab.child, BUTTONS[(index - 1) % 3 + 1], 86, BUTTON_HEIGHT)
+    b = newButton(tab.child, label, width, BUTTON_HEIGHT)
     b:Disable()
     b.background:SetColorTexture(0.2, 0.2, 0.2, 1)
     b.label:SetTextColor(0.5, 0.5, 0.5)
-    tab.buttons[index] = b
+    pool[index] = b
   end
   b:ClearAllPoints()
   b:SetPoint("TOPLEFT", tab.child, "TOPLEFT", x, -y)
   b:Show()
+  return b
+end
+
+-- The three change buttons of a not confirmed row: greyed, with nothing behind them.
+local function greyButton(index, x, y)
+  greyIn(tab.buttons, index, BUTTONS[(index - 1) % 3 + 1], 86, x, y)
+end
+
+-- The loot master's Undo on a confirmed row: voids the award and posts its undo line (Popup.Undo,
+-- through Popup.Choose). Greyed in a boss fight, its tooltip saying why.
+local function undoButton(index, y, key, undo)
+  local b = tab.undos[index]
+  if not b then
+    b = PopupFrame.TipButton(tab.child, UNDO_WIDTH)
+    b:SetScript("OnClick", function(self)
+      if self.undo.enabled then
+        ns.Popup.Choose(self.key, "undo")
+        UI.RefreshAwards()
+      end
+    end)
+    tab.undos[index] = b
+  end
+  PopupFrame.SetButton(b, "Undo", undo.enabled)
+  b.key, b.undo, b.tip = key, undo, undo.tooltip
+  b:ClearAllPoints()
+  b:SetPoint("TOPLEFT", tab.child, "TOPLEFT", CONTENT_WIDTH - UNDO_WIDTH, -y)
+  b:Show()
+  return b
+end
+
+-- The loot master's Pick winner on a NEEDS A WINNER row. It does nothing yet (#126).
+local function pickButton(index, y)
+  local b = tab.picks[index]
+  if not b then
+    b = newButton(tab.child, "Pick winner", PICK_WIDTH, BUTTON_HEIGHT)
+    tab.picks[index] = b
+  end
+  b:ClearAllPoints()
+  b:SetPoint("TOPLEFT", tab.child, "TOPLEFT", CONTENT_WIDTH - PICK_WIDTH, -y)
+  b:Show()
+  return b
 end
 
 -- The loot master's click on one of a not confirmed row's choices: Give to someone else opens or
@@ -229,20 +297,38 @@ local function drawRow(r, y, used, practice)
     note = cell(i, tab.notes, "GameFontDisableSmall") }
   put(shown.time, "time", y, GREY:format(practice and r.practiceTime or r.time))
   put(shown.item, "item", y, colour(r.item))
-  put(shown.winner, "winner", y,
-    colour(r.winner) .. (r.notConfirmed and " " .. AMBER:format("NOT CONFIRMED") or ""))
-  put(shown.how, "how", y, colour(r.how))
+  put(shown.winner, "winner", y, r.winnerNeeded and NEEDS_WINNER
+    or colour(r.winner) .. (r.notConfirmed and " " .. AMBER:format("NOT CONFIRMED") or ""))
+  put(shown.how, "how", y, r.how and colour(r.how) or "")
   put(shown.roll, "roll", y, r.roll and colour(tostring(r.roll)) or "")
-  put(shown.note, "note", y, r.note or (practice and AMBER:format("Practice")) or "")
-  local line = { time = shown.time, item = shown.item, winner = shown.winner,
-    how = shown.how, roll = shown.roll, note = shown.note, voided = r.voided, notConfirmed = r.notConfirmed }
+  -- Undo takes the note's place on a practice row; the group's heading says practice.
+  put(shown.note, "note", y, r.note or (practice and not (r.undoable or r.winnerNeeded)
+    and AMBER:format("Practice")) or "")
+  local line = { time = shown.time, item = shown.item, winner = shown.winner, how = shown.how,
+    roll = shown.roll, note = shown.note, voided = r.voided, notConfirmed = r.notConfirmed,
+    winnerNeeded = r.winnerNeeded }
   tab.shown[#tab.shown + 1] = line
   if r.voided then
     used.strikes = used.strikes + 1
     strike(used.strikes, y)
   end
+  -- Undo, or Pick winner, at the row's right end: the loot master's, or greyed for another officer.
+  if r.undo then
+    used.undos = used.undos + 1
+    line.undo = undoButton(used.undos, y, r.key, r.undo)
+  elseif r.undoable then
+    used.undoGreys = used.undoGreys + 1
+    line.undo = greyIn(tab.undoGreys, used.undoGreys, "Undo", UNDO_WIDTH, CONTENT_WIDTH - UNDO_WIDTH, y)
+  elseif r.winnerNeeded and not tab.view.readOnly then
+    used.picks = used.picks + 1
+    line.pick = pickButton(used.picks, y)
+  elseif r.winnerNeeded then
+    used.pickGreys = used.pickGreys + 1
+    line.pick = greyIn(tab.pickGreys, used.pickGreys, "Pick winner", PICK_WIDTH,
+      CONTENT_WIDTH - PICK_WIDTH, y)
+  end
   y = y + math.max(shown.item:GetStringHeight(), shown.winner:GetStringHeight(),
-    shown.how:GetStringHeight()) + ROW_GAP
+    shown.how:GetStringHeight(), (line.undo or line.pick) and BUTTON_HEIGHT or 0) + ROW_GAP
   local choices = r.notConfirmed and r.choices
   if choices and tab.elseOpen == r.key then
     -- Give to someone else's list, in the buttons' place, as the pop-up draws it.
@@ -314,7 +400,7 @@ function UI.RefreshAwards()
   local view = UI.AwardsView()
   tab.view = view
   hideAll({ tab.headings, tab.times, tab.items, tab.winners, tab.hows, tab.rolls, tab.notes,
-    tab.buttons, tab.choices, tab.refusals, tab.strikes })
+    tab.buttons, tab.choices, tab.refusals, tab.strikes, tab.undos, tab.undoGreys, tab.picks, tab.pickGreys })
   tab.list:Hide()
   tab.listShown = false
   tab.shown = {}
@@ -325,7 +411,8 @@ function UI.RefreshAwards()
   if view.banner then tab.banner:Show() tab.banner:SetText(view.banner) else tab.banner:Hide() end
   if list then
     tab.summary:SetText(view.summary)
-    local used = { rows = 0, headings = 0, buttons = 0, choices = 0, refusals = 0, strikes = 0 }
+    local used = { rows = 0, headings = 0, buttons = 0, choices = 0, refusals = 0, strikes = 0, undos = 0,
+      undoGreys = 0, picks = 0, pickGreys = 0 }
     local y = 0
     for _, group in ipairs(view.groups or {}) do
       y = drawHeading(group.heading, y, used)
@@ -354,7 +441,7 @@ local function build()
   tab.content = content
   tab.headings, tab.times, tab.items, tab.winners, tab.hows = {}, {}, {}, {}, {}
   tab.rolls, tab.notes, tab.buttons, tab.strikes, tab.shown = {}, {}, {}, {}, {}
-  tab.choices, tab.refusals = {}, {}
+  tab.choices, tab.refusals, tab.undos, tab.undoGreys, tab.picks, tab.pickGreys = {}, {}, {}, {}, {}, {}
 
   -- Another officer's view: a line above the list.
   tab.banner = newText(content, "GameFontNormal")
