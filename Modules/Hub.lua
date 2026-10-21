@@ -513,10 +513,31 @@ Hub.Register("S", function(body, sender)
   ns.UI.RefreshSync()
 end)
 
--- The bare names of the other group members seen running the add-on, sorted.
+-- Whether the bare name is a group member the game shows offline (the roster's online flag; in a
+-- party, UnitIsConnected). The player and anyone not found in the group never count as offline.
+local function offline(name)
+  if name == bare(UnitName("player")) then return false end
+  if IsInRaid() then
+    for i = 1, GetNumGroupMembers() do
+      local member, _, _, _, _, _, _, online = GetRaidRosterInfo(i)
+      if member and bare(member) == name then return online == false end
+    end
+    return false
+  end
+  for i = 1, GetNumGroupMembers() - 1 do
+    local member = UnitName("party" .. i)
+    if member and bare(member) == name then return not UnitIsConnected("party" .. i) end
+  end
+  return false
+end
+
+-- The bare names of the other group members seen running the add-on and online, sorted. A name
+-- that goes offline stays in the roster, so it counts again on coming back.
 function Hub.Roster()
   local list = {}
-  for name in pairs(roster) do list[#list + 1] = name end
+  for name in pairs(roster) do
+    if not offline(name) then list[#list + 1] = name end
+  end
   table.sort(list, ns.Selection.NameBefore)
   return list
 end
@@ -557,11 +578,11 @@ end
 
 -- Who asks the raid question (spec 2.1): the loot master if master loot is on and they run the
 -- add-on, else the raid leader if they run it, else the add-on user who comes first by name, byte
--- by byte. It runs on the P roster and the game's loot master and leader, so every add-on with the
--- same roster gives the same name.
+-- by byte. An officer who is offline doesn't count. It runs on the online P roster and the game's
+-- loot master and leader, so every add-on with the same roster gives the same name.
 function Hub.Chooser()
   local users = { [bare(UnitName("player"))] = true }
-  for name in pairs(roster) do users[name] = true end
+  for _, name in ipairs(Hub.Roster()) do users[name] = true end
   local master, lead = lootMaster(), leader()
   if master and users[master] then return master end
   if lead and users[lead] then return lead end

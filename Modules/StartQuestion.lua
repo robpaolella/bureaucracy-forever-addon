@@ -394,8 +394,9 @@ ns.On("PLAYER_ENTERING_WORLD", function(_, isReloadingUi)
 end)
 
 -- Joining a raid group (or the party becoming one) in a raid instance asks after the wait, and so
--- does the chooser who takes over when the one asked leaves the group. Leaving it closes the question.
-ns.On("GROUP_ROSTER_UPDATE", function()
+-- does the chooser who takes over when the one asked leaves the group or goes offline (the roster
+-- has no one offline). Leaving the group closes the question.
+local function update()
   local now = IsInRaid()
   if not now then
     if shown and shown.kind ~= "gone" then hide() end
@@ -413,4 +414,9 @@ ns.On("GROUP_ROSTER_UPDATE", function()
     end
   end
   raidGroup = now
-end)
+end
+
+ns.On("GROUP_ROSTER_UPDATE", update)
+-- A member going offline or coming back may not change the roster event.
+ns.On("PARTY_MEMBER_DISABLE", update)
+ns.On("PARTY_MEMBER_ENABLE", update)

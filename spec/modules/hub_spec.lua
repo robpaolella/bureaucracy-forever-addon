@@ -747,6 +747,54 @@ describe("Hub officers and the selection", function()
     end)
   end)
 
+  describe("the chooser, with officers offline", function()
+    before_each(function()
+      start("Rae Quill", { "Rae Quill", ZOE, BO, CY })
+      receive("P;0", ZOE)
+      receive("P;0", BO)
+    end)
+
+    it("skips an offline loot master, then an offline raid leader", function()
+      wow.state.lootMethod = { "master", 2, 3 }
+      wow.state.groupLeader = ZOE
+      assert.are.equal(BO, Hub.Chooser())
+      wow.state.offline = { [BO] = true }
+      assert.are.equal(ZOE, Hub.Chooser())
+      wow.state.offline = { [BO] = true, [ZOE] = true }
+      assert.are.equal("Rae Quill", Hub.Chooser())
+    end)
+
+    it("is the first online user by name when the leader and loot master are offline", function()
+      wow.state.groupLeader = ZOE
+      wow.state.offline = { [ZOE] = true }
+      assert.are.equal(BO, Hub.Chooser())
+    end)
+
+    it("is this player when all others are offline, and never reads this player as offline", function()
+      wow.state.groupLeader = ZOE
+      wow.state.offline = { [ZOE] = true, [BO] = true, ["Rae Quill"] = true }
+      assert.are.equal("Rae Quill", Hub.Chooser())
+      assert.is_true(Hub.IsChooser())
+      assert.are.same({}, Hub.Roster())
+    end)
+
+    it("counts an officer again on coming back online, without a new P", function()
+      wow.state.groupLeader = ZOE
+      wow.state.offline = { [ZOE] = true }
+      assert.are.same({ BO }, Hub.Roster())
+      wow.state.offline = nil
+      assert.are.equal(ZOE, Hub.Chooser())
+      assert.are.same({ BO, ZOE }, Hub.Roster())
+    end)
+
+    it("reads a party's online state with UnitIsConnected", function()
+      wow.state.groupIsRaid = false
+      wow.state.groupLeader = ZOE
+      wow.state.offline = { [ZOE] = true }
+      assert.are.equal(BO, Hub.Chooser())
+    end)
+  end)
+
   describe("S", function()
     it("is broadcast when this officer chooses a raid, not a guild run, or pastes", function()
       wow.state.time = 1792000100

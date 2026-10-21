@@ -280,10 +280,14 @@ local function installGlobals(metadata)
   wow.secret = {}
   _G.issecretvalue = function(value) return value == wow.secret end
   _G.GetNumGroupMembers = function() return #(wow.state.group or {}) end
-  -- A raid member's name and rank (2 for the leader).
+  -- A raid member's name, rank (2 for the leader) and, as the 8th value, whether they are online;
+  -- wow.state.offline = { name = true } sets a member offline.
   _G.GetRaidRosterInfo = function(i)
     local name = (wow.state.group or {})[i]
-    return name, leads(name) and 2 or 0
+    return name, leads(name) and 2 or 0, 1, 60, "", "", "", not (wow.state.offline or {})[name], false
+  end
+  _G.UnitIsConnected = function(unit)
+    return not (wow.state.offline or {})[_G.UnitName(unit)]
   end
   -- Item facts the game knows, as wow.state.items[id] = { name, link, icon }.
   _G.GetItemInfo = function(id)
