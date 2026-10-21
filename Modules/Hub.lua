@@ -1,23 +1,20 @@
--- Hub: officers' hidden sync messages in (ADDON-SPEC.md 10, 10.2 to 10.4; #71). Checks each
--- message's prefix and sender, hands its body to the handler for its type, and rebuilds O
--- messages from their chunks before applying the operation through Records.
+-- Hub: officers' hidden sync messages in and out (ADDON-SPEC.md 10, 10.2 to 10.4; #71, #25).
+-- Checks each message's prefix and sender, hands its body to the handler for its type, and
+-- rebuilds O messages from their chunks before applying the operation through Records. Sends
+-- this add-on's own operations, and Q requests and resends, through one paced queue.
 local _, ns = ...
 
 local Hub = {}
 ns.Hub = Hub
 
 local bare = ns.Rules.Bare
+local Sync = ns.Sync
 
 -- The game delivers only registered prefixes: the newer ones are registered so the add-on can
 -- tell the officer it needs updating (conductor's call, #71, 2026-10-15).
 local NEWEST = 5
 local RETRY_EVERY, RETRIES = 10, 3
 local MAX_PARTIAL = 4
-
--- Listeners #25 connects to sending. sendRequest(target, body) whispers a Q to target;
--- onRequest(sender, msgid, chunks) re-sends the chunks of msgid that sender asked for again.
-Hub.sendRequest = nil
-Hub.onRequest = nil
 
 local handlers = {}
 local noticed = {}
@@ -98,11 +95,7 @@ local function retry(entry, asked)
     if partials[entry.sender .. ";" .. entry.msgid] ~= entry then return end
     if asked == RETRIES then return drop(entry, "chunks still missing") end
     local body = "Q;" .. entry.msgid .. ";" .. missing(entry)
-    if Hub.sendRequest then
-      Hub.sendRequest(entry.sender, body)
-    else
-      ns.Log("Sync: no sender connected for " .. body .. " to " .. entry.sender .. ".")
-    end
+    Hub.sendRequest(entry.sender, body)
     retry(entry, asked + 1)
   end)
 end
@@ -162,7 +155,7 @@ local function complete(entry, raidId)
 end
 
 Hub.Register("O", function(body, sender)
-  local chunk = ns.Sync.ParseChunk(body)
+  local chunk = Sync.ParseChunk(body)
   if not chunk then return ns.Log("Sync: dropped a malformed O message from " .. sender .. ".") end
   if bare(chunk.author) ~= sender then
     -- Forwarded by a catch-up reply (#20), not applied here.
@@ -203,8 +196,141 @@ Hub.Register("Q", function(body, sender)
     chunks[#chunks + 1] = n
   end
   if not msgid then return ns.Log("Sync: dropped a malformed Q message from " .. sender .. ".") end
-  if Hub.onRequest then return Hub.onRequest(sender, msgid, chunks) end
-  ns.Log("Sync: " .. sender .. " asked again for " .. msgid .. "; nothing connected to re-send.")
+  Hub.onRequest(sender, msgid, chunks)
+end)
+
+-- Sending (#25): this add-on's own operations go out as O messages, one at a time, paced so the
+-- game doesn't throttle them, and held during boss fights. The queue lives only in this session:
+-- the records stay in Records, and catch-up covers what was never sent. The pace and sizes are
+-- cautious guesses, to check in a real raid (#22).
+local PACE = 1          -- seconds between two messages
+local FAILED_WAIT = 5   -- seconds before trying a message the game didn't send again
+local QUEUE_SIZE = 100  -- messages waiting to be sent
+local SENT_KEPT = 50    -- recent operations whose messages are kept to resend
+
+-- Each queued message: { body, target (a whisper; nil for the group), failed }.
+local queue, waiting, fighting, nextAt = {}, false, false, 0
+local sent, sentOrder = {}, {}
+
+-- The group's add-on channel, or nil when not in a group.
+local function groupChannel()
+  if IsInRaid() then return "RAID" end
+  if GetNumGroupMembers() > 0 then return "PARTY" end
+end
+
+local function succeeded(result)
+  local results = Enum and Enum.SendAddonMessageResult
+  return result == true or result == ((results and results.Success) or 0)
+end
+
+-- Sends the message at the head of the queue, and says how long to wait before the next.
+local function sendHead()
+  local channel = groupChannel()
+  if not channel then
+    -- Out of the group: its messages are dropped (catch-up covers them), whispers stay.
+    local kept, dropped = {}, 0
+    for _, message in ipairs(queue) do
+      if message.target then kept[#kept + 1] = message else dropped = dropped + 1 end
+    end
+    queue = kept
+    if dropped > 0 then
+      ns.Log("Sync: not in a group, so " .. dropped .. " messages weren't sent; catch-up covers them.")
+    end
+    if #queue == 0 then return 0 end
+  end
+  local message = queue[1]
+  local result = C_ChatInfo.SendAddonMessage(Sync.PREFIX, message.body,
+    message.target and "WHISPER" or channel, message.target)
+  if succeeded(result) then
+    table.remove(queue, 1)
+    return PACE
+  end
+  if not message.failed then
+    message.failed = true
+    ns.Log("Sync: the game didn't send a message (" .. tostring(result) .. "); trying it again.")
+  end
+  return FAILED_WAIT
+end
+
+local pump
+pump = function()
+  waiting = false
+  if fighting or #queue == 0 then return end
+  local wait = nextAt - GetTime()
+  if wait <= 0 then
+    wait = sendHead()
+    nextAt = GetTime() + wait
+    if #queue == 0 then return end
+  end
+  waiting = true
+  C_Timer.After(wait, pump)
+end
+
+-- Queues messages (a list of { body, target }), all or none; false when the queue is too full.
+local function enqueue(messages)
+  if #queue + #messages > QUEUE_SIZE then return false end
+  for _, message in ipairs(messages) do queue[#queue + 1] = message end
+  if not waiting then pump() end
+  return true
+end
+
+-- Sends an operation made on this add-on (as Records returns it) to the group, for its raid id.
+-- Returns true once queued; otherwise logs why, and the record waits for catch-up. Never call it
+-- for an operation received from another officer: those are never sent again.
+function Hub.SendOp(op, raidId)
+  local snapshot = raidId and ns.Raids.Get(raidId)
+  if not snapshot then
+    ns.Log("Sync: " .. op.id .. " has no loaded raid, so it wasn't sent; catch-up covers it.")
+    return false
+  end
+  if not groupChannel() then
+    ns.Log("Sync: not in a group, so " .. op.id .. " wasn't sent; catch-up covers it.")
+    return false
+  end
+  local msgid = Sync.NewMsgId()
+  local bodies = Sync.EncodeOp(op, snapshot.code, bare(UnitName("player")), msgid)
+  local messages = {}
+  for n, body in ipairs(bodies) do messages[n] = { body = body } end
+  if not enqueue(messages) then
+    ns.Log("Sync: the sending queue is full, so " .. op.id .. " wasn't sent; catch-up covers it.")
+    return false
+  end
+  sent[msgid] = bodies
+  sentOrder[#sentOrder + 1] = msgid
+  if #sentOrder > SENT_KEPT then sent[table.remove(sentOrder, 1)] = nil end
+  return true
+end
+
+-- Whispers a Q to target, paced with the rest.
+function Hub.sendRequest(target, body)
+  if not enqueue({ { body = body, target = target } }) then
+    ns.Log("Sync: the sending queue is full, so " .. body .. " to " .. target .. " wasn't sent.")
+  end
+end
+
+-- Re-sends the chunks of msgid that sender asked for again, as whispers.
+function Hub.onRequest(sender, msgid, chunks)
+  local bodies = sent[msgid]
+  if not bodies then
+    return ns.Log("Sync: " .. sender .. " asked again for " .. msgid .. ", which is no longer held.")
+  end
+  local messages = {}
+  for _, n in ipairs(chunks) do
+    if bodies[n] then
+      messages[#messages + 1] = { body = bodies[n], target = sender }
+    else
+      ns.Log("Sync: " .. sender .. " asked for chunk " .. n .. " of " .. msgid .. ", which has none.")
+    end
+  end
+  if not enqueue(messages) then
+    ns.Log("Sync: the sending queue is full, so " .. msgid .. " wasn't sent again to " .. sender .. ".")
+  end
+end
+
+ns.On("ENCOUNTER_START", function() fighting = true end)
+ns.On("ENCOUNTER_END", function()
+  fighting = false
+  if not waiting then pump() end
 end)
 
 for version = 1, NEWEST do

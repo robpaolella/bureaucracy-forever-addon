@@ -202,6 +202,7 @@ local function installGlobals(metadata)
   -- other parts of Enum before the start.
   _G.Enum = _G.Enum or {}
   _G.Enum.AddOnRestrictionType = { Combat = 0, Map = 1, Encounter = 2, Chat = 3 }
+  _G.Enum.SendAddonMessageResult = { Success = 0, AddonMessageThrottle = 3, GeneralError = 9 }
   _G.C_RestrictedActions = {
     IsAddOnRestrictionActive = function(value)
       for name, v in pairs(_G.Enum.AddOnRestrictionType) do
@@ -224,10 +225,12 @@ local function installGlobals(metadata)
   _G.SendChatMessage = protected("SendChatMessage", sendChat)
   _G.C_ChatInfo = {
     SendChatMessage = protected("SendChatMessage", sendChat),
+    -- wow.state.sendResult, when set, is what the game returns instead, and nothing is sent.
     SendAddonMessage = function(prefix, text, channel, target)
+      if wow.state.sendResult then return wow.state.sendResult end
       wow.addonMessages[#wow.addonMessages + 1] =
         { prefix = prefix, text = text, channel = channel, target = target }
-      return 0 -- Enum.SendAddonMessageResult.Success
+      return _G.Enum.SendAddonMessageResult.Success
     end,
     RegisterAddonMessagePrefix = function(prefix)
       wow.prefixes[#wow.prefixes + 1] = prefix
@@ -373,14 +376,17 @@ function wow.openLoot(items)
   wow.fire("LOOT_OPENED", false)
 end
 
--- A boss fight starts (true) or ends: like the beta showed, the Encounter and Chat limits and
--- chat lockdown switch on together, then off the moment the boss dies.
+-- A boss fight starts (true) or ends: like the beta showed, ENCOUNTER_START comes with the
+-- Encounter and Chat limits and chat lockdown switching on together, and they switch off the
+-- moment the boss dies, with ENCOUNTER_END (a kill of boss 1, "Boss").
 function wow.bossFight(on)
+  if on then wow.fire("ENCOUNTER_START", 1, "Boss", 0, 5) end
   wow.state.chatLockdown = on
   for _, name in ipairs({ "Encounter", "Chat" }) do
     wow.state.limits[name] = on or nil
     wow.fire("ADDON_RESTRICTION_STATE_CHANGED", _G.Enum.AddOnRestrictionType[name], on and 1 or 0)
   end
+  if not on then wow.fire("ENCOUNTER_END", 1, "Boss", 0, 5, 1) end
 end
 
 function wow.closeLoot()
