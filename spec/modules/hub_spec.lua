@@ -964,14 +964,15 @@ describe("Hub across a whole raid", function()
     return ns
   end
 
-  -- Awards to players first to last, through 40, by the officer whose turn it is.
+  -- Awards to players from to to, of the 40, by the officer whose turn it is.
   local function awards(from, to)
     return function(Records)
       local ops = {}
       for i = from, to do
         -- Every fifth award has a note long enough to need two messages.
         local note = i % 5 == 0 and string.rep("Trés bien; ", 14) or nil
-        ops[#ops + 1] = assert(Records.Award({ boss = "lb_lucifron", item = 16800 + i, char = players[i],
+        -- Players i and i + 20 get copies of one item.
+        ops[#ops + 1] = assert(Records.Award({ boss = "lb_lucifron", item = 16800 + i % 20, char = players[i],
           user = "u_" .. i, method = i % 2 == 0 and "SR" or "HR", roll = i, note = note }))
       end
       return ops
@@ -1061,6 +1062,13 @@ describe("Hub across a whole raid", function()
     end
     assert.is_nil(record(1).voided)
     assert.are.same({ true, true, true }, { record(2).voided, record(15).voided, record(16).voided })
+    -- The other copies of the voided awards' items stand, each its own award.
+    for _, i in ipairs({ 2, 15, 16 }) do
+      local copy = record(i + 20)
+      assert.are_not.equal(record(i).key, copy.key)
+      assert.are.equal(record(i).item, copy.item)
+      assert.is_nil(copy.voided)
+    end
     assert.are.same({ "not-confirmed", "confirmed" }, { record(3).state, record(28).state })
     assert.is_true(record(29).voided)
     local replacement = records[record(29).replacedBy]
