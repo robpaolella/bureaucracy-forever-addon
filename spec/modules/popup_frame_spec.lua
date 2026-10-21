@@ -343,7 +343,7 @@ describe("PopupFrame", function()
       local rows = shownRows()
       for _, row in ipairs(rows) do
         assert.is_false(row.primary:IsEnabled())
-        assert.is_true(row.db:IsEnabled())
+        assert.is_false(row.db:IsEnabled())
       end
       rows[1].primary.scripts.OnEnter(rows[1].primary)
       assert.are.same({ "Chat is locked until the fight ends" }, _G.GameTooltip.lines)
@@ -352,7 +352,7 @@ describe("PopupFrame", function()
       assert.are.same({}, wow.sent)
       wow.bossFight(false)
       assert.is_false(pf.frame.fight:IsShown())
-      for _, row in ipairs(shownRows()) do assert.is_true(row.primary:IsEnabled()) end
+      for _, row in ipairs(shownRows()) do assert.is_true(row.primary:IsEnabled() and row.db:IsEnabled()) end
       _G.GameTooltip.lines = {}
       shownRows()[1].primary.scripts.OnEnter(shownRows()[1].primary)
       assert.are.same({}, _G.GameTooltip.lines) -- no tooltip once the fight is over
@@ -367,6 +367,152 @@ describe("PopupFrame", function()
       assert.are.equal("Ashla Brightwater's name hasn't loaded yet (shown as \"Unknown\")."
         .. " Try again in a moment.", row.skipped:GetText())
       click(row.primary)
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+    end)
+  end)
+
+  describe("disenchant/bank (#39)", function()
+    local function raid(group)
+      setup({ code = "SA0001", reserves = { [1] = { holder("Ashla Brightwater", "HR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } }, group)
+    end
+
+    local function click(button, mouseButton)
+      wow.click(function() button.scripts.OnClick(button, mouseButton or "LeftButton") end)
+    end
+
+    local function shownEntries()
+      local list = {}
+      for _, entry in ipairs(pf.dbEntries()) do
+        if entry:IsShown() then list[#list + 1] = entry end
+      end
+      return list
+    end
+
+    local function entryNamed(name)
+      for _, entry in ipairs(shownEntries()) do
+        if entry.label:GetText() == name then return entry end
+      end
+    end
+
+    it("opens the list on a click with no pick; choosing a name remembers it and gives nothing", function()
+      raid()
+      drop({ { id = 1 } })
+      local db = shownRows()[1].db
+      assert.are.equal("D/B: choose ▾", db.label:GetText())
+      db.scripts.OnEnter(db)
+      assert.are.same({ "Disenchant/bank: choose the character to give to." }, _G.GameTooltip.lines)
+      click(db)
+      assert.is_true(pf.dbList:IsShown())
+      assert.are.equal("Disenchant/bank: give to", pf.dbList.title:GetText())
+      assert.are.equal("Remembered for this raid.", pf.dbList.note:GetText())
+      assert.is_false(pf.dbList.more:IsShown())
+      local names = {}
+      for i, entry in ipairs(shownEntries()) do
+        names[i] = entry.label:GetText()
+        assert.is_false(entry.tick:IsShown())
+      end
+      assert.are.same({ "Ashla Brightwater", "Bram Ironvein", "Doran Vale", "Masterlooter", "Mirel Stone" },
+        names)
+      click(entryNamed("Doran Vale"))
+      assert.is_false(pf.dbList:IsShown())
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+      assert.are.equal("D/B: Doran ▾", shownRows()[1].db.label:GetText())
+      -- Opened again, the pick is ticked.
+      click(shownRows()[1].db, "RightButton")
+      assert.is_true(entryNamed("Doran Vale").tick:IsShown())
+      assert.is_false(entryNamed("Mirel Stone").tick:IsShown())
+    end)
+
+    it("gives to the pick on a click; right-click or Shift-click opens the list instead", function()
+      raid()
+      drop({ { id = 1 }, { id = 2 } })
+      ns.Popup.SetDBPick("Doran Vale")
+      pf.Refresh()
+      local db = shownRows()[1].db
+      _G.GameTooltip.lines = {}
+      db.scripts.OnEnter(db)
+      assert.are.same({ "Disenchant/bank: give to Doran Vale. Right-click or Shift-click to choose someone"
+        .. " else." }, _G.GameTooltip.lines)
+      click(db, "RightButton")
+      assert.is_true(pf.dbList:IsShown())
+      assert.are.same({}, wow.gives)
+      click(db, "RightButton") -- a second right-click closes it
+      assert.is_false(pf.dbList:IsShown())
+      wow.state.shift = true
+      click(db)
+      assert.is_true(pf.dbList:IsShown())
+      assert.are.same({}, wow.gives)
+      wow.state.shift = false
+      click(db)
+      assert.is_false(pf.dbList:IsShown())
+      assert.are.same({ { slot = 1, candidate = 3 } }, wow.gives)
+      assert.are.equal(1, #wow.sent)
+      assert.is_truthy(wow.sent[1].text:find("→ disenchant/bank <BF1;A;SA0001;", 1, true))
+      local row = shownRows()[1]
+      assert.are.equal("Handing out to Doran Vale…", row.handout:GetText())
+      assert.is_false(row.db:IsShown())
+      -- The next row is one click too.
+      click(shownRows()[2].db)
+      assert.are.equal(2, #wow.gives)
+    end)
+
+    it("shows twelve names and scrolls the rest (popup-db)", function()
+      local group = { "Masterlooter" }
+      for i = 1, 24 do group[#group + 1] = string.format("Member %02d", i) end
+      raid(group)
+      drop({ { id = 1 } })
+      ns.Popup.SetDBPick("Member 02")
+      pf.Refresh()
+      click(shownRows()[1].db, "RightButton")
+      assert.are.equal(12, #shownEntries())
+      assert.are.equal("Masterlooter", shownEntries()[1].label:GetText())
+      assert.is_true(shownEntries()[3].tick:IsShown())
+      assert.is_true(pf.dbList.more:IsShown())
+      assert.is_truthy(pf.dbList.more:GetText():find("13 more · scroll", 1, true))
+      pf.dbList.scripts.OnMouseWheel(pf.dbList, -1)
+      assert.are.equal("Member 01", shownEntries()[1].label:GetText())
+      assert.is_truthy(pf.dbList.more:GetText():find("12 more · scroll", 1, true))
+      for _ = 1, 30 do pf.dbList.scripts.OnMouseWheel(pf.dbList, -1) end
+      assert.are.equal("Member 13", shownEntries()[1].label:GetText())
+      assert.is_truthy(pf.dbList.more:GetText():find("13 more · scroll", 1, true)) -- now above
+      assert.is_truthy(pf.dbList.more:GetText():find("Arrow-Up", 1, true))
+      click(entryNamed("Member 20"))
+      assert.are.equal("Member 20", ns.Popup.DBPick())
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("says why on the row when the pick can't receive the item", function()
+      raid()
+      drop({ { id = 1, candidates = { "Masterlooter", "Ashla Brightwater" } } })
+      ns.Popup.SetDBPick("Doran Vale")
+      pf.Refresh()
+      click(shownRows()[1].db)
+      assert.are.same({}, wow.gives)
+      assert.are.equal("The game won't let Doran Vale receive this item (usually: not nearby when the boss"
+        .. " died). Right-click D/B to choose someone else.", shownRows()[1].skipped:GetText())
+    end)
+
+    it("is greyed in a boss fight, says why, and closes an open list", function()
+      raid()
+      drop({ { id = 1 } })
+      ns.Popup.SetDBPick("Doran Vale")
+      pf.Refresh()
+      click(shownRows()[1].db, "RightButton")
+      assert.is_true(pf.dbList:IsShown())
+      wow.bossFight(true)
+      local db = shownRows()[1].db
+      assert.is_false(db:IsEnabled())
+      assert.is_false(pf.dbList:IsShown())
+      _G.GameTooltip.lines = {}
+      db.scripts.OnEnter(db)
+      assert.are.same({ "Chat is locked until the fight ends" }, _G.GameTooltip.lines)
+      click(db)
+      click(db, "RightButton")
+      assert.is_false(pf.dbList:IsShown())
       assert.are.same({}, wow.gives)
       assert.are.same({}, wow.sent)
     end)
