@@ -264,6 +264,26 @@ describe("Hub", function()
     assert.is_true(Records.Get("aw-8d3c5n2a").voided)
   end)
 
+  it("credits a forwarded operation to its author and saves the forwarder only as via", function()
+    ns.Hub.Apply(award({ sender = "Somebody Else" }), RAID, ZOE, BO)
+    ns.Hub.Apply({ type = "void", id = "vd-5b2n8c1w", key = "aw-9d2f6h1j", reason = "wrong winner",
+      at = 1792001260 }, RAID, ZOE, BO)
+    local held = Records.Get("aw-9d2f6h1j")
+    assert.are.same({ ZOE, true }, { held.sender, held.voided })
+    assert.are.same({ ["aw-9d2f6h1j"] = BO, ["vd-5b2n8c1w"] = BO }, ns.db.via)
+    for _, op in ipairs(Records.Ops(RAID)) do assert.is_nil(op.via) end
+    assert.is_nil(assert(Sync.CopyOut(RAID)):find(BO, 1, true))
+    -- A direct copy arriving later is the same operation.
+    send(award())
+    assert.are.equal(2, #Records.Ops(RAID))
+    assert.are.same({}, wow.printed)
+  end)
+
+  it("saves no via for a direct message", function()
+    send(award())
+    assert.is_nil(ns.db.via)
+  end)
+
   describe("a resend request", function()
     it("goes to the connected listener with the sender, msgid and chunks", function()
       local got

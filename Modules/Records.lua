@@ -6,7 +6,8 @@
 -- in the list and takes effect when the award arrives (4.2). Awards merged from the site's
 -- catch-up (Merge, spec 3.4) are records with no operation: they are the site's already. Its
 -- voids for awards not held yet wait in .siteVoids[key] = { raid, env, reason, at } (spec 4.4),
--- never as operations.
+-- never as operations. An operation another officer forwarded keeps the forwarder's bare name in
+-- .via[id] (spec 10.2): apart from the operation, so it is never uploaded or copied out.
 local _, ns = ...
 
 local Records = {}
@@ -191,6 +192,16 @@ local function record(raidId, op)
   return op, effect(awards, ops, op) and "recorded" or "pending"
 end
 
+-- Keeps via, the bare name of whoever forwarded a newly saved operation; a copy already held
+-- keeps what it had.
+local function keepVia(via, op, outcome)
+  if op and via and outcome ~= "replayed" then
+    ns.db.via = ns.db.via or {}
+    ns.db.via[op.id] = via
+  end
+  return op, outcome
+end
+
 -- The raid awards go to now: the selected raid when loaded, else nil (no raid).
 local function current()
   local raidId = ns.db.activeRaid
@@ -234,7 +245,8 @@ end
 
 -- A hand-out was announced. fields: boss, item, char, user, method, roll, note, practice, and
 -- optionally id, at, sender (this officer by default) and raid. It goes to the raid named, else
--- the selected raid, or is held as no raid while none is loaded.
+-- the selected raid, or is held as no raid while none is loaded. Each operation below also takes
+-- fields.via: the bare name of the officer who forwarded it, when it came forwarded.
 function Records.Award(fields)
   local reason = refusal(fields, "award")
   if reason then return nil, reason end
@@ -244,7 +256,7 @@ function Records.Award(fields)
     local held, heldRaid = locate(fields.id)
     if held then raidId = heldRaid end
   end
-  return record(raidId, awardOp(raidId, envOf(raidId), fields.practice, fields))
+  return keepVia(fields.via, record(raidId, awardOp(raidId, envOf(raidId), fields.practice, fields)))
 end
 
 -- An operation naming an award by key goes where the award is held; for an award not held yet,
@@ -267,10 +279,10 @@ local function keyOp(kind, key, fields, extra)
     reason = extra(op, raidId, env, practice)
     if reason then return nil, reason end
   end
-  return record(raidId, op)
+  return keepVia(fields.via, record(raidId, op))
 end
 
--- fields (optional): id, at, practice (used only for an award not held yet).
+-- fields (optional): id, at, via, practice (used only for an award not held yet).
 function Records.Confirm(key, fields)
   return keyOp("confirm", key, fields)
 end
@@ -279,7 +291,7 @@ function Records.NotConfirmed(key, fields)
   return keyOp("not-confirmed", key, fields)
 end
 
--- fields (optional): reason, id, at, practice.
+-- fields (optional): reason, id, at, via, practice.
 function Records.Void(key, fields)
   fields = fields or {}
   return keyOp("void", key, fields, function(op)
@@ -333,9 +345,12 @@ end
 -- keys (spec 4.4). They were never sent, so nothing reaches the site; it works while not a guild
 -- run too. Returns how many awards were discarded.
 function Records.Discard()
-  local awards = lists(nil)
+  local awards, ops = lists(nil)
   for _, award in ipairs(awards) do
     if ns.db.siteVoids then ns.db.siteVoids[award.key] = nil end
+  end
+  for _, op in ipairs(ops) do
+    if ns.db.via then ns.db.via[op.id] = nil end
   end
   ns.db.noRaid, ns.db.noRaidOps = nil, nil
   return #awards
@@ -397,3 +412,8 @@ end
 
 -- The award with this key and its raid id (nil for no raid), or nil.
 Records.Get = locate
+
+-- The bare name of the officer who forwarded the operation with this id, or nil.
+function Records.Via(id)
+  return (ns.db.via or {})[id]
+end
