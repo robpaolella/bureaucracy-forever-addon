@@ -1073,6 +1073,171 @@ describe("the Sync tab", function()
     end)
   end)
 
+  describe("awards with no raid (sync-noraid, sync-discard)", function()
+    local function made(fields)
+      local f = { boss = "lb_lucifron", item = 100, char = "Ashla Brightwater", user = "u1",
+        method = "OPEN_ROLL", roll = 71 }
+      for k, v in pairs(fields or {}) do f[k] = v end
+      return assert(ns.Records.Award(f))
+    end
+    local function cellText(column, i) return sync.cells["noRaid" .. column][i]:GetText() end
+    local function rowTexts(i)
+      return { cellText("boss", i), cellText("item", i), cellText("char", i), cellText("method", i),
+        cellText("roll", i) }
+    end
+    local function menuTexts(menu)
+      local shown = {}
+      for i, b in ipairs(menu.entries) do
+        if b:IsShown() then shown[i] = b.label:GetText() end
+      end
+      return shown
+    end
+
+    before_each(function()
+      wow.state.items[100] = { name = "Choker", link = "[Choker]", icon = 1 }
+    end)
+
+    it("shows nothing when no award lacks a raid", function()
+      paste(pasteText("raid00001"))
+      assert.is_false(sync.noRaidNote:IsShown())
+      assert.is_false(sync.attach:IsShown())
+      assert.is_false(sync.discard:IsShown())
+    end)
+
+    it("lists the awards with how many, the hint, and Attach and Discard", function()
+      made({ at = 1792000000 })
+      made({ boss = "lb_other", method = "HR", roll = 5, char = "Doran Vale", item = 5 })
+      ns.UI.RefreshSync()
+      assert.are.same({ "warn", "|cffffa0202 awards aren't linked to a raid.|r They were made while no "
+        .. "raid was chosen, so they can't be sent to the site yet." },
+        { sync.noRaidNote.kind, sync.noRaidNote.text:GetText() })
+      assert.are.equal("|cff808080" .. date("%H:%M", 1792000000) .. "|r", cellText("at", 1))
+      assert.are.same({ "lb_lucifron", "|T1:14|t [Choker]", "Ashla Brightwater", "Open roll", "71" },
+        rowTexts(1))
+      assert.are.same({ "lb_other", "Item 5", "Doran Vale", "Hard reserve", "5" }, rowTexts(2))
+      assert.are.equal("Methods stay as recorded; fix any on the site afterwards. Discard if they were from "
+        .. "a run that wasn't a guild run.", sync.noRaidHint:GetText())
+      assert.are.same({ "Attach to:", "Attach", "Discard" },
+        { sync.attachLabel:GetText(), sync.attach.label:GetText(), sync.discard.label:GetText() })
+    end)
+
+    it("says award in the singular", function()
+      made()
+      ns.UI.RefreshSync()
+      assert.are.equal("|cffffa0201 award isn't linked to a raid.|r They were made while no raid was chosen, "
+        .. "so they can't be sent to the site yet.", sync.noRaidNote.text:GetText())
+    end)
+
+    it("names a boss from a loaded raid", function()
+      made()
+      local boss = { id = "lb_lucifron", name = "Lucifron", items = {}, trash = false }
+      paste(pasteText("raid00001", { bosses = { boss } }))
+      assert.are.equal("Lucifron", cellText("boss", 1))
+    end)
+
+    it("has Attach disabled and no picker with no raid loaded", function()
+      made()
+      ns.UI.RefreshSync()
+      assert.is_false(sync.attachPick:IsShown())
+      assert.is_false(sync.attach:IsEnabled())
+      assert.is_true(sync.discard:IsEnabled())
+    end)
+
+    it("attaches to the selected raid by default, so they copy out with it", function()
+      local award = made()
+      paste(pasteText("raid00001"))
+      assert.are.equal("Molten Core, " .. DAY .. " ▾", sync.attachPick.label:GetText())
+      assert.is_true(sync.attach:IsEnabled())
+      wow.click(function() sync.attach.scripts.OnClick() end)
+      assert.are.equal("raid00001", ns.Records.Get(award.id).raid)
+      assert.are.equal(1, #ns.Raids.Awards("raid00001"))
+      assert.are.same({}, ns.Raids.NoRaidAwards())
+      assert.is_false(sync.noRaidNote:IsShown())
+      assert.is_truthy(ns.Sync.CopyOut("raid00001"):find(award.id, 1, true))
+    end)
+
+    it("attaches to another raid when it is picked from the menu", function()
+      local award = made()
+      paste(pasteText("raid00001"))
+      paste(pasteText("raid00002", { name = "Onyxia's Lair" }))
+      sync.attachPick.scripts.OnClick()
+      assert.is_true(sync.attachMenu:IsShown())
+      assert.are.equal("Which raid?", sync.attachMenu.title:GetText())
+      assert.are.same({ "   Molten Core, " .. DAY, "> Onyxia's Lair, " .. DAY }, menuTexts(sync.attachMenu))
+      sync.attachMenu.entries[1].scripts.OnClick()
+      assert.is_false(sync.attachMenu:IsShown())
+      assert.are.equal("Molten Core, " .. DAY .. " ▾", sync.attachPick.label:GetText())
+      wow.click(function() sync.attach.scripts.OnClick() end)
+      assert.are.equal("raid00001", ns.Records.Get(award.id).raid)
+    end)
+
+    it("keeps both sets when the raid already has awards", function()
+      paste(pasteText("raid00001"))
+      local first = made()
+      ns.Selection.ChooseOff()
+      ns.Selection.ChooseRaid("raid00001", true)
+      assert.are.equal("raid00001", ns.Records.Get(first.id).raid)
+      -- Held as no raid until a raid is chosen again.
+      ns.db.activeRaid = nil
+      local second = made({ item = 5 })
+      assert.is_nil(ns.Records.Get(second.id).raid)
+      ns.db.activeRaid = "raid00001"
+      ns.UI.RefreshSync()
+      wow.click(function() sync.attach.scripts.OnClick() end)
+      local held = ns.Raids.Awards("raid00001")
+      assert.are.same({ first.id, second.id }, { held[1].key, held[2].key })
+    end)
+
+    it("makes the officer choose when no raid is selected", function()
+      made()
+      paste(pasteText("raid00001"))
+      ns.Selection.ChooseOff()
+      ns.UI.RefreshSync()
+      assert.are.equal("Choose a raid ▾", sync.attachPick.label:GetText())
+      assert.is_false(sync.attach:IsEnabled())
+    end)
+
+    it("shows Attach disabled while it is not a guild run, and Discard still works", function()
+      made()
+      paste(pasteText("raid00001"))
+      ns.Selection.ChooseOff()
+      sync.attachPick.scripts.OnClick()
+      sync.attachMenu.entries[1].scripts.OnClick()
+      assert.is_false(sync.attach:IsEnabled())
+      assert.is_true(sync.discard:IsEnabled())
+      wow.click(function() sync.discard.scripts.OnClick() end)
+      wow.click(function() ns.UI.dialog.yes.scripts.OnClick() end)
+      assert.are.same({}, ns.Raids.NoRaidAwards())
+    end)
+
+    it("asks before discarding; Cancel keeps them, Discard removes them with their voids", function()
+      made()
+      made({ item = 5 })
+      local void = { raid = "r", env = "staging", reason = "x", at = 1 }
+      ns.db.siteVoids = { [ns.Raids.NoRaidAwards()[1].key] = void }
+      ns.UI.RefreshSync()
+      wow.click(function() sync.discard.scripts.OnClick() end)
+      assert.are.same({ "Discard |cffffffff2 awards|r that aren't linked to a raid?",
+        "They were never sent to the site. This can't be undone.", "Discard", "Cancel" }, dialog())
+      assert.are.equal(2, #ns.Raids.NoRaidAwards())
+      wow.click(function() ns.UI.dialog.no.scripts.OnClick() end)
+      assert.are.equal(2, #ns.Raids.NoRaidAwards())
+      wow.click(function() sync.discard.scripts.OnClick() end)
+      wow.click(function() ns.UI.dialog.yes.scripts.OnClick() end)
+      assert.are.same({}, ns.Raids.NoRaidAwards())
+      assert.are.same({}, ns.Records.Ops(nil))
+      assert.are.same({}, ns.db.siteVoids)
+      assert.is_false(sync.noRaidNote:IsShown())
+    end)
+
+    it("asks about one award in the singular", function()
+      made()
+      ns.UI.RefreshSync()
+      wow.click(function() sync.discard.scripts.OnClick() end)
+      assert.are.equal("Discard |cffffffff1 award|r that isn't linked to a raid?", dialog()[1])
+    end)
+  end)
+
   describe("removing a pasted raid", function()
     it("removes one with no awards without asking, and clears the selection", function()
       paste(pasteText("raid00001"))

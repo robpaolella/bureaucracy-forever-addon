@@ -797,37 +797,61 @@ local function copyPicked(offered)
   return selected
 end
 
--- The raid menu drops from the picker button, like the pop-up's boss menu: a title and one entry per
--- raid that can be copied, the picked one marked.
-local function drawCopyMenu(offered, picked)
-  local menu = sync.menu
+-- A menu frame with its title, hidden, and its entries (made as drawMenu needs them).
+local function newMenu(title)
+  local menu = CreateFrame("Frame", nil, sync.child)
+  menu.entries = {}
+  menu:SetFrameStrata("TOOLTIP")
+  menu:SetSize(320, 100)
+  local background = menu:CreateTexture(nil, "BACKGROUND")
+  background:SetAllPoints()
+  background:SetColorTexture(0.08, 0.08, 0.08, 1)
+  menu.title = newText(menu, "GameFontNormal")
+  menu.title:SetPoint("TOPLEFT", menu, "TOPLEFT", 8, -6)
+  menu.title:SetText(title)
+  menu:Hide()
+  return menu
+end
+
+-- A raid menu drops from its picker button, like the pop-up's boss menu: a title and one entry
+-- per raid in options ({ id, text }), the picked one marked; choosing one calls onPick(id).
+local function drawMenu(menu, anchor, options, pickedId, onPick)
   menu:ClearAllPoints()
-  menu:SetPoint("TOPLEFT", sync.outPick, "BOTTOMLEFT", 0, -2)
+  menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
   local y = 26
-  for i, entry in ipairs(offered) do
-    local b = sync.menuEntries[i]
+  for i, option in ipairs(options) do
+    local b = menu.entries[i]
     if not b then
       b = newButton(menu, "", 308, 18)
       b.label:ClearAllPoints()
       b.label:SetPoint("LEFT", b, "LEFT", 4, 0)
       b.background = b:CreateTexture(nil, "BACKGROUND")
       b.background:SetAllPoints()
-      sync.menuEntries[i] = b
+      menu.entries[i] = b
     end
     b:ClearAllPoints()
     b:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -y)
-    b.label:SetText((entry == picked and "> " or "   ") .. raidName(entry.raid))
+    b.label:SetText((option.id == pickedId and "> " or "   ") .. option.text)
     b.background:SetColorTexture(0.08, 0.08, 0.08, 1)
     b:SetScript("OnClick", function()
-      sync.copyPick = entry.raid.id
       menu:Hide()
-      UI.RefreshSync()
+      onPick(option.id)
     end)
     b:Show()
     y = y + 20
   end
-  for i = #offered + 1, #sync.menuEntries do sync.menuEntries[i]:Hide() end
+  for i = #options + 1, #menu.entries do menu.entries[i]:Hide() end
   menu:SetHeight(y + 6)
+end
+
+-- The raid menu of Awards out: one entry per raid that can be copied.
+local function drawCopyMenu(offered, picked)
+  local options = {}
+  for i, entry in ipairs(offered) do options[i] = { id = entry.raid.id, text = raidName(entry.raid) } end
+  drawMenu(sync.menu, sync.outPick, options, picked and picked.raid.id, function(id)
+    sync.copyPick = id
+    UI.RefreshSync()
+  end)
 end
 
 -- Copy awards: shows the picked raid's text in the box, selected, for Ctrl+C.
@@ -880,6 +904,101 @@ local function drawAwardsOut(y, raids)
   return y + 30
 end
 
+-- The raid to attach to: the officer's pick while it is still loaded, else the selected raid, else
+-- nothing (the officer chooses).
+local function attachPicked(raids, status)
+  for _, raid in ipairs(raids) do
+    if raid.id == sync.attachChoice then return raid end
+  end
+  for _, raid in ipairs(raids) do
+    if raid.id == status.activeRaid then return raid end
+  end
+end
+
+local NO_RAID_COLUMNS = { -- x and width
+  at = { 4, 40 }, boss = { 48, 100 }, item = { 152, 220 }, char = { 376, 120 }, method = { 500, 70 },
+  roll = { 574, 40 },
+}
+local METHODS = {
+  HR = "Hard reserve", SR = "Soft reserve", OPEN_ROLL = "Open roll", DISENCHANT_BANK = "Disenchant/bank",
+}
+
+-- A boss's name from the loaded raids, else its id as saved.
+local function bossName(raids, id)
+  for _, raid in ipairs(raids) do
+    for _, boss in ipairs(ns.Raids.Get(raid.id).bosses) do
+      if boss.id == id then return plain(boss.name) end
+    end
+  end
+  return plain(tostring(id))
+end
+
+-- Attach: moves the no-raid awards to the picked raid, so they copy out with it.
+local function attach()
+  local raids, status = ns.Raids.Status()
+  local raid = attachPicked(raids, status)
+  if raid then ns.Records.Attach(raid.id) end
+  UI.RefreshSync()
+end
+
+-- Discard: asks first, then throws the no-raid awards away. They were never sent to the site.
+local function discard()
+  local n = #ns.Raids.NoRaidAwards()
+  confirm("Discard " .. WHITE:format(plural(n, "award", "awards")) .. " that "
+    .. agree(n, "isn't", "aren't") .. " linked to a raid?",
+    "They were never sent to the site. This can't be undone.", "Discard", "Cancel", function()
+      ns.Records.Discard()
+      UI.RefreshSync()
+    end)
+end
+
+-- Draws the no-raid awards at y with Attach and Discard; returns the new y.
+local function drawNoRaid(y, raids, status)
+  local held = ns.Raids.NoRaidAwards()
+  at(sync.noRaidNote, y)
+  setNote(sync.noRaidNote, "warn", AMBER:format(plural(#held, "award", "awards") .. " "
+    .. agree(#held, "isn't", "aren't") .. " linked to a raid.")
+    .. " They were made while no raid was chosen, so they can't be sent to the site yet.")
+  y = y + sync.noRaidNote:GetHeight() + 6
+  for i, award in ipairs(held) do
+    local values = {
+      at = GREY:format(clock(award.at)), boss = bossName(raids, award.boss), item = itemText(award.item),
+      char = plain(award.char), method = METHODS[award.method] or plain(tostring(award.method)),
+      roll = award.roll and tostring(award.roll) or "",
+    }
+    for column, value in pairs(values) do
+      sync.cells["noRaid" .. column] = sync.cells["noRaid" .. column] or {}
+      local text = cell(i, sync.cells["noRaid" .. column], sync.child, "GameFontHighlightSmall")
+      at(text, y, NO_RAID_COLUMNS[column][1])
+      text:SetWidth(NO_RAID_COLUMNS[column][2])
+      text:SetText(value)
+    end
+    y = y + 22
+  end
+  local picked = attachPicked(raids, status)
+  at(sync.attachLabel, y + 4)
+  if #raids > 0 then
+    at(sync.attachPick, y, 60)
+    sync.attachPick.label:SetText((picked and raidName(ns.Raids.Get(picked.id)) or "Choose a raid") .. " ▾")
+    local options = {}
+    for k, raid in ipairs(raids) do options[k] = { id = raid.id, text = raidName(raid) } end
+    drawMenu(sync.attachMenu, sync.attachPick, options, picked and picked.id, function(id)
+      sync.attachChoice = id
+      UI.RefreshSync()
+    end)
+  else
+    sync.attachMenu:Hide()
+  end
+  local x = #raids > 0 and 310 or 60
+  at(sync.attach, y, x)
+  -- Not a guild run records nothing new, so Attach waits; Discard only removes what was never sent.
+  if picked and not ns.Selection.IsQuiet() then sync.attach:Enable() else sync.attach:Disable() end
+  at(sync.discard, y, x + 80)
+  y = y + 28
+  at(sync.noRaidHint, y)
+  return y + sync.noRaidHint:GetStringHeight() + 8
+end
+
 -- Draws the tab: the status bar, the raid table, the helper line and the paste box with its result.
 function UI.RefreshSync()
   if not sync.child or not window:IsShown() or not UI.tabs.Sync:IsShown() then return end
@@ -889,7 +1008,8 @@ function UI.RefreshSync()
   end
   local optional = { sync.columns, sync.selected, sync.offRadio, sync.offLabel, sync.where, sync.whereHint,
     sync.resultNote, sync.linkLabel, sync.link, sync.linkHint, sync.outHeading, sync.outHint, sync.outNote,
-    sync.outScroll, sync.outRaidLabel, sync.outPick, sync.copy, sync.outCount }
+    sync.outScroll, sync.outRaidLabel, sync.outPick, sync.copy, sync.outCount, sync.noRaidNote,
+    sync.attachLabel, sync.attachPick, sync.attach, sync.discard, sync.noRaidHint }
   for _, piece in ipairs(optional) do
     piece:Hide()
   end
@@ -900,6 +1020,11 @@ function UI.RefreshSync()
   at(sync.status, y)
   setNote(sync.status, UI.SyncStatus())
   y = y + sync.status:GetHeight() + 8
+  if #ns.Raids.NoRaidAwards() > 0 then
+    y = drawNoRaid(y, raids, status)
+  else
+    sync.attachMenu:Hide()
+  end
   at(sync.raidsHeading, y)
   y = y + 18
   sync.rows = {}
@@ -1084,24 +1209,34 @@ local function buildSync(content)
   sync.outRaidLabel = line("GameFontHighlightSmall", "Raid:")
   sync.outRaidLabel:SetWidth(36)
   sync.outPick = newButton(sync.child, "", 240, 22)
-  sync.menuEntries = {}
-  sync.menu = CreateFrame("Frame", nil, sync.child)
-  sync.menu:SetFrameStrata("TOOLTIP")
-  sync.menu:SetSize(320, 100)
-  local menuBackground = sync.menu:CreateTexture(nil, "BACKGROUND")
-  menuBackground:SetAllPoints()
-  menuBackground:SetColorTexture(0.08, 0.08, 0.08, 1)
-  sync.menu.title = newText(sync.menu, "GameFontNormal")
-  sync.menu.title:SetPoint("TOPLEFT", sync.menu, "TOPLEFT", 8, -6)
-  sync.menu.title:SetText("Which raid's awards?")
-  sync.menu:Hide()
+  sync.menu = newMenu("Which raid's awards?")
+  sync.menuEntries = sync.menu.entries
   sync.outPick:SetScript("OnClick", function()
+    sync.attachMenu:Hide()
     if sync.menu:IsShown() then sync.menu:Hide() else sync.menu:Show() end
   end)
   sync.copy = newButton(sync.child, "Copy awards", 90)
   sync.copy:SetScript("OnClick", copyOut)
   sync.outCount = line("GameFontHighlightSmall")
   sync.outCount:SetWidth(CONTENT_WIDTH - 380)
+
+  -- Awards with no raid: the note above them, then Attach to a raid (a picker like Awards out's)
+  -- and Discard.
+  sync.noRaidNote = newNote(sync.child)
+  sync.attachLabel = line("GameFontHighlightSmall", "Attach to:")
+  sync.attachLabel:SetWidth(56)
+  sync.attachPick = newButton(sync.child, "", 240, 22)
+  sync.attachMenu = newMenu("Which raid?")
+  sync.attachPick:SetScript("OnClick", function()
+    sync.menu:Hide()
+    if sync.attachMenu:IsShown() then sync.attachMenu:Hide() else sync.attachMenu:Show() end
+  end)
+  sync.attach = newButton(sync.child, "Attach", 70)
+  sync.attach:SetScript("OnClick", attach)
+  sync.discard = newButton(sync.child, "Discard", 70)
+  sync.discard:SetScript("OnClick", discard)
+  sync.noRaidHint = line("GameFontHighlightSmall", "Methods stay as recorded; fix any on the site "
+    .. "afterwards. Discard if they were from a run that wasn't a guild run.")
 end
 
 local function build()
@@ -1173,6 +1308,7 @@ local function build()
   window:SetScript("OnHide", function()
     saved().shown = false
     if sync.menu then sync.menu:Hide() end
+    if sync.attachMenu then sync.attachMenu:Hide() end
   end)
   window:SetScript("OnShow", function()
     saved().shown = true
