@@ -1,6 +1,7 @@
 ## PASS
 
-**Model:** gpt-5.6-terra  
+**Model:** gpt-5.6-terra
+
 **Scope and limits:** read-only pre-choice critique. I inspected `brief.md`, `decisions.md`, `design.json`, both issues and their comments, revision 1 and 2 authorities, `ADDON-SPEC.md`, `Modules/OpText.lua`, all supplied manifest entries, and all 78 supplied images. I reviewed the recorded offline proof in `decisions.md`; I did not independently run the prototypes, so interaction behaviour is assessed from the recorded proof and source, not asserted from screenshots.
 
 ### Checklist
