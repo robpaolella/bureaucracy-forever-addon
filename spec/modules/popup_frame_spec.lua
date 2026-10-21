@@ -233,4 +233,89 @@ describe("PopupFrame", function()
       assert.is_false(pf.frame:IsShown())
     end)
   end)
+
+  describe("giving (#38)", function()
+    local function raid()
+      setup({ code = "SA0001", reserves = { [1] = { holder("Ashla Brightwater", "HR") },
+        [2] = { holder("Doran Vale", "SR") } },
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+    end
+
+    local function click(button)
+      wow.click(function() button.scripts.OnClick(button) end)
+    end
+
+    it("hands out on a click and shows the row waiting for the game (handout-waiting)", function()
+      raid()
+      drop({ { id = 1 }, { id = 2 }, { id = 3 } })
+      click(shownRows()[1].primary)
+      assert.are.same({ { slot = 1, candidate = 2 } }, wow.gives)
+      assert.are.equal(1, #wow.sent)
+      local row = shownRows()[1]
+      assert.are.equal("Handing out to Ashla Brightwater…", row.handout:GetText())
+      assert.are.equal("Announced in raid chat. Waiting for the game to confirm (a few seconds).",
+        row.handoutNote:GetText())
+      assert.is_true(row.spinner:IsShown())
+      assert.is_false(row.primary:IsShown() or row.db:IsShown())
+      assert.are.equal("Ashla Brightwater", row.beside:GetText())
+      local other = shownRows()[2] -- the other rows keep their buttons
+      assert.is_true(other.primary:IsShown() and other.primary:IsEnabled())
+      -- The game confirms: the slot empties and the row goes.
+      wow.fire("LOOT_SLOT_CLEARED", 1)
+      table.remove(wow.state.loot, 1)
+      wow.fire("CHAT_MSG_LOOT", "Ashla Brightwater receives loot: " .. link(1) .. ".")
+      assert.are.equal(2, #shownRows())
+      assert.are.equal("Give to Doran Vale", shownRows()[1].primary.label:GetText())
+      assert.is_false(shownRows()[1].spinner:IsShown())
+    end)
+
+    it("gives the buttons back when the game doesn't confirm", function()
+      raid()
+      drop({ { id = 1 } })
+      click(shownRows()[1].primary)
+      wow.advance(ns.Tracking.confirmWait)
+      local row = shownRows()[1]
+      assert.is_false(row.handout:IsShown() or row.spinner:IsShown())
+      assert.is_true(row.primary:IsShown())
+    end)
+
+    it("greys award and roll buttons in a fight, says why, enables them after (popup-fight)", function()
+      raid()
+      drop({ { id = 1 }, { id = 2 }, { id = 3 } })
+      wow.bossFight(true)
+      assert.are.equal("Boss fight in progress. The game locks chat for add-ons, so awards wait until"
+        .. " it ends.", pf.frame.fight:GetText())
+      assert.is_true(pf.frame.fight:IsShown())
+      local rows = shownRows()
+      for _, row in ipairs(rows) do
+        assert.is_false(row.primary:IsEnabled())
+        assert.is_true(row.db:IsEnabled())
+      end
+      rows[1].primary.scripts.OnEnter(rows[1].primary)
+      assert.are.same({ "Chat is locked until the fight ends" }, _G.GameTooltip.lines)
+      click(rows[1].primary)
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+      wow.bossFight(false)
+      assert.is_false(pf.frame.fight:IsShown())
+      for _, row in ipairs(shownRows()) do assert.is_true(row.primary:IsEnabled()) end
+      _G.GameTooltip.lines = {}
+      shownRows()[1].primary.scripts.OnEnter(shownRows()[1].primary)
+      assert.are.same({}, _G.GameTooltip.lines) -- no tooltip once the fight is over
+    end)
+
+    it("keeps an unavailable winner's button greyed and unclickable, with why (popup-unavailable)", function()
+      raid()
+      drop({ { id = 1, candidates = { "Masterlooter", "Unknown" } } })
+      local row = shownRows()[1]
+      assert.are.equal("Give to Unknown", row.primary.label:GetText())
+      assert.is_false(row.primary:IsEnabled())
+      assert.are.equal("Ashla Brightwater's name hasn't loaded yet (shown as \"Unknown\")."
+        .. " Try again in a moment.", row.skipped:GetText())
+      click(row.primary)
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+    end)
+  end)
 end)
