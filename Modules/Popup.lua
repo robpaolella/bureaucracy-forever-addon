@@ -2,6 +2,8 @@
 -- raid and the group, and returns what the pop-up shows; nothing is drawn (the frame is #77).
 -- Only the loot master gets a model (design Q3), and none on a run that is not a guild run.
 -- Give is the officer's click on a Give button (#38): it hands out, records and announces.
+-- A hand-out the game doesn't confirm is recorded as not confirmed, and the officer resolves it
+-- with TryAgain, GiveElse (from GiveElseList) or NotHandedOut (#12; drawn by #95).
 local _, ns = ...
 
 local Popup = {}
@@ -21,6 +23,7 @@ local FIGHT_TOOLTIP = "Chat is locked until the fight ends"
 local ANNOUNCED = "Announced in raid chat. Waiting for the game to confirm (a few seconds)."
 local NOT_ANNOUNCED = "Not announced in raid chat: the line couldn't be posted. Waiting for the game to"
   .. " confirm (a few seconds)."
+local OPEN_WINDOW = "Open the loot window to hand it out."
 -- The game's limits that lock chat: on during a boss fight only (beta, #3). Its Combat limit (every
 -- fight) and Map limit (the whole time in an instance) leave chat alone.
 local CHAT_LIMITS = { "Encounter", "Chat" }
@@ -310,6 +313,24 @@ function Popup.Build()
   return model
 end
 
+-- Posts the operation's chat line, built from data, in raid (or party) chat. With no data (the
+-- record wasn't saved; why says why) or a line that can't be built, nothing is posted: the log
+-- says why under `what`, and the officer is told `told`. Returns true once posted.
+local function post(operation, data, why, what, told)
+  local line, problem
+  if data then
+    line, problem = ns.OpText.BuildLine(operation, data)
+  else
+    problem = "the record wasn't saved (" .. tostring(why) .. ")"
+  end
+  if line then
+    C_ChatInfo.SendChatMessage(line, IsInRaid() and "RAID" or "PARTY")
+    return true
+  end
+  ns.Log(what .. " not posted: " .. problem)
+  ns.Print(told .. " Type /bf log for why.")
+end
+
 -- The officer clicked a row's Give button: hands the item to the winner, found by name among
 -- this corpse's candidates (their order changes per corpse), records the award as announced and
 -- posts its line in raid chat. A line that can't be built is not posted, and the officer is
@@ -343,31 +364,234 @@ function Popup.Give(slot, item, winner)
   local method = row.mode == "hr" and "HR" or "SR"
   local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = row.winner,
     user = row.user, method = method })
-  local line, problem
+  local data
   if op then
     attempt.awardKey = op.id
     local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
-    line, problem = ns.OpText.BuildLine("award", { raid = snapshot.code, key = op.id, item = row.item,
-      link = row.link, boss = model.boss.id, method = method, winner = row.winner, practice = op.practice })
-  else
-    problem = "the award wasn't saved (" .. tostring(why) .. ")"
+    data = { raid = snapshot.code, key = op.id, item = row.item, link = row.link, boss = model.boss.id,
+      method = method, winner = row.winner, practice = op.practice }
   end
-  if line then
-    C_ChatInfo.SendChatMessage(line, IsInRaid() and "RAID" or "PARTY")
-    attempt.announced = true
-  else
-    ns.Log("Award line for " .. row.link .. " not posted: " .. problem)
-    ns.Print(row.link .. " is being handed to " .. row.winner .. ", but its raid chat line couldn't be"
-      .. " posted. Type /bf log for why.")
-  end
+  attempt.announced = post("award", data, why, "Award line for " .. row.link,
+    row.link .. " is being handed to " .. row.winner .. ", but its raid chat line couldn't be posted.")
   return attempt
 end
 
--- Once the game confirms a hand-out made here, its award is confirmed. Not confirmed is #12's.
-ns.Tracking.On("confirmed", function(attempt)
+-- The newest hand-out of the award still followed (waiting, or given up on), or nil.
+local function attemptOf(key)
+  local found
+  for _, a in ipairs(ns.Tracking.Pending()) do
+    if a.awardKey == key then found = a end
+  end
+  return found
+end
+
+local function itemOf(link) return link and tonumber(link:match("item:(%d+)")) end
+
+-- The award, if it is not confirmed and not voided: the only kind the three choices act on. Or
+-- nil and why: "not unconfirmed", or "handing out" while a hand-out of it waits for the game.
+local function unconfirmedAward(key)
+  local award = ns.Records.Get(key)
+  if not (award and award.state == "not-confirmed" and not award.voided) then
+    return nil, "not unconfirmed"
+  end
+  local attempt = attemptOf(key)
+  if attempt and attempt.status == "pending" then return nil, "handing out" end
+  return award
+end
+
+-- The loot window slot holding the award's item: its last hand-out's slot first, else any slot
+-- with that item (the same corpse can list its items in another order); or nil.
+local function findSlot(key, item)
+  local attempt = attemptOf(key)
+  local slots = attempt and { attempt.slot } or {}
+  for slot = 1, GetNumLootItems() do slots[#slots + 1] = slot end
+  for _, slot in ipairs(slots) do
+    if itemOf(GetLootSlotLink(slot)) == item then return slot end
+  end
+end
+
+-- findSlot, or nil and why: "window" (no loot window open) or "changed" (the item isn't in it).
+-- The officer is told either way.
+local function lootSlot(key, item)
+  local slot = findSlot(key, item)
+  if slot then return slot end
+  ns.Print(OPEN_WINDOW)
+  return nil, GetNumLootItems() == 0 and "window" or "changed"
+end
+
+-- The index of the candidate with this name for the slot, or nil.
+local function candidateIndex(slot, char)
+  for i = 1, MAX_CANDIDATES do
+    local name = GetMasterLootCandidate(slot, i)
+    if not name then return end
+    if bare(name) == bare(char) then return i end
+  end
+end
+
+-- The checks every hand-out choice shares. Returns the award and the slot, or nil and why.
+local function handoutCheck(key)
+  local award, why = unconfirmedAward(key)
+  if not award then return nil, why end
+  if not isLootMaster() then return nil, "not loot master" end
+  local slot, reason = lootSlot(key, award.item)
+  if not slot then return nil, reason end
+  return award, slot
+end
+
+-- Try again: hands the award's item to the same winner once more, with no new announcement and
+-- no new record; the award is confirmed once the game confirms this hand-out. It needs no free
+-- chat, so it works in a boss fight. key is the award's key. Returns the new hand-out (Tracking's
+-- attempt, with awardKey and announced as the first hand-out had it), or nil and why: "not
+-- unconfirmed" (no such award, or it isn't waiting as not confirmed), "handing out" (a hand-out
+-- of it still waits for the game: every choice waits for that), "not loot master",
+-- "window" (the loot window is closed), "changed" (the item isn't in the loot window), "not a
+-- candidate" (the game won't let the winner receive it now) or Tracking.Give's reasons. A refusal
+-- changes nothing and hands nothing out.
+function Popup.TryAgain(key)
+  local award, slot = handoutCheck(key)
+  if not award then return nil, slot end
+  local index = candidateIndex(slot, award.char)
+  if not index then return nil, "not a candidate" end
+  local before = attemptOf(key)
+  local attempt, reason = ns.Tracking.Give(slot, index)
+  if not attempt then return nil, reason end
+  attempt.awardKey, attempt.announced = key, before and before.announced
+  return attempt
+end
+
+-- The people the award's item could go to instead: the item's other reserve holders, hard
+-- reserves first, each with the method the new award carries. Trials, holders who already have
+-- it and the site's blocked holders are left out. key is the award's key. Returns a list of
+-- { char, user, method ("HR" or "SR"), available, reason (when not available: "not in raid",
+-- or "cannot receive" when the open loot window's candidates leave them out) }, or nil and "not
+-- unconfirmed" or "handing out".
+function Popup.GiveElseList(key)
+  local award, why = unconfirmedAward(key)
+  if not award then return nil, why end
+  local snapshot = ns.Raids.Get(award.raid)
+  local reserves = snapshot and snapshot.reserves or {}
+  local holders = reserves[award.item] or reserves[tostring(award.item)] or {}
+  local awards = {}
+  for _, a in ipairs(snapshot and snapshot.awards or {}) do awards[#awards + 1] = a end
+  for _, a in ipairs(ns.Raids.Awards(award.raid)) do
+    if a.key ~= key then awards[#awards + 1] = a end
+  end
+  -- A name not loaded yet ("Unknown") can't be matched, so then nobody counts as unable to receive.
+  local slot = findSlot(key, award.item)
+  local cands, unknown
+  if slot then cands, unknown = candidates(slot) end
+  if unknown then cands = nil end
+  local list = {}
+  for _, kind in ipairs({ "HR", "SR" }) do
+    local same = {}
+    for _, h in ipairs(holders) do
+      if h.kind == kind and h.user ~= award.user then same[#same + 1] = h end
+    end
+    local resolved = ns.Rules.Resolve({ item = award.item, reserves = { [award.item] = same },
+      awards = awards, roster = roster(), candidates = cands })
+    local status = {}
+    for _, h in ipairs(resolved.contenders) do status[h.user] = { available = true } end
+    for _, s in ipairs(resolved.skipped) do
+      if s.reason == ns.Rules.NOT_IN_RAID or s.reason == ns.Rules.CANNOT_RECEIVE then
+        status[s.user] = { available = false, reason = s.reason }
+      end
+    end
+    for _, h in ipairs(same) do
+      local st = status[h.user]
+      if st then
+        list[#list + 1] = { char = h.char, user = h.user, method = kind, available = st.available,
+          reason = st.reason }
+      end
+    end
+  end
+  return list
+end
+
+-- Give to someone else: hands the award's item to char, one of GiveElseList's available people,
+-- records the replacement (the old award voided, a new one with the method char holds) and posts
+-- the one correction line. A line that can't be built is not posted, and the officer is told;
+-- the hand-out and the records stand. key is the award's key. Returns the new hand-out (with
+-- awardKey, the new award's key, and announced), or nil and why: "fight" (chat is locked),
+-- "not a contender" (not on the list), "not in raid", "cannot receive" (greyed on the list), or
+-- TryAgain's reasons. A refusal changes nothing, hands nothing out and posts nothing.
+function Popup.GiveElse(key, char)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local award, slot = handoutCheck(key)
+  if not award then return nil, slot end
+  local pick
+  for _, c in ipairs(Popup.GiveElseList(key)) do
+    if c.char == char then pick = c end
+  end
+  if not pick then return nil, "not a contender" end
+  if not pick.available then return nil, pick.reason end
+  local index = candidateIndex(slot, char)
+  if not index then return nil, "not a candidate" end
+  local attempt, reason = ns.Tracking.Give(slot, index)
+  if not attempt then return nil, reason end
+  local link = GetLootSlotLink(slot)
+  local op, why = ns.Records.Replace(key, { boss = award.boss, item = award.item, char = pick.char,
+    user = pick.user, method = pick.method })
+  local data
+  if op then
+    attempt.awardKey = op.award.id
+    local snapshot = ns.Raids.Get(award.raid)
+    data = { raid = snapshot and snapshot.code, id = op.id, key = key, newKey = op.award.id,
+      item = award.item, link = link, boss = award.boss, method = pick.method, winner = pick.char,
+      oldWinner = award.char, practice = op.practice }
+  end
+  attempt.announced = post("correction", data, why, "Correction line for " .. link,
+    link .. " is being handed to " .. pick.char .. " instead of " .. award.char
+      .. ", but its raid chat line couldn't be posted.")
+  return attempt
+end
+
+-- Not handed out: voids the award and posts its undo line. It needs no loot window. A line that
+-- can't be built is not posted, and the officer is told; the void stands. key is the award's key.
+-- Returns the void operation, or nil and why: "fight" (chat is locked), "not unconfirmed",
+-- "handing out" or Records.Void's reasons. A refusal changes nothing and posts nothing.
+function Popup.NotHandedOut(key)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local award, refused = unconfirmedAward(key)
+  if not award then return nil, refused end
+  local op, why = ns.Records.Void(key, { reason = "not handed out" })
+  if not op then return nil, why end
+  local attempt = attemptOf(key)
+  local link = attempt and attempt.link or select(2, GetItemInfo(award.item)) or ("item " .. award.item)
+  local snapshot = ns.Raids.Get(award.raid)
+  post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
+    winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
+    link .. " is no longer awarded to " .. award.char .. ", but its raid chat line couldn't be posted.")
+  return op
+end
+
+-- Once the game confirms a hand-out made here, its award is confirmed, even after it was given
+-- up on (a late confirmation). One for an award changed meanwhile is told to the officer.
+local function confirmed(attempt)
   if not attempt.awardKey then return end
+  local award = ns.Records.Get(attempt.awardKey)
+  if award and award.voided then
+    ns.Log("The game confirmed " .. attempt.link .. " to " .. attempt.winner
+      .. " after its award was changed")
+    ns.Print("The game says " .. attempt.winner .. " got " .. attempt.link .. " after all, but that award"
+      .. " was already changed. Check the Awards tab.")
+    return
+  end
   local ok, why = ns.Records.Confirm(attempt.awardKey)
   if not ok then ns.Log("Confirming the award " .. attempt.awardKey .. " failed: " .. tostring(why)) end
+end
+ns.Tracking.On("confirmed", confirmed)
+ns.Tracking.On("late", confirmed)
+
+-- A hand-out the game didn't confirm in time: its award is recorded as not confirmed.
+ns.Tracking.On("unconfirmed", function(attempt)
+  local award = attempt.awardKey and ns.Records.Get(attempt.awardKey)
+  if not award or award.voided then return end
+  local ok, why = ns.Records.NotConfirmed(attempt.awardKey)
+  if ok then
+    ns.Log("The game didn't confirm " .. attempt.link .. " to " .. attempt.winner)
+  else
+    ns.Log("Recording " .. attempt.awardKey .. " as not confirmed failed: " .. tostring(why))
+  end
 end)
 
 -- The officer picks the boss (a boss row id of the loaded raid, "Trash" included) for this loot

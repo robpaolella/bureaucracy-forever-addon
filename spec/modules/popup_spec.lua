@@ -415,12 +415,17 @@ describe("Popup", function()
       assert.is_nil(ns.Records.Ops("raid00001")[1])
     end)
 
-    it("leaves the award announced when the game doesn't confirm", function()
+    it("records the award as not confirmed when the game doesn't confirm in time", function()
       raid()
       drop({ { id = 1 } })
       local attempt = give(1)
-      wow.advance(ns.Tracking.confirmWait)
+      wow.advance(ns.Tracking.confirmWait - 1)
       assert.are.equal("announced", ns.Records.Get(attempt.awardKey).state)
+      wow.advance(1)
+      assert.are.equal("not-confirmed", ns.Records.Get(attempt.awardKey).state)
+      assert.are.same({ "award", "not-confirmed" }, { ns.Records.Ops("raid00001")[1].type,
+        ns.Records.Ops("raid00001")[2].type })
+      assert.are.equal(1, #wow.sent)
       assert.is_nil(ns.Popup.Build().rows[1].handout)
     end)
 
@@ -492,6 +497,273 @@ describe("Popup", function()
       assert.are.same({ nil, "not ready" }, { give(1) }) -- no boss picked yet
       assert.are.same({ nil, "not ready" }, { give(2) }) -- an open roll
       assert.are.same({}, wow.gives)
+    end)
+
+    describe("when the game doesn't confirm (#12)", function()
+      local GROUP = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein", "Tovin Hale" }
+
+      -- Gives item 1 (Ashla's hard reserve) and lets the wait run out. Returns the award key.
+      local function unconfirmed(fields, group)
+        raid(fields)
+        wow.state.group = group or wow.state.group
+        drop({ { id = 1 } })
+        local attempt = assert(give(1))
+        wow.advance(ns.Tracking.confirmWait)
+        wow.state.time = wow.state.time + 10
+        assert.are.equal("not-confirmed", ns.Records.Get(attempt.awardKey).state)
+        return attempt.awardKey
+      end
+
+      local function click(fn, ...)
+        local args, result = { ... }, nil
+        wow.click(function() result = { fn(unpack(args)) } end)
+        return result[1], result[2]
+      end
+
+      -- What a refusal must leave as it was: hand-outs, chat lines and records.
+      local function unchanged(key, gives)
+        assert.are.equal(gives, #wow.gives)
+        assert.are.equal(1, #wow.sent)
+        assert.are.equal(2, #ns.Records.Ops("raid00001"))
+        local award = ns.Records.Get(key)
+        assert.are.same({ "not-confirmed", nil }, { award.state, award.voided })
+      end
+
+      it("stays not confirmed when the loot window closes with no choice made", function()
+        local key = unconfirmed()
+        wow.closeLoot()
+        assert.are.equal("not-confirmed", ns.Records.Get(key).state)
+      end)
+
+      it("still confirms the award when the game confirms late", function()
+        local key = unconfirmed()
+        confirm(1, "Ashla Brightwater")
+        assert.are.equal("confirmed", ns.Records.Get(key).state)
+        assert.are.equal("confirm", ns.Records.Ops("raid00001")[3].type)
+      end)
+
+      it("tries again: hands out to the same winner, posts nothing, records nothing new", function()
+        local key = unconfirmed()
+        local attempt = assert(click(ns.Popup.TryAgain, key))
+        assert.are.same({ key, true }, { attempt.awardKey, attempt.announced })
+        assert.are.same({ slot = 1, candidate = 2 }, wow.gives[2])
+        assert.are.equal(1, #wow.sent)
+        assert.are.equal(2, #ns.Records.Ops("raid00001"))
+        assert.are.equal("Handing out to Ashla Brightwater…", ns.Popup.Build().rows[1].handout.text)
+        confirm(1, "Ashla Brightwater")
+        assert.are.equal("confirmed", ns.Records.Get(key).state)
+      end)
+
+      it("tries again in a boss fight, since it posts nothing", function()
+        local key = unconfirmed()
+        wow.bossFight(true)
+        assert.is_truthy(click(ns.Popup.TryAgain, key))
+        assert.are.equal(2, #wow.gives)
+      end)
+
+      it("finds the item when the reopened loot window lists it in another slot", function()
+        local key = unconfirmed()
+        wow.closeLoot()
+        drop({ { id = 3 }, { id = 1 } })
+        assert.is_truthy(click(ns.Popup.TryAgain, key))
+        assert.are.same({ slot = 2, candidate = 2 }, wow.gives[2])
+      end)
+
+      it("refuses the hand-outs with the loot window closed or the item gone, and says so", function()
+        local key = unconfirmed()
+        wow.closeLoot()
+        assert.are.same({ nil, "window" }, { click(ns.Popup.TryAgain, key) })
+        assert.are.equal("Open the loot window to hand it out.", wow.printed[#wow.printed]:match(":|r (.*)$"))
+        assert.are.same({ nil, "window" }, { click(ns.Popup.GiveElse, key, "Doran Vale") })
+        unchanged(key, 1)
+        drop({ { id = 3 } })
+        assert.are.same({ nil, "changed" }, { click(ns.Popup.TryAgain, key) })
+        assert.are.same({ nil, "changed" }, { click(ns.Popup.GiveElse, key, "Doran Vale") })
+        unchanged(key, 1)
+      end)
+
+      it("refuses to try again when the winner can't receive the item now", function()
+        local key = unconfirmed()
+        wow.state.loot[1].candidates = { "Masterlooter", "Doran Vale" }
+        assert.are.same({ nil, "not a candidate" }, { click(ns.Popup.TryAgain, key) })
+        unchanged(key, 1)
+      end)
+
+      it("refuses every choice while a retry waits for the game, and again once it gives up", function()
+        local key = unconfirmed()
+        assert.is_truthy(click(ns.Popup.TryAgain, key))
+        assert.are.same({ nil, "handing out" }, { click(ns.Popup.TryAgain, key) })
+        assert.are.same({ nil, "handing out" }, { click(ns.Popup.GiveElse, key, "Doran Vale") })
+        assert.are.same({ nil, "handing out" }, { click(ns.Popup.NotHandedOut, key) })
+        assert.are.same({ nil, "handing out" }, { ns.Popup.GiveElseList(key) })
+        assert.are.equal(2, #wow.gives)
+        assert.are.equal(1, #wow.sent)
+        assert.are.equal(2, #ns.Records.Ops("raid00001"))
+        wow.advance(ns.Tracking.confirmWait)
+        assert.is_truthy(click(ns.Popup.NotHandedOut, key))
+      end)
+
+      it("refuses every choice for an award not waiting as not confirmed", function()
+        raid()
+        drop({ { id = 1 } })
+        local key = assert(give(1)).awardKey
+        for _, fn in ipairs({ ns.Popup.TryAgain, ns.Popup.NotHandedOut }) do
+          assert.are.same({ nil, "not unconfirmed" }, { click(fn, key) })
+        end
+        assert.are.same({ nil, "not unconfirmed" }, { click(ns.Popup.GiveElse, key, "Doran Vale") })
+        assert.are.same({ nil, "not unconfirmed" }, { ns.Popup.GiveElseList(key) })
+        assert.are.same({ nil, "not unconfirmed" }, { click(ns.Popup.TryAgain, "aw-nosuchkey") })
+      end)
+
+      describe("give to someone else", function()
+        local RESERVES = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR"),
+          holder("Mirel Stone", "SR"), holder("Tovin Hale", "SR", { trial = true }),
+          holder("Bram Ironvein", "SR") } }
+
+        -- Ashla's award not confirmed, in a raid without Mirel.
+        local function setupList()
+          return unconfirmed({ reserves = RESERVES }, GROUP)
+        end
+
+        it("lists the item's other holders with their methods, greying who isn't in the raid", function()
+          raid({ reserves = RESERVES })
+          wow.state.group = GROUP
+          -- Bram has the item already, from an earlier copy.
+          assert(ns.Records.Award({ boss = "lb_lucifron", item = 1, char = "Bram Ironvein",
+            user = "bramironvein", method = "SR" }))
+          drop({ { id = 1 } })
+          local key = assert(give(1)).awardKey
+          wow.advance(ns.Tracking.confirmWait)
+          assert.are.same({
+            { char = "Doran Vale", user = "doranvale", method = "SR", available = true },
+            { char = "Mirel Stone", user = "mirelstone", method = "SR", available = false,
+              reason = "not in raid" },
+          }, ns.Popup.GiveElseList(key))
+        end)
+
+        it("lists a hard reserve first, and leaves out a holder the site blocked", function()
+          raid({ reserves = { [1] = { holder("Doran Vale", "SR"), holder("Ashla Brightwater", "HR"),
+            holder("Bram Ironvein", "HR"), holder("Tovin Hale", "SR", { blocked = "left the guild" }) } } })
+          -- Bram can't receive it at first, so Ashla is the one hard reserve; then he can.
+          drop({ { id = 1, candidates = { "Masterlooter", "Ashla Brightwater", "Doran Vale" } } })
+          local key = assert(give(1)).awardKey
+          wow.advance(ns.Tracking.confirmWait)
+          wow.state.loot[1].candidates = wow.state.group
+          assert.are.same({
+            { char = "Bram Ironvein", user = "bramironvein", method = "HR", available = true },
+            { char = "Doran Vale", user = "doranvale", method = "SR", available = true },
+          }, ns.Popup.GiveElseList(key))
+          local attempt = assert(click(ns.Popup.GiveElse, key, "Bram Ironvein"))
+          assert.are.equal("HR", ns.Records.Get(attempt.awardKey).method)
+        end)
+
+        it("greys a holder the game won't let receive the item", function()
+          local key = setupList()
+          wow.state.loot[1].candidates = { "Masterlooter", "Ashla Brightwater", "Doran Vale" }
+          local list = ns.Popup.GiveElseList(key)
+          assert.are.same({ "Bram Ironvein", "SR", false, "cannot receive" },
+            { list[3].char, list[3].method, list[3].available, list[3].reason })
+          assert.are.same({ nil, "cannot receive" }, { click(ns.Popup.GiveElse, key, "Bram Ironvein") })
+          unchanged(key, 1)
+        end)
+
+        it("hands out, records the replacement and posts the one correction line", function()
+          local key = setupList()
+          local attempt = assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
+          assert.are.same({ slot = 1, candidate = 3 }, wow.gives[2])
+          local old, new = ns.Records.Get(key), ns.Records.Get(attempt.awardKey)
+          assert.are.same({ true, attempt.awardKey }, { old.voided, old.replacedBy })
+          assert.are.same({ "announced", "Doran Vale", "doranvale", "SR", "lb_lucifron", key },
+            { new.state, new.char, new.user, new.method, new.boss, new.replaces })
+          local replace = ns.Records.Ops("raid00001")[3]
+          assert.are.equal("replace", replace.type)
+          assert.are.same({ channel = "RAID", text = "Correction: " .. link(1)
+            .. " → Doran Vale (soft reserve), not Ashla Brightwater <BF1;R;SA0001;" .. replace.id .. ";"
+            .. key .. ";" .. attempt.awardKey .. ";1;ifron;SR;;Doran Vale>" }, wow.sent[2])
+          assert.is_true(attempt.announced)
+          confirm(1, "Doran Vale")
+          assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+        end)
+
+        it("records the replacement even when the line can't be built, and says so", function()
+          local key = unconfirmed({ code = "MC0001", reserves = RESERVES }, GROUP)
+          local attempt = assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
+          assert.are.equal(2, #wow.gives)
+          assert.are.equal(0, #wow.sent)
+          assert.is_nil(attempt.announced)
+          assert.are.same({ true, "Doran Vale" }, { ns.Records.Get(key).voided,
+            ns.Records.Get(attempt.awardKey).char })
+          assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale instead of Ashla"
+            .. " Brightwater, but its raid chat line couldn't be posted", 1, true))
+          assert.is_truthy(ns.log[#ns.log].text:find("Correction line for .* not posted: the raid code"))
+        end)
+
+        it("refuses who isn't in the raid or on the list, and waits out a boss fight", function()
+          local key = setupList()
+          assert.are.same({ nil, "not in raid" }, { click(ns.Popup.GiveElse, key, "Mirel Stone") })
+          assert.are.same({ nil, "not a contender" }, { click(ns.Popup.GiveElse, key, "Tovin Hale") })
+          assert.are.same({ nil, "not a contender" }, { click(ns.Popup.GiveElse, key, "Ashla Brightwater") })
+          wow.bossFight(true)
+          assert.are.same({ nil, "fight" }, { click(ns.Popup.GiveElse, key, "Doran Vale") })
+          unchanged(key, 1)
+          wow.bossFight(false)
+          assert.is_truthy(click(ns.Popup.GiveElse, key, "Doran Vale"))
+        end)
+
+        it("starts the line with [Practice] for a practice award", function()
+          local key = setupList()
+          ns.Records.Get(key).practice = true
+          assert.is_truthy(click(ns.Popup.GiveElse, key, "Doran Vale"))
+          assert.is_truthy(wow.sent[2].text:find("^%[Practice%] Correction: "))
+          assert.is_truthy(wow.sent[2].text:find("<BF1P;R;", 1, true))
+        end)
+      end)
+
+      describe("not handed out", function()
+        it("voids the award and posts its undo line, with no loot window needed", function()
+          local key = unconfirmed()
+          wow.closeLoot()
+          local op = assert(click(ns.Popup.NotHandedOut, key))
+          assert.are.same({ "void", "not handed out" }, { op.type, op.reason })
+          assert.is_true(ns.Records.Get(key).voided)
+          assert.are.same({ channel = "RAID", text = "Undo: " .. link(1) .. " is no longer awarded to Ashla"
+            .. " Brightwater <BF1;V;SA0001;" .. op.id .. ";" .. key .. ">" }, wow.sent[2])
+          assert.are.equal(1, #wow.gives)
+        end)
+
+        it("starts the line with [Practice] for a practice award", function()
+          local key = unconfirmed()
+          ns.Records.Get(key).practice = true
+          assert.is_truthy(click(ns.Popup.NotHandedOut, key))
+          assert.is_truthy(wow.sent[2].text:find("^%[Practice%] Undo: "))
+        end)
+
+        it("waits out a boss fight", function()
+          local key = unconfirmed()
+          wow.bossFight(true)
+          assert.are.same({ nil, "fight" }, { click(ns.Popup.NotHandedOut, key) })
+          unchanged(key, 1)
+        end)
+
+        it("voids even when the line can't be built, and says so", function()
+          local key = unconfirmed({ code = "MC0001" })
+          assert.is_truthy(click(ns.Popup.NotHandedOut, key))
+          assert.is_true(ns.Records.Get(key).voided)
+          assert.are.equal(0, #wow.sent)
+          assert.is_truthy(wow.printed[#wow.printed]:find("is no longer awarded to Ashla Brightwater, but its"
+            .. " raid chat line couldn't be posted", 1, true))
+          assert.is_truthy(ns.log[#ns.log].text:find("Undo line for .* not posted: the raid code"))
+        end)
+
+        it("tells the officer when the game confirms it after all, and keeps the void", function()
+          local key = unconfirmed()
+          assert.is_truthy(click(ns.Popup.NotHandedOut, key))
+          confirm(1, "Ashla Brightwater")
+          local award = ns.Records.Get(key)
+          assert.are.same({ true, "not-confirmed" }, { award.voided, award.state })
+          assert.is_truthy(wow.printed[#wow.printed]:find("got " .. link(1) .. " after all", 1, true))
+        end)
+      end)
     end)
   end)
 end)
