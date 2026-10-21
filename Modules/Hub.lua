@@ -3,7 +3,8 @@
 -- rebuilds O messages from their chunks before applying the operation through Records. Sends
 -- this add-on's own operations, and Q requests and resends, through one paced queue. Keeps who in
 -- the group runs the add-on (P), shares the group's raid selection (S) and names the chooser (#62).
--- Trades what each add-on holds (H) and asks for what differs (C), for catch-up (#20).
+-- Trades what each add-on holds (H) and asks for what differs (C), for catch-up (#20), and answers
+-- a C with the operations its sender lacks, applying such replies with the forwarder kept (#114).
 local _, ns = ...
 
 local Hub = {}
@@ -116,10 +117,11 @@ local function awardName(op)
 end
 
 -- Applies a whole operation to its raid through Records, with the author as its sender; via is
--- the bare name of whoever forwarded it (a catch-up reply, #20), nil for a direct message.
+-- the bare name of whoever forwarded it (a catch-up reply, #114), nil for a direct message.
 function Hub.Apply(op, raidId, author, via)
   local Records = ns.Records
-  local fields = { id = op.id, at = op.at, practice = op.practice, raid = raidId, via = via }
+  local fields = { id = op.id, at = op.at, practice = op.practice, raid = raidId, via = via,
+    author = bare(author) }
   local ok, why
   if op.type == "award" then
     for _, field in ipairs({ "boss", "item", "char", "user", "method", "roll", "note" }) do
@@ -166,7 +168,11 @@ local function complete(entry, raidId)
   if not whole then
     return ns.Log("Sync: dropped " .. entry.sender .. "'s message " .. entry.msgid .. " (malformed).")
   end
-  if entry.kind == "O" then return Hub.Apply(whole, raidId, entry.author) end
+  if entry.kind == "O" then
+    -- An author other than the sender came forwarded, in a catch-up reply.
+    local via = bare(entry.author) ~= entry.sender and entry.sender or nil
+    return Hub.Apply(whole, raidId, entry.author, via)
+  end
   local theirs, lacking = {}, {}
   for _, id in ipairs(whole) do theirs[id] = true end
   for _, id in ipairs(heldIds(raidId)) do
@@ -207,10 +213,6 @@ end
 Hub.Register("O", function(body, sender)
   local chunk = Sync.ParseChunk(body)
   if not chunk then return ns.Log("Sync: dropped a malformed O message from " .. sender .. ".") end
-  if bare(chunk.author) ~= sender then
-    -- Forwarded by a catch-up reply (#114), not applied here.
-    return ns.Log("Sync: ignored " .. chunk.author .. "'s operation sent by " .. sender .. ".")
-  end
   collect("O", chunk, sender)
 end)
 
@@ -221,12 +223,16 @@ Hub.Register("C", function(body, sender)
   collect("C", chunk, sender)
 end)
 
--- A whole catch-up request from sender: lacking are the ids held for raidId that sender's list
--- doesn't have, in the order made or received. Answering it is #114's; here it is only logged.
-function Hub.onCatchUp(sender, reqid, raidId, lacking)
-  ns.Log("Sync: " .. sender .. " asked to catch up (" .. reqid .. ") on raid " .. raidId .. "; they lack "
-    .. #lacking .. (#lacking > 0 and (": " .. table.concat(lacking, ", ")) or "") .. ".")
-end
+-- The end of a catch-up reply (spec 10.2): "D;reqid;count". Only logged: the operations came
+-- before it as O messages.
+Hub.Register("D", function(body, sender)
+  local reqid, count = body:match("^D;([a-z0-9]+);(%d%d?%d?)$")
+  if not reqid or #reqid ~= 6 then
+    return ns.Log("Sync: dropped a malformed D message from " .. sender .. ".")
+  end
+  ns.Log("Sync: " .. sender .. " answered catch-up request " .. reqid .. " with " .. tonumber(count)
+    .. " operations.")
+end)
 
 -- A resend request for a message this add-on sent: "Q;msgid;1,3".
 Hub.Register("Q", function(body, sender)
@@ -425,6 +431,47 @@ Hub.Register("H", function(body, sender)
   end
   remember(reqid, bodies)
 end)
+
+-- A whole catch-up request from sender (spec 10.4): lacking are the ids held for raidId that
+-- sender's list doesn't have, in the order made or received. Whispers sender each such operation
+-- as O messages with its author, then "D;reqid;count"; nothing at all when it lacks none. Only
+-- whole operations that fit the queue, the D counted, go; when some don't, it logs them and
+-- whispers an H, queued after the rest, so sender asks again for them once the queue has drained:
+-- rounds repeat until both match.
+function Hub.onCatchUp(sender, reqid, raidId, lacking)
+  ns.Log("Sync: " .. sender .. " asked to catch up (" .. reqid .. ") on raid " .. raidId .. "; they lack "
+    .. #lacking .. (#lacking > 0 and (": " .. table.concat(lacking, ", ")) or "") .. ".")
+  if #lacking == 0 then return end
+  local wanted = {}
+  for _, id in ipairs(lacking) do wanted[id] = true end
+  local code = ns.Raids.Get(raidId).code
+  local room = QUEUE_SIZE - #queue - 1
+  local messages, replies = {}, {}
+  for _, op in ipairs(ns.Records.Ops(raidId)) do
+    if wanted[op.id] then
+      local msgid = Sync.NewMsgId()
+      local bodies = Sync.EncodeOp(op, code, ns.Records.Author(op), msgid)
+      if #messages + #bodies > room then break end
+      for _, body in ipairs(bodies) do messages[#messages + 1] = { body = body, target = sender } end
+      replies[#replies + 1] = { msgid, bodies }
+    end
+  end
+  local queued, why = false, "the sending queue is full"
+  if #replies > 0 then
+    messages[#messages + 1] = { body = "D;" .. reqid .. ";" .. #replies, target = sender }
+    queued, why = enqueue(messages)
+  end
+  if not queued then
+    ns.Log("Sync: " .. why .. ", so the catch-up reply to " .. sender .. " wasn't sent.")
+    if not groupChannel() then return end
+  else
+    for _, reply in ipairs(replies) do remember(reply[1], reply[2]) end
+    if #replies == #lacking then return end
+    ns.Log("Sync: the sending queue is full, so " .. (#lacking - #replies) .. " of " .. #lacking
+      .. " operations weren't sent to " .. sender .. "; they are sent when " .. sender .. " asks again.")
+  end
+  sendHeld(sender, { raidId })
+end
 
 -- The held selection as an S body ("S;choice;at;by"), or nil when it is none.
 function Hub.SelectionBody()

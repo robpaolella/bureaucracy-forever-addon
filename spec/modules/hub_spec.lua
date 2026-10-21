@@ -165,7 +165,6 @@ describe("Hub", function()
       ["a malformed operation"] = function() receive("O;k4m8q2;1/1;SA0001;Zoé Brûlé;X;aw-9d2f6h1j") end,
       ["a sender outside the group"] = function() send(award(), nil, "Stranger") end,
       ["a raid not loaded"] = function() send(award(), "SZZZZZ") end,
-      ["an author who isn't the sender"] = function() send(award(), nil, ZOE, BO) end,
       ["a type with no handler"] = function() receive("Z;SA0001;x") end,
     }
     for name, act in pairs(cases) do
@@ -282,6 +281,41 @@ describe("Hub", function()
   it("saves no via for a direct message", function()
     send(award())
     assert.is_nil(ns.db.via)
+  end)
+
+  it("applies an operation forwarded in a catch-up reply, credited to its author, with the forwarder as via",
+    function()
+      send(award({ sender = ZOE }), nil, ZOE, BO)
+      send({ type = "confirm", id = "cf-1x8p4d2s", key = "aw-9d2f6h1j", at = 1792001204 }, nil, ZOE, BO)
+      local ops = Records.Ops(RAID)
+      local held = Records.Get("aw-9d2f6h1j")
+      assert.are.same({ ZOE, "confirmed" }, { held.sender, held.state })
+      assert.are.same({ ["aw-9d2f6h1j"] = BO, ["cf-1x8p4d2s"] = BO }, ns.db.via)
+      assert.are.same({ ZOE, ZOE }, { Records.Author(ops[1]), Records.Author(ops[2]) })
+      -- The same operations again, sent directly by their author, change nothing.
+      send(award({ sender = ZOE }))
+      send({ type = "confirm", id = "cf-1x8p4d2s", key = "aw-9d2f6h1j", at = 1792001204 })
+      assert.are.equal(2, #Records.Ops(RAID))
+      assert.are.same({ ["aw-9d2f6h1j"] = BO, ["cf-1x8p4d2s"] = BO }, ns.db.via)
+      assert.are.same({}, wow.printed)
+    end)
+
+  describe("the end of a catch-up reply", function()
+    it("is logged with its request and count, and changes no records", function()
+      receive("D;r00001;3", BO)
+      assert.is_true(logged("Bo Marsh answered catch-up request r00001 with 3 operations."))
+      assert.are.same({}, Records.Ops(RAID))
+    end)
+
+    it("is logged and dropped when malformed", function()
+      for _, body in ipairs({ "D;r00001;", "D;r00001", "D;R00001;1", "D;r0001;1", "D;r00001;1000",
+        "D;r00001;-1", "D;r00001;1;2" }) do
+        receive(body, BO)
+      end
+      assert.are.equal(7, #ns.log)
+      assert.is_true(logged("dropped a malformed D message from Bo Marsh."))
+      assert.are.same({}, wow.printed)
+    end)
   end)
 
   describe("a resend request", function()
@@ -1295,10 +1329,11 @@ describe("Hub catch-up", function()
       assert.are.same({ { ZOE, "r00001", RAID, { "aw-00000001" } } }, calls)
     end)
 
-    it("from an add-on holding all hands over none", function()
+    it("from an add-on holding all hands over none, and is answered with nothing", function()
       award("aw-00000001")
       receive(request({ "aw-00000001", "aw-notmine1" })[1], ZOE, "WHISPER")
       assert.are.same({ { ZOE, "r00001", RAID, {} } }, calls)
+      assert.are.same({}, sent())
     end)
 
     it("with a chunk missing asks for it again after 10 seconds", function()
@@ -1363,6 +1398,157 @@ describe("Hub catch-up", function()
       assert.are.same({ { ZOE, "r00001", RAID, { "cf-00000001" } } }, calls)
     end)
 
+    -- The operations of a reply's O whispers to target, as { id, author, msgid } each in order,
+    -- checking they are whole, then the D's body; anything after the D is in rest.
+    local function reply(list, target)
+      local ops, pieces, rest = {}, {}, {}
+      local done
+      for _, m in ipairs(list) do
+        if done then
+          rest[#rest + 1] = m
+        else
+          assert.are.same({ "WHISPER", target }, { m[2], m[3] })
+          if m[1]:sub(1, 2) == "D;" then
+            done = m[1]
+          else
+            local chunk = assert(Sync.ParseChunk(m[1]))
+            assert.are.equal("SA0001", chunk.raid)
+            pieces[#pieces + 1] = chunk.piece
+            if chunk.n == chunk.total then
+              local op = assert(ns.OpText.Decode(table.concat(pieces)))
+              ops[#ops + 1] = { op.id, chunk.author, chunk.msgid }
+              pieces = {}
+            end
+          end
+        end
+      end
+      assert.are.same({}, pieces)
+      return ops, done, rest
+    end
+
+    describe("is answered", function()
+      local LONG = string.rep("Trés bien; ", 14)
+
+      -- Records held here: Rae's award, Zoé's and Bo's received directly (Bo's with two chunks),
+      -- Bo's void of Zoé's, received directly, and Rae's confirm.
+      local function hold()
+        award("aw-rae00001")
+        ns.Hub.Apply({ type = "award", id = "aw-zoe00001", boss = "lb_lucifron", item = 16806,
+          char = "Ana Vale", user = "u_ana", method = "SR", at = 1792000100 }, RAID, ZOE)
+        ns.Hub.Apply({ type = "award", id = "aw-bo000001", boss = "lb_lucifron", item = 16807,
+          char = "Ana Vale", user = "u_ana", method = "SR", note = LONG, at = 1792000200 }, RAID, BO)
+        ns.Hub.Apply({ type = "void", id = "vd-bo000001", key = "aw-zoe00001", at = 1792000300 }, RAID, BO)
+        assert(ns.Records.Confirm("aw-rae00001", { id = "cf-rae00001" }))
+      end
+
+      it("with a whisper of each operation its sender lacks, by its author, in order, then D and the count",
+        function()
+          hold()
+          receive(request({ "aw-zoe00001" })[1], ZOE, "WHISPER")
+          local ops, done, rest = reply(sent(), ZOE)
+          assert.are.same({ { "aw-rae00001", "Rae Quill" }, { "aw-bo000001", BO }, { "vd-bo000001", BO },
+            { "cf-rae00001", "Rae Quill" } }, { { ops[1][1], ops[1][2] }, { ops[2][1], ops[2][2] },
+            { ops[3][1], ops[3][2] }, { ops[4][1], ops[4][2] } })
+          assert.are.same({ 4, "D;r00001;4", {} }, { #ops, done, rest })
+          assert.is_false(logged("operations weren't sent"))
+        end)
+
+      it("with chunks of the reply sent again when asked", function()
+        hold()
+        receive(request({})[1], ZOE, "WHISPER")
+        local list = sent()
+        local ops = reply(list, ZOE)
+        receive("Q;" .. ops[3][3] .. ";2", ZOE, "WHISPER")
+        local again = sent()
+        assert.are.equal("O;" .. ops[3][3] .. ";2/2", list[4][1]:sub(1, 12))
+        assert.are.same({ list[4][1], "WHISPER", ZOE }, again[#again])
+      end)
+
+      it("by two add-ons alike, and applying both replies, in any number, leaves one list", function()
+        hold()
+        receive(request({})[1], ZOE, "WHISPER")
+        local list = sent()
+        -- Zoé's add-on, holding none, gets the same reply from Rae and from Bo.
+        local zoe = wow.start()
+        wow.state.player = ZOE
+        wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
+        zoe.Raids.Load(assert(zoe.Snapshot.Validate(snapshot(RAID), "0.1.0")), "pasted")
+        for _, forwarder in ipairs({ "Rae Quill", BO, "Rae Quill" }) do
+          for _, m in ipairs(list) do receive(m[1], forwarder, "WHISPER") end
+        end
+        local ids, vias = {}, {}
+        for n, op in ipairs(zoe.Records.Ops(RAID)) do
+          ids[n], vias[n] = op.id, zoe.Records.Via(op.id)
+        end
+        assert.are.same({ "aw-rae00001", "aw-zoe00001", "aw-bo000001", "vd-bo000001", "cf-rae00001" }, ids)
+        -- Rae's own operations came from Rae directly; the others were forwarded.
+        assert.are.same({ [2] = "Rae Quill", [3] = "Rae Quill", [4] = "Rae Quill" }, vias)
+        local ops = zoe.Records.Ops(RAID)
+        assert.are.same({ "Rae Quill", ZOE, BO, BO, "Rae Quill" }, { zoe.Records.Author(ops[1]),
+          zoe.Records.Author(ops[2]), zoe.Records.Author(ops[3]), zoe.Records.Author(ops[4]),
+          zoe.Records.Author(ops[5]) })
+        assert.are.same({ true, "confirmed" }, { zoe.Records.Get("aw-zoe00001").voided,
+          zoe.Records.Get("aw-rae00001").state })
+        assert.are.same({}, wow.printed)
+        -- Nothing received was sent on.
+        for _ = 1, 20 do wow.advance(1) end
+        assert.are.same({}, wow.addonMessages)
+      end)
+
+      it("with only the whole operations that fit the queue, the D counted, then an H, and logs it",
+        function()
+          hold()
+          wow.bossFight(true)
+          local ids = { "aw-zoe00001" }
+          for i = 1, 95 do
+            local op = assert(ns.Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
+              user = "u_ana", method = "HR", id = string.format("aw-%08d", i), raid = RAID }))
+            assert.is_true(Hub.SendOp(op, RAID))
+            ids[#ids + 1] = op.id
+          end
+          -- Zoé lacks Rae's award, Bo's two-chunk award, the void and the confirm: 5 chunks, with 4
+          -- places left in the queue once the D has its own.
+          for _, body in ipairs(request(ids)) do receive(body, ZOE, "WHISPER") end
+          assert.is_true(logged("the sending queue is full, so 1 of 4 operations weren't sent to Zoé Brûlé; "
+            .. "they are sent when Zoé Brûlé asks again."))
+          wow.bossFight(false)
+          for _ = 1, 100 do wow.advance(1) end
+          local list = sent()
+          assert.are.equal(101, #list)
+          local ops, done, rest = reply({ unpack(list, 96) }, ZOE)
+          assert.are.same({ "aw-rae00001", "aw-bo000001", "vd-bo000001" },
+            { ops[1][1], ops[2][1], ops[3][1] })
+          assert.are.same({ 3, "D;r00001;3" }, { #ops, done })
+          local mine = {}
+          for n, op in ipairs(ns.Records.Ops(RAID)) do mine[n] = op.id end
+          assert.are.same({ { held(mine), "WHISPER", ZOE } }, rest)
+        end)
+
+      it("with nothing but an H, logged, when not even one operation and the D fit the queue", function()
+        hold()
+        wow.bossFight(true)
+        local ids = { "aw-zoe00001", "aw-bo000001", "vd-bo000001", "cf-rae00001" }
+        for i = 1, 99 do
+          local op = assert(ns.Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
+            user = "u_ana", method = "HR", id = string.format("aw-%08d", i), raid = RAID }))
+          assert.is_true(Hub.SendOp(op, RAID))
+          ids[#ids + 1] = op.id
+        end
+        for _, body in ipairs(request(ids)) do receive(body, ZOE, "WHISPER") end
+        assert.is_true(logged("the sending queue is full, so the catch-up reply to Zoé Brûlé wasn't sent."))
+        wow.bossFight(false)
+        for _ = 1, 110 do wow.advance(1) end
+        -- An H follows the queue, so Zoé asks again once it has drained, and gets the award.
+        local list = sent()
+        local mine = {}
+        for n, op in ipairs(ns.Records.Ops(RAID)) do mine[n] = op.id end
+        assert.are.same({ 100, { held(mine), "WHISPER", ZOE } }, { #list, list[100] })
+        for _, body in ipairs(request(ids, "r00002")) do receive(body, ZOE, "WHISPER") end
+        local ops, done, rest = reply({ unpack(sent(), 101) }, ZOE)
+        assert.are.same({ "aw-rae00001", "D;r00002;1", {} }, { ops[1][1], done, rest })
+      end)
+    end)
+
     it("for a raid that isn't loaded is ignored", function()
       receive(request({}, nil, "SZZZZZ")[1], ZOE, "WHISPER")
       assert.are.same({}, calls)
@@ -1376,5 +1562,227 @@ describe("Hub catch-up", function()
       assert.is_true(logged("dropped a malformed C message from Zoé Brûlé"))
       assert.is_true(logged("dropped Zoé Brûlé's message r00002 (malformed)"))
     end)
+  end)
+end)
+
+-- Catch-up between add-ons (spec 10.4, #114): officers take turns, each a session of their own
+-- add-on with its saved data; a message goes to every officer present, or, whispered, to its target.
+describe("Hub catch-up between officers", function()
+  local OFFICERS = { ZOE, "Rae Quill", BO }
+  local dbs, inbox, present, logs, sentBy, count
+
+  -- One session of officer's add-on. It takes in what waits for it, then options.make's operations
+  -- (sent unless options.unsent), and sends for 150 seconds. options.login fires the login or
+  -- /reload; options.solo leaves it out of the group.
+  local function turn(officer, options)
+    options = options or {}
+    local ns = wow.start({ saved = { BureaucracyForeverDB = dbs[officer] } })
+    wow.state.player = officer
+    if not dbs[officer] then
+      ns.Raids.Load(assert(ns.Snapshot.Validate(snapshot(RAID), "0.1.0")), "pasted")
+      assert.is_true(ns.Selection.ChooseRaid(RAID, true))
+    end
+    wow.state.group, wow.state.groupIsRaid = not options.solo and OFFICERS or {}, not options.solo
+    if options.login ~= nil then wow.fire("PLAYER_ENTERING_WORLD", options.login) end
+    -- Who asked this add-on to catch up, this session.
+    local asked = {}
+    for _, m in ipairs(inbox[officer]) do
+      if m[2]:sub(1, 2) == "C;" then asked[m[1]] = true end
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", m[2], m[3], m[1])
+    end
+    inbox[officer] = {}
+    for _, op in ipairs(options.make and options.make(ns.Records) or {}) do
+      if not options.unsent then assert.is_true(ns.Hub.SendOp(op, RAID)) end
+    end
+    for _ = 1, 150 do wow.advance(1) end
+    for _, m in ipairs(wow.addonMessages) do
+      local chunk = m.text:sub(1, 2) == "O;" and assert(ns.Sync.ParseChunk(m.text))
+      if chunk and chunk.author ~= officer then
+        -- A received operation is sent on only in a whisper, to who asked for it.
+        assert.are.same({ "WHISPER", true }, { m.channel, asked[m.target] or false })
+      end
+      table.insert(sentBy[officer], m)
+      for _, other in ipairs(OFFICERS) do
+        if other ~= officer and present[other] and (m.channel ~= "WHISPER" or m.target == other) then
+          table.insert(inbox[other], { officer, m.text, m.channel })
+        end
+      end
+    end
+    for _, entry in ipairs(ns.log) do table.insert(logs[officer], entry.text) end
+    for _, line in ipairs(wow.printed) do assert.is_nil(line:find("different version", 1, true)) end
+    dbs[officer] = BureaucracyForeverDB
+    return ns
+  end
+
+  -- Turns for every officer present until no message waits.
+  local function settle()
+    for _ = 1, 20 do
+      local waiting = false
+      for _, officer in ipairs(OFFICERS) do
+        if present[officer] and #inbox[officer] > 0 then
+          waiting = true
+          turn(officer)
+        end
+      end
+      if not waiting then return end
+    end
+    error("still sending after 20 rounds")
+  end
+
+  -- n awards, made by the officer whose turn it is.
+  local function awards(n)
+    return function(Records)
+      local ops = {}
+      for _ = 1, n do
+        count = count + 1
+        ops[#ops + 1] = assert(Records.Award({ boss = "lb_lucifron", item = 16800 + count % 20,
+          char = "Ana Vale", user = "u_" .. count, method = "SR", roll = count,
+          note = count % 5 == 0 and string.rep("Trés bien; ", 14) or nil }))
+      end
+      return ops
+    end
+  end
+
+  -- What officer's add-on holds now, by id: its operations, records and each operation's author.
+  local function holding(officer)
+    local ns = wow.start({ saved = { BureaucracyForeverDB = dbs[officer] } })
+    wow.state.player = officer
+    local ops, records, authors = {}, {}, {}
+    for _, op in ipairs(ns.Records.Ops(RAID)) do
+      ops[op.id], authors[op.id] = op, ns.Records.Author(op)
+    end
+    for _, record in ipairs(ns.Raids.Awards(RAID)) do records[record.key] = record end
+    return ops, records, authors, ns
+  end
+
+  local function size(map)
+    local n = 0
+    for _ in pairs(map) do n = n + 1 end
+    return n
+  end
+
+  -- Checks every officer named (all by default) holds the same expected number of operations.
+  local function sameEverywhere(expected, officers)
+    officers = officers or OFFICERS
+    local ops, records, authors = holding(officers[1])
+    assert.are.equal(expected, size(ops))
+    for i = 2, #officers do
+      local others, otherRecords, otherAuthors = holding(officers[i])
+      assert.are.same(ops, others)
+      assert.are.same(records, otherRecords)
+      assert.are.same(authors, otherAuthors)
+    end
+    return ops, authors
+  end
+
+  local function logged(officer, text)
+    for _, line in ipairs(logs[officer]) do
+      if line:find(text, 1, true) then return true end
+    end
+    return false
+  end
+
+  before_each(function()
+    dbs, inbox, present, logs, sentBy, count = {}, {}, {}, {}, {}, 0
+    for _, officer in ipairs(OFFICERS) do inbox[officer], logs[officer], sentBy[officer] = {}, {}, {} end
+  end)
+
+  it("brings a late officer the same list as the others, from two replies alike", function()
+    present[ZOE], present["Rae Quill"] = true, true
+    turn(ZOE, { make = awards(6) })
+    turn("Rae Quill", { make = awards(5) })
+    turn(ZOE, { make = function(Records)
+      local first = Records.Ops(RAID)[7].id
+      return { assert(Records.Void(first, { reason = "wrong winner" })), (assert(Records.Confirm(first))) }
+    end })
+    turn("Rae Quill", { make = function(Records)
+      local first = Records.Ops(RAID)[1].id
+      return { (assert(Records.Replace(first, { boss = "lb_lucifron", item = 16801, char = "Bo Marsh",
+        user = "u_bo", method = "SR", roll = 70 }))) }
+    end })
+    settle()
+    -- Bo awarded one item before joining the group, so it was never sent.
+    turn(BO, { solo = true, unsent = true, make = awards(1) })
+    present[BO] = true
+    turn(BO, { login = true })
+    settle()
+
+    local ops, authors = sameEverywhere(15)
+    local makers = {}
+    for _, officer in ipairs(OFFICERS) do
+      for _, m in ipairs(sentBy[officer]) do
+        local chunk = m.text:sub(1, 2) == "O;" and m.channel ~= "WHISPER" and wow.ns.Sync.ParseChunk(m.text)
+        if chunk then makers[chunk.author] = true end
+      end
+    end
+    for id in pairs(ops) do
+      assert.is_truthy(authors[id] == ZOE or authors[id] == "Rae Quill" or authors[id] == BO)
+    end
+    assert.are.same({ [ZOE] = true, ["Rae Quill"] = true }, makers)
+    -- Both Zoé and Rae answered Bo, with the same operations; each forwarded copy keeps its forwarder.
+    local answered = {}
+    for _, officer in ipairs({ ZOE, "Rae Quill" }) do
+      for _, m in ipairs(sentBy[officer]) do
+        if m.target == BO and m.text:sub(1, 2) == "D;" then answered[officer] = m.text:match("(%d+)$") end
+      end
+    end
+    assert.are.same({ [ZOE] = "14", ["Rae Quill"] = "14" }, answered)
+    local _, _, _, bo = holding(BO)
+    for id in pairs(ops) do
+      local via = bo.Records.Via(id)
+      if via then assert.are_not.equal(authors[id], via) end
+    end
+    -- Bo's own award reached the others from Bo, when they asked for it.
+    local _, _, _, rae = holding("Rae Quill")
+    for id, author in pairs(authors) do
+      if author == BO then assert.is_nil(rae.Records.Via(id)) end
+    end
+  end)
+
+  it("brings an officer who reloads mid-run what was sent while away", function()
+    for _, officer in ipairs(OFFICERS) do present[officer] = true end
+    turn(ZOE, { make = awards(4) })
+    turn(BO, { make = awards(3) })
+    settle()
+    -- Rae reloads: what is sent meanwhile never reaches her.
+    present["Rae Quill"] = false
+    turn(ZOE, { make = awards(3) })
+    turn(BO, { make = function(Records)
+      local zoes = Records.Ops(RAID)[1].id
+      return { assert(Records.Void(zoes, { reason = "traded" })),
+        (assert(Records.NotConfirmed(Records.Ops(RAID)[2].id))) }
+    end })
+    settle()
+    present["Rae Quill"] = true
+    turn("Rae Quill", { login = false })
+    settle()
+    local _, authors = sameEverywhere(12)
+    local _, _, _, rae = holding("Rae Quill")
+    -- Zoé answered first: her own awards came direct, Bo's void and not-confirmed forwarded by her.
+    local forwarded = {}
+    for id, author in pairs(authors) do
+      local via = rae.Records.Via(id)
+      if via then forwarded[#forwarded + 1] = author .. " via " .. via end
+    end
+    assert.are.same({ "Bo Marsh via Zoé Brûlé", "Bo Marsh via Zoé Brûlé" }, forwarded)
+  end)
+
+  it("sends a reply larger than the queue in rounds until the lists match", function()
+    present[ZOE] = true
+    turn(ZOE, { solo = true, unsent = true, make = awards(130) })
+    present["Rae Quill"] = true
+    turn("Rae Quill", { login = true })
+    settle()
+    sameEverywhere(130, { ZOE, "Rae Quill" })
+    assert.is_true(logged(ZOE, "operations weren't sent to Rae Quill; they are sent when Rae Quill asks "
+      .. "again."))
+    local replies = {}
+    for _, m in ipairs(sentBy[ZOE]) do
+      if m.text:sub(1, 2) == "D;" then replies[#replies + 1] = tonumber(m.text:match("(%d+)$")) end
+    end
+    assert.is_true(#replies >= 2)
+    local total = 0
+    for _, n in ipairs(replies) do total = total + n end
+    assert.are.equal(130, total)
   end)
 end)
