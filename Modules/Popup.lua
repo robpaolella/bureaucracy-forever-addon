@@ -3,7 +3,8 @@
 -- Only the loot master gets a model (design Q3), and none on a run that is not a guild run.
 -- Give is the officer's click on a Give button (#38): it hands out, records and announces.
 -- A hand-out the game doesn't confirm is recorded as not confirmed, and the officer resolves it
--- with TryAgain, GiveElse (from GiveElseList) or NotHandedOut (#12; drawn by #95).
+-- with TryAgain, GiveElse (from GiveElseList) or NotHandedOut (#12). Build shows the row of such a
+-- hand-out as not confirmed, with those three choices (#95).
 -- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
 local _, ns = ...
 
@@ -32,13 +33,34 @@ local UNKNOWN_BOSS_NOTICE = "These items drop from more than one boss. Pick the 
 local NO_RESERVES_NOTICE = "No reserves loaded, so every item is an open roll."
 local DB_TITLE = "Disenchant/bank: give to"
 local DB_CHOOSE_TIP = "Disenchant/bank: choose the character to give to."
+local NC_HINT = "Try again posts nothing. Give to someone else posts one correction line, and Not handed"
+  .. " out posts an undo line. If you close this, it waits in the Awards tab as \"not confirmed\"."
+local NC_FIGHT_TOOLTIP = "Posts a line, so it waits until the boss fight ends"
+-- What the row says when TryAgain, GiveElse or NotHandedOut refuses, by their reasons.
+local REFUSALS = {
+  fight = "Chat is locked in the boss fight. Try again works now; the other two wait until it ends.",
+  window = "The loot window is closed. Open it to hand the item out.",
+  changed = "The item isn't in the loot window now.",
+  ["not a candidate"] = "The game won't let them receive it now (usually: not nearby when the boss died).",
+  ["not a contender"] = "They aren't one of the people who reserved it.",
+  ["not in raid"] = "They aren't in the raid.",
+  ["cannot receive"] = "The game won't let them receive it now (usually: not nearby when the boss died).",
+  ["no pick"] = "No disenchant/bank character is chosen for this raid. Choose one with D/B first.",
+  ["not loot master"] = "Only the loot master can hand items out.",
+  ["not unconfirmed"] = "This award is already settled.",
+  ["handing out"] = "A hand-out of it is still waiting for the game.",
+  unknown = "The game can't name them yet. Try again in a moment.",
+  grey = "Grey items can only go to you.",
+  empty = "That item is gone from the loot window.",
+}
 
 local bare = ns.Rules.Bare
 local chosenBoss -- the boss row id the officer picked for this loot window
 local sessionPick -- the D/B pick while no raid is loaded: kept until the game closes, never saved
 local dbNotes = {} -- per slot, why the last D/B click handed nothing out
+local refusals = {} -- per award key, why the last not-confirmed choice was refused
 
-ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes = nil, {} end)
+ns.On("LOOT_CLOSED", function() chosenBoss, dbNotes, refusals = nil, {}, {} end)
 
 -- Whether the game locks chat for add-ons now (a boss fight). A call that fails counts as no lock.
 function Popup.ChatLocked()
@@ -226,9 +248,10 @@ local function resolveRow(it, ctx, earlier, copyNote, pendingKey)
 end
 
 -- The buttons of a row, once the boss is known: Give and D/B need a boss picked. In a boss fight
--- the Give and roll buttons wait, with a tooltip saying why. A row being handed out has none.
+-- the Give and roll buttons wait, with a tooltip saying why. A row being handed out, or not
+-- confirmed, has none (a not confirmed row's choices are in row.notConfirmed).
 local function addButtons(row, boss, locked)
-  if row.handout then
+  if row.handout or row.notConfirmed then
     row.buttons = {}
     return
   end
@@ -277,13 +300,57 @@ local function footLine(raidId, snapshot)
     date("%a %d %b", snapshot.startsAt), date("%H:%M", snapshot.generated), date("%H:%M", loaded))
 end
 
+-- The row's not confirmed state: the hand-out the game gave up on (its award still waits as not
+-- confirmed) and the officer's three choices. Buttons that post a line wait in a boss fight; Try
+-- again posts none. list is Give to someone else's list, from GiveElseList.
+local function notConfirmed(attempt, locked)
+  local key = attempt.awardKey
+  local wait = locked and NC_FIGHT_TOOLTIP or nil
+  local list = { title = "Give " .. attempt.link .. " to someone else", people = {}, back = "Back" }
+  local award = ns.Records.Get(key)
+  for _, c in ipairs(Popup.GiveElseList(key) or {}) do
+    local hard = c.method == "HR"
+    list.people[#list.people + 1] = { char = c.char, method = hard and LABELS["hr-single"] or LABELS.sr,
+      kind = hard and "hr" or "sr", available = c.available,
+      reason = c.reason == "cannot receive" and "can't receive it" or c.reason,
+      enabled = c.available and not locked, tooltip = c.available and wait or nil }
+  end
+  if #list.people == 0 then list.empty = "No one else reserved it." end
+  list.hint = "Posts one correction line: Correction: " .. attempt.link .. " → their name, not "
+    .. (award.char or "disenchant/bank") .. "."
+  return { key = key,
+    text = "The game didn't confirm that " .. attempt.winner .. " got it. They may be too far away, or"
+      .. " their bags are full.",
+    hint = NC_HINT, refusal = refusals[key], list = list,
+    buttons = {
+      { text = "Try again", action = "tryagain", enabled = true },
+      { text = "Give to someone else", action = "giveelse", enabled = not locked, tooltip = wait },
+      { text = "Not handed out", action = "nothandedout", enabled = not locked, tooltip = wait },
+    } }
+end
+
+-- The attempt of each slot whose hand-out the game didn't confirm and whose award still waits
+-- as not confirmed (newest first wins), by slot.
+local function unconfirmedBySlot()
+  local found = {}
+  for _, a in ipairs(ns.Tracking.Pending()) do
+    local award = a.status == "unconfirmed" and a.awardKey and ns.Records.Get(a.awardKey)
+    if award and award.state == "not-confirmed" and not award.voided then found[a.slot] = a end
+  end
+  return found
+end
+
 -- The model for the open loot window, or nil and why: "not loot master", "not a guild run" or
 -- "no items". Fields: title, boss ({ name, id, resolved, notice, menuTitle, menu = { { id, name,
 -- selected, killed } } }), notice (no reserves), fight (the boss fight note, while chat is locked),
 -- syncLink, rows (every item of every loot-window page; each: slot, item, link, copy, mode, label,
 -- contenders, winner, user, skipped, skippedText, note, text, action, unavailable, dbNote (why the
 -- last D/B click handed nothing out), handout (while the game confirms a hand-out: { text, note }),
--- buttons (each: text, action, enabled, tooltip; the D/B button's also pick)), dbMenu ({ title,
+-- notConfirmed (once the game gave up on its hand-out: { key, text, hint, refusal (why the last
+-- choice was refused), buttons (Try again, Give to someone else, Not handed out: text, action,
+-- enabled, tooltip), list = { title, people = { { char, method, kind, available, reason, enabled,
+-- tooltip } }, empty, hint, back } }), buttons (each: text, action, enabled, tooltip; the D/B
+-- button's also pick)), dbMenu ({ title,
 -- members = { { name, selected } }, note }), count, foot, recheck.
 function Popup.Build()
   if not isLootMaster() then return nil, "not loot master" end
@@ -308,6 +375,7 @@ function Popup.Build()
   for _, a in ipairs(ns.Tracking.Pending()) do
     if a.status == "pending" and not a.windowClosed then handouts[a.slot] = a end
   end
+  local unconfirmed = unconfirmedBySlot()
   local total, seen, earlier, copyNotes = {}, {}, {}, {}
   for _, it in ipairs(items) do total[it.item] = (total[it.item] or 0) + 1 end
   local model = { boss = boss, rows = {}, count = #items, foot = footLine(raidId, snapshot) }
@@ -315,7 +383,10 @@ function Popup.Build()
     seen[it.item] = (seen[it.item] or 0) + 1
     earlier[it.item] = earlier[it.item] or {}
     local handout = handouts[it.slot]
-    local row = resolveRow(it, ctx, earlier[it.item], copyNotes[it.item], handout and handout.awardKey)
+    local gaveUp = unconfirmed[it.slot]
+    if gaveUp and gaveUp.link and tonumber(gaveUp.link:match("item:(%d+)")) ~= it.item then gaveUp = nil end
+    local mine = handout or gaveUp
+    local row = resolveRow(it, ctx, earlier[it.item], copyNotes[it.item], mine and mine.awardKey)
     if total[it.item] > 1 then
       row.copy = string.format("Copy %d of %d", seen[it.item], total[it.item])
       if row.action == "give" then
@@ -326,6 +397,7 @@ function Popup.Build()
       row.handout = { text = "Handing out to " .. handout.winner .. "…",
         note = handout.announced and ANNOUNCED or NOT_ANNOUNCED }
     end
+    if gaveUp and not handout then row.notConfirmed = notConfirmed(gaveUp, locked) end
     row.dbNote = dbNotes[it.slot]
     addButtons(row, boss, locked)
     model.recheck = model.recheck or row.recheck
@@ -367,6 +439,12 @@ function Popup.SetDBPick(name)
   end
   dbNotes = {}
   return true
+end
+
+-- The officer's choice on a not confirmed row was refused for `why` (nil: it worked): the row
+-- says so until the next choice or the loot window closes.
+function Popup.Refused(key, why)
+  refusals[key] = why and (REFUSALS[why] or ("It couldn't be done (" .. tostring(why) .. ").")) or nil
 end
 
 -- Posts the operation's chat line, built from data, in raid (or party) chat. With no data (the

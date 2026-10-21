@@ -323,14 +323,15 @@ describe("PopupFrame", function()
       assert.are.equal("Give to Doran Vale", shownRows()[1].primary.label:GetText())
     end)
 
-    it("gives the buttons back when the game doesn't confirm", function()
+    it("swaps the waiting box for the not confirmed choices when the game doesn't confirm", function()
       raid()
       drop({ { id = 1 } })
       click(shownRows()[1].primary)
       wow.advance(ns.Tracking.confirmWait)
       local row = shownRows()[1]
       assert.is_false(row.box:IsShown())
-      assert.is_true(row.primary:IsShown())
+      assert.is_false(row.primary:IsShown() or row.db:IsShown())
+      assert.is_true(row.ncBox:IsShown())
     end)
 
     it("greys award and roll buttons in a fight, says why, enables them after (popup-fight)", function()
@@ -369,6 +370,158 @@ describe("PopupFrame", function()
       click(row.primary)
       assert.are.same({}, wow.gives)
       assert.are.same({}, wow.sent)
+    end)
+  end)
+
+  describe("not confirmed (#95)", function()
+    local RESERVES = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR"),
+      holder("Mirel Stone", "SR"), holder("Tovin Hale", "SR") } }
+
+    local function click(button)
+      wow.click(function() button.scripts.OnClick(button) end)
+    end
+
+    -- Item 1 given to Ashla and not confirmed; Mirel isn't in the raid. Returns the row.
+    local function unconfirmed()
+      setup({ code = "SA0001", reserves = RESERVES,
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } },
+        { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Tovin Hale" })
+      drop({ { id = 1 }, { id = 2 } })
+      click(shownRows()[1].primary)
+      wow.advance(ns.Tracking.confirmWait)
+      return shownRows()[1]
+    end
+
+    local function texts(box)
+      local list = {}
+      for i, b in ipairs(box.buttons) do list[i] = { b.label:GetText(), b:IsEnabled() } end
+      return list
+    end
+
+    it("draws the design's state: the message, three buttons and the hint, no row buttons", function()
+      local row = unconfirmed()
+      local box = row.ncBox
+      assert.is_true(box:IsShown())
+      assert.is_false(row.box:IsShown() or row.list:IsShown() or row.primary:IsShown() or row.db:IsShown())
+      assert.are.equal("The game didn't confirm that Ashla Brightwater got it. They may be too far away, or"
+        .. " their bags are full.", box.text:GetText())
+      assert.are.same({ { "Try again", true }, { "Give to someone else", true }, { "Not handed out", true } },
+        texts(box))
+      assert.are.equal("Try again posts nothing. Give to someone else posts one correction line, and Not"
+        .. " handed out posts an undo line. If you close this, it waits in the Awards tab as"
+        .. " \"not confirmed\".", box.hint:GetText())
+      assert.is_true(box.warnEdge:GetHeight() > box.text:GetStringHeight())
+      assert.is_true(box.buttons[1].points[1].y < -box.warnEdge:GetHeight())
+      assert.are.equal("", box.refusal:GetText())
+      assert.is_false(box.refusal:IsShown())
+      assert.are.same({ row, 40 }, { box.points[1].relativeTo, box.points[1].x })
+      assert.is_true(row:GetHeight() >= 40 + box:GetHeight())
+      -- The other rows are unaffected.
+      assert.are.equal("Call open roll", shownRows()[2].primary.label:GetText())
+    end)
+
+    it("Try again hands out once more, posts nothing and shows the waiting box", function()
+      local row = unconfirmed()
+      local sent, gives = #wow.sent, #wow.gives
+      click(row.ncBox.buttons[1])
+      assert.are.equal(gives + 1, #wow.gives)
+      assert.are.equal(sent, #wow.sent)
+      row = shownRows()[1]
+      assert.is_true(row.box:IsShown())
+      assert.is_false(row.ncBox:IsShown())
+    end)
+
+    it("Not handed out voids the award, posts the undo line and clears the state", function()
+      local row = unconfirmed()
+      click(row.ncBox.buttons[3])
+      assert.are.equal(2, #wow.sent)
+      assert.is_truthy(wow.sent[2].text:find("Undo:", 1, true))
+      assert.is_false(shownRows()[1].ncBox:IsShown())
+      assert.is_true(shownRows()[1].primary:IsShown())
+    end)
+
+    it("Give to someone else opens the list: contenders, methods, not in raid greyed (give-else)", function()
+      local row = unconfirmed()
+      click(row.ncBox.buttons[2])
+      row = shownRows()[1]
+      local list = row.list
+      assert.is_true(list:IsShown())
+      assert.is_false(row.ncBox:IsShown())
+      assert.are.equal("Give " .. link(1) .. " to someone else", list.title:GetText())
+      local e1, e2, e3 = list.entries[1], list.entries[2], list.entries[3]
+      assert.are.same({ "Doran Vale", "SOFT RESERVE", true, true }, { e1.name:GetText(), e1.method:GetText(),
+        e1.give:IsShown(), e1.give:IsEnabled() })
+      assert.are.same({ "Mirel Stone", "not in raid", false }, { e2.name:GetText(), e2.method:GetText(),
+        e2.give:IsShown() })
+      assert.are.same({ "Tovin Hale", "SOFT RESERVE", true }, { e3.name:GetText(), e3.method:GetText(),
+        e3.give:IsShown() })
+      assert.is_nil(list.entries[4])
+      -- Each method sits on a badge and each name has a separator line; the greyed one has no badge.
+      assert.are.same({ true, false, true }, { e1.badge:IsShown(), e2.badge:IsShown(), e3.badge:IsShown() })
+      assert.is_true(e1.line:IsShown() and e3.line:IsShown())
+      assert.is_false(list.empty:IsShown())
+      assert.are.equal("Posts one correction line: Correction: " .. link(1)
+        .. " → their name, not Ashla Brightwater.", list.hint:GetText())
+      assert.is_true(row:GetHeight() >= 40 + list:GetHeight())
+    end)
+
+    it("Back closes the list; choosing a name hands out, posts the correction line and closes it", function()
+      local row = unconfirmed()
+      click(row.ncBox.buttons[2])
+      click(row.list.back)
+      assert.is_true(shownRows()[1].ncBox:IsShown())
+      click(row.ncBox.buttons[2])
+      click(row.list.entries[1].give)
+      assert.is_truthy(wow.sent[2].text:find("Correction:", 1, true))
+      assert.are.equal(1, wow.gives[2].slot)
+      row = shownRows()[1]
+      assert.is_false(row.list:IsShown() or row.ncBox:IsShown())
+      assert.is_true(row.box:IsShown())
+    end)
+
+    it("shows why a choice was refused in the row", function()
+      local row = unconfirmed()
+      wow.state.loot[1].candidates = { "Masterlooter", "Doran Vale" }
+      click(row.ncBox.buttons[1])
+      row = shownRows()[1]
+      assert.are.equal("The game won't let them receive it now (usually: not nearby when the boss died).",
+        row.ncBox.refusal:GetText())
+      assert.is_true(row.ncBox.refusal:IsShown())
+      assert.are.equal(1, #wow.gives)
+    end)
+
+    it("greys the buttons that post a line in a boss fight, and draws them again after", function()
+      local row = unconfirmed()
+      click(row.ncBox.buttons[2])
+      wow.bossFight(true)
+      row = shownRows()[1]
+      assert.is_false(row.list.entries[1].give:IsEnabled())
+      click(row.list.back)
+      assert.are.same({ { "Try again", true }, { "Give to someone else", false },
+        { "Not handed out", false } }, texts(shownRows()[1].ncBox))
+      local sent = #wow.sent
+      click(shownRows()[1].ncBox.buttons[3])
+      assert.are.equal(sent, #wow.sent)
+      click(shownRows()[1].ncBox.buttons[1])
+      assert.are.equal(2, #wow.gives)
+      wow.bossFight(false)
+    end)
+
+    it("clears the state when the game confirms late", function()
+      local row = unconfirmed()
+      wow.fire("LOOT_SLOT_CLEARED", 1)
+      wow.fire("CHAT_MSG_LOOT", "Ashla Brightwater receives loot: " .. link(1) .. ".")
+      assert.is_false(row.ncBox:IsShown())
+      assert.is_true(shownRows()[1].primary:IsShown())
+    end)
+
+    it("leaves the award not confirmed when the pop-up closes", function()
+      unconfirmed()
+      local key = ns.Popup.Build().rows[1].notConfirmed.key
+      wow.fire("LOOT_CLOSED")
+      assert.is_false(pf.frame:IsShown())
+      assert.are.equal("not-confirmed", ns.Records.Get(key).state)
     end)
   end)
 
