@@ -473,8 +473,9 @@ describe("Hub sending", function()
     it("for the first of a full queue held through a boss fight", function()
       wow.bossFight(true)
       local first = award()
-      Hub.SendOp(first, RAID)
-      for _ = 2, 98 do Hub.SendOp(award(), RAID) end
+      assert.is_true(Hub.SendOp(first, RAID))
+      for _ = 2, 100 do assert.is_true(Hub.SendOp(award(), RAID)) end
+      assert.is_false(Hub.SendOp(award(), RAID))
       wow.bossFight(false)
       wow.advance(1)
       local firstId = wow.addonMessages[3].text:match("^O;(%w+);")
