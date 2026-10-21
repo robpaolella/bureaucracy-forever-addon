@@ -51,7 +51,8 @@ end
 
 -- Officers' sync messages (spec 10.2, 10.3). The game sends the prefix apart from the body, and
 -- counts both, with a separator, against its 255 bytes.
-Sync.PREFIX = "BFLOOT1"
+Sync.VERSION = 1
+Sync.PREFIX = "BFLOOT" .. Sync.VERSION
 local PIECE = 160
 local MSGID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -79,16 +80,20 @@ local function pieceEnd(text, first)
   return last
 end
 
--- An operation's O message bodies, in order (spec 10.2): "O;msgid;n/N;raid;author;piece".
--- raid is the raid code, author the officer who made it ("First Last"); msgid is new by default.
-function Sync.EncodeOp(op, raid, author, msgid)
-  local text = ns.OpText.Encode(op)
+local function cut(text)
   local pieces, first = {}, 1
   while first <= #text do
     local last = pieceEnd(text, first)
     pieces[#pieces + 1] = text:sub(first, last)
     first = last + 1
   end
+  return pieces
+end
+
+-- An operation's O message bodies, in order (spec 10.2): "O;msgid;n/N;raid;author;piece".
+-- raid is the raid code, author the officer who made it ("First Last"); msgid is new by default.
+function Sync.EncodeOp(op, raid, author, msgid)
+  local pieces = cut(ns.OpText.Encode(op))
   msgid = msgid or Sync.NewMsgId()
   local Escape = ns.OpText.Escape
   local bodies = {}
@@ -115,4 +120,38 @@ function Sync.ParseChunk(body)
     return nil, "malformed"
   end
   return { msgid = msgid, n = n, total = total, raid = raid, author = author, piece = piece }
+end
+
+-- A catch-up request's C message bodies, in order (spec 10.2): "C;reqid;raid;n/N;piece", the ids
+-- held, comma-separated, cut like an O. Holding none is one chunk with an empty piece.
+function Sync.EncodeRequest(ids, raid, reqid)
+  local pieces = cut(table.concat(ids, ","))
+  if #pieces == 0 then pieces[1] = "" end
+  local bodies = {}
+  for n, piece in ipairs(pieces) do
+    bodies[n] = string.format("C;%s;%s;%d/%d;%s", reqid, ns.OpText.Escape(raid), n, #pieces, piece)
+  end
+  return bodies
+end
+
+-- One C message body's fields, as ParseChunk's ({ msgid = the reqid, n, total, raid, piece }), or
+-- nil and "malformed". The piece holds only id characters and commas.
+function Sync.ParseRequest(body)
+  local reqid, raid, n, total, piece =
+    body:match("^C;([a-z0-9]+);([^;]*);(%d%d?%d?)/(%d%d?%d?);([%w_,%-]*)$")
+  if not reqid or #reqid ~= 6 then return nil, "malformed" end
+  n, total, raid = tonumber(n), tonumber(total), ns.OpText.Unescape(raid)
+  if n < 1 or n > total or not raid or raid == "" then return nil, "malformed" end
+  return { msgid = reqid, n = n, total = total, raid = raid, piece = piece }
+end
+
+-- The ids of a whole C's text, or nil when one isn't a valid id.
+function Sync.ParseIds(text)
+  local ids = {}
+  if text == "" then return ids end
+  for id in (text .. ","):gmatch("([^,]*),") do
+    if not ns.Records.ValidId(id) then return nil end
+    ids[#ids + 1] = id
+  end
+  return ids
 end

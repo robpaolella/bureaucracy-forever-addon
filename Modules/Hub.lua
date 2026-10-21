@@ -3,6 +3,7 @@
 -- rebuilds O messages from their chunks before applying the operation through Records. Sends
 -- this add-on's own operations, and Q requests and resends, through one paced queue. Keeps who in
 -- the group runs the add-on (P), shares the group's raid selection (S) and names the chooser (#62).
+-- Trades what each add-on holds (H) and asks for what differs (C), for catch-up (#20).
 local _, ns = ...
 
 local Hub = {}
@@ -65,12 +66,13 @@ function Hub.Receive(prefix, body, sender)
   ns.Log("Sync: ignored a " .. (kind or "malformed") .. " message from " .. sender .. ".")
 end
 
--- Incomplete O messages, by sender and msgid, and each sender's in the order they started.
--- An entry: { sender, msgid, total, raid, author, pieces = { [n] = piece }, count }.
+-- Incomplete O and C messages, by sender, kind and msgid (a C's reqid), and each sender's in the
+-- order they started. An entry: { key, kind, sender, msgid, total, raid, author (nil for a C),
+-- pieces = { [n] = piece }, count }.
 local partials, started = {}, {}
 
 local function forget(entry)
-  partials[entry.sender .. ";" .. entry.msgid] = nil
+  partials[entry.key] = nil
   local list = started[entry.sender]
   for i, other in ipairs(list) do
     if other == entry then table.remove(list, i) break end
@@ -93,7 +95,7 @@ end
 -- Every 10 seconds while chunks are missing, asks the sender for them; after three asks, drops it.
 local function retry(entry, asked)
   C_Timer.After(RETRY_EVERY, function()
-    if partials[entry.sender .. ";" .. entry.msgid] ~= entry then return end
+    if partials[entry.key] ~= entry then return end
     if asked == RETRIES then return drop(entry, "chunks still missing") end
     local body = "Q;" .. entry.msgid .. ";" .. missing(entry)
     Hub.sendRequest(entry.sender, body)
@@ -144,35 +146,45 @@ function Hub.Apply(op, raidId, author, via)
   end
 end
 
+-- The ids of the operations held for a raid, in the order made or received.
+local function heldIds(raidId)
+  local ids = {}
+  for n, op in ipairs(ns.Records.Ops(raidId)) do ids[n] = op.id end
+  return ids
+end
+
 -- A whole message is forgotten: a late copy of one of its chunks starts a new message, which
 -- Records replays once whole (an id held with the same payload changes nothing), so a msgid used
 -- again for another operation still arrives.
 local function complete(entry, raidId)
   forget(entry)
-  local op = ns.OpText.Decode(table.concat(entry.pieces, "", 1, entry.total))
-  if not op then
+  local text = table.concat(entry.pieces, "", 1, entry.total)
+  local whole = entry.kind == "O" and ns.OpText.Decode(text) or entry.kind == "C" and Sync.ParseIds(text)
+  if not whole then
     return ns.Log("Sync: dropped " .. entry.sender .. "'s message " .. entry.msgid .. " (malformed).")
   end
-  Hub.Apply(op, raidId, entry.author)
+  if entry.kind == "O" then return Hub.Apply(whole, raidId, entry.author) end
+  local theirs, lacking = {}, {}
+  for _, id in ipairs(whole) do theirs[id] = true end
+  for _, id in ipairs(heldIds(raidId)) do
+    if not theirs[id] then lacking[#lacking + 1] = id end
+  end
+  Hub.onCatchUp(entry.sender, entry.msgid, raidId, lacking)
 end
 
-Hub.Register("O", function(body, sender)
-  local chunk = Sync.ParseChunk(body)
-  if not chunk then return ns.Log("Sync: dropped a malformed O message from " .. sender .. ".") end
-  if bare(chunk.author) ~= sender then
-    -- Forwarded by a catch-up reply (#20), not applied here.
-    return ns.Log("Sync: ignored " .. chunk.author .. "'s operation sent by " .. sender .. ".")
-  end
+-- Keeps a chunk of an O or C message (as Sync.ParseChunk or Sync.ParseRequest gives it) from
+-- sender, and handles the message once all its chunks have arrived.
+local function collect(kind, chunk, sender)
   local raidId, notice = ns.Raids.FindByCode(chunk.raid)
   if not raidId then
     return ns.Log("Sync: ignored " .. sender .. "'s message for raid " .. chunk.raid .. ": "
       .. (notice or "not loaded."))
   end
-  local key = sender .. ";" .. chunk.msgid
+  local key = sender .. ";" .. kind .. ";" .. chunk.msgid
   local entry = partials[key]
   if not entry then
-    entry = { sender = sender, msgid = chunk.msgid, total = chunk.total, raid = chunk.raid,
-      author = chunk.author, pieces = {}, count = 0 }
+    entry = { key = key, kind = kind, sender = sender, msgid = chunk.msgid, total = chunk.total,
+      raid = chunk.raid, author = chunk.author, pieces = {}, count = 0 }
     started[sender] = started[sender] or {}
     if #started[sender] == MAX_PARTIAL then drop(started[sender][1], "too many incomplete") end
     partials[key] = entry
@@ -186,7 +198,31 @@ Hub.Register("O", function(body, sender)
   entry.pieces[chunk.n] = chunk.piece
   entry.count = entry.count + 1
   if entry.count == entry.total then complete(entry, raidId) end
+end
+
+Hub.Register("O", function(body, sender)
+  local chunk = Sync.ParseChunk(body)
+  if not chunk then return ns.Log("Sync: dropped a malformed O message from " .. sender .. ".") end
+  if bare(chunk.author) ~= sender then
+    -- Forwarded by a catch-up reply (#114), not applied here.
+    return ns.Log("Sync: ignored " .. chunk.author .. "'s operation sent by " .. sender .. ".")
+  end
+  collect("O", chunk, sender)
 end)
+
+-- A catch-up request (spec 10.4): the ids the sender holds, whispered after an H of ours differed.
+Hub.Register("C", function(body, sender)
+  local chunk = Sync.ParseRequest(body)
+  if not chunk then return ns.Log("Sync: dropped a malformed C message from " .. sender .. ".") end
+  collect("C", chunk, sender)
+end)
+
+-- A whole catch-up request from sender: lacking are the ids held for raidId that sender's list
+-- doesn't have, in the order made or received. Answering it is #114's; here it is only logged.
+function Hub.onCatchUp(sender, reqid, raidId, lacking)
+  ns.Log("Sync: " .. sender .. " asked to catch up (" .. reqid .. ") on raid " .. raidId .. "; they lack "
+    .. #lacking .. (#lacking > 0 and (": " .. table.concat(lacking, ", ")) or "") .. ".")
+end
 
 -- A resend request for a message this add-on sent: "Q;msgid;1,3".
 Hub.Register("Q", function(body, sender)
@@ -277,6 +313,13 @@ local function enqueue(messages, uncapped)
   return true
 end
 
+-- Keeps a sent message's bodies, so a Q for its chunks can be answered.
+local function remember(msgid, bodies)
+  sent[msgid] = bodies
+  sentOrder[#sentOrder + 1] = msgid
+  if #sentOrder > SENT_KEPT then sent[table.remove(sentOrder, 1)] = nil end
+end
+
 -- Sends an operation made on this add-on (as Records returns it) to the group, for its raid id.
 -- Returns true once queued; otherwise logs why, and the record waits for catch-up. Never call it
 -- for an operation received from another officer: those are never sent again.
@@ -295,9 +338,7 @@ function Hub.SendOp(op, raidId)
     ns.Log("Sync: " .. why .. ", so " .. op.id .. " wasn't sent; catch-up covers it.")
     return false
   end
-  sent[msgid] = bodies
-  sentOrder[#sentOrder + 1] = msgid
-  if #sentOrder > SENT_KEPT then sent[table.remove(sentOrder, 1)] = nil end
+  remember(msgid, bodies)
   return true
 end
 
@@ -341,6 +382,46 @@ local function sendBody(body, target)
   if not queued then ns.Log("Sync: " .. why .. ", so " .. body .. " wasn't sent.") end
 end
 
+-- What this add-on holds (spec 10.2, #20): an H body ("H;raid;version;count;digest") per loaded
+-- raid, sent to the group, or whispered to target, for each raid id given (every loaded one when
+-- nil). The ids held count no awards merged from the site: those add no operations.
+local function sendHeld(target, raidIds)
+  if not raidIds then
+    raidIds = {}
+    for n, raid in ipairs(ns.Raids.Status()) do raidIds[n] = raid.id end
+  end
+  for _, raidId in ipairs(raidIds) do
+    local ids = heldIds(raidId)
+    sendBody(string.format("H;%s;%d;%d;%s", ns.OpText.Escape(ns.Raids.Get(raidId).code), Sync.VERSION,
+      #ids, ns.Digest.Of(ids)), target)
+  end
+end
+
+-- An H whose digest differs from ours is answered with a C, whispered: every id held, chunked like
+-- an O, and kept to resend like one. All or none, as for an O; the next H covers a full queue.
+Hub.Register("H", function(body, sender)
+  local raid, digest = body:match("^H;([^;]*);%d%d?%d?;%d+;(%x%x%x%x%x%x%x%x)$")
+  raid = raid and ns.OpText.Unescape(raid)
+  if not (raid and raid ~= "" and digest == digest:lower()) then
+    return ns.Log("Sync: dropped a malformed H message from " .. sender .. ".")
+  end
+  local raidId, notice = ns.Raids.FindByCode(raid)
+  if not raidId then
+    return ns.Log("Sync: ignored " .. sender .. "'s H for raid " .. raid .. ": " .. (notice or "not loaded."))
+  end
+  local ids = heldIds(raidId)
+  if ns.Digest.Of(ids) == digest then return end
+  local reqid = Sync.NewMsgId()
+  local bodies = Sync.EncodeRequest(ids, ns.Raids.Get(raidId).code, reqid)
+  local messages = {}
+  for n, request in ipairs(bodies) do messages[n] = { body = request, target = sender } end
+  local queued, why = enqueue(messages)
+  if not queued then
+    return ns.Log("Sync: " .. why .. ", so the catch-up request to " .. sender .. " wasn't sent.")
+  end
+  remember(reqid, bodies)
+end)
+
 -- The held selection as an S body ("S;choice;at;by"), or nil when it is none.
 function Hub.SelectionBody()
   local status = ns.Selection.Status()
@@ -356,7 +437,8 @@ ns.Selection.onChoose = function()
 end
 
 -- Every P;1 is answered, not only one from a name not yet seen: an officer who reloads or logs in
--- again has lost their roster, and a P;0 is never answered, so nothing loops.
+-- again has lost their roster, and a P;0 is never answered, so nothing loops. The answer holds an
+-- H per loaded raid: the newcomer's own H only makes the others ask it, so this lets it ask them.
 Hub.Register("P", function(body, sender)
   local reply = body:match("^P;([01])$")
   if not reply then return ns.Log("Sync: dropped a malformed P message from " .. sender .. ".") end
@@ -365,6 +447,7 @@ Hub.Register("P", function(body, sender)
   sendBody("P;0", sender)
   local selection = Hub.SelectionBody()
   if selection then sendBody(selection, sender) end
+  sendHeld(sender)
 end)
 
 Hub.Register("S", function(body, sender)
@@ -444,21 +527,26 @@ function Hub.IsChooser()
 end
 
 -- The first PLAYER_ENTERING_WORLD of a session is the login or the /reload: in a group, the
--- add-on says it runs; out of one, a login clears the saved selection and a /reload keeps it.
+-- add-on says it runs and what it holds; out of one, a login clears the saved selection and a
+-- /reload keeps it.
 ns.On("PLAYER_ENTERING_WORLD", function(isInitialLogin)
   if grouped ~= nil then return end
   grouped = groupChannel() ~= nil
-  if grouped then return sendBody("P;1") end
+  if grouped then
+    sendBody("P;1")
+    return sendHeld()
+  end
   if isInitialLogin then ns.Selection.Clear() end
 end)
 
--- Joining a group says the add-on runs; leaving it clears the roster and the selection, so a new
--- group asks fresh; a name that leaves the group leaves the roster.
+-- Joining a group says the add-on runs and what it holds; leaving it clears the roster and the
+-- selection, so a new group asks fresh; a name that leaves the group leaves the roster.
 ns.On("GROUP_ROSTER_UPDATE", function()
   if grouped == nil then return end
   local now = groupChannel() ~= nil
   if now and not grouped then
     sendBody("P;1")
+    sendHeld()
   elseif now then
     for name in pairs(roster) do
       if not inGroup(name) then roster[name] = nil end
@@ -471,6 +559,12 @@ ns.On("GROUP_ROSTER_UPDATE", function()
     ns.UI.RefreshSync()
   end
   grouped = now
+end)
+
+-- A snapshot loaded in a group says what is held for it. Before the first PLAYER_ENTERING_WORLD
+-- (the inbox, read at load) it waits for that event's H for every raid.
+ns.Raids.OnLoad(function(raidId)
+  if grouped and groupChannel() then sendHeld(nil, { raidId }) end
 end)
 
 ns.On("ENCOUNTER_START", function() fighting = true end)

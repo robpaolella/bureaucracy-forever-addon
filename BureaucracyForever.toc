@@ -14,6 +14,7 @@ Modules\Raids.lua
 Modules\Selection.lua
 Modules\Attribution.lua
 Modules\OpText.lua
+Modules\Digest.lua
 Modules\Sync.lua
 Modules\Hub.lua
 Modules\Inbox.lua
