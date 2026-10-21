@@ -750,6 +750,32 @@ describe("Popup", function()
           assert.are.equal("confirmed", ns.Records.Get(key).state)
         end)
 
+        it("after a /reload, tries again to its own raid's pick, not the selected raid's", function()
+          local key = unconfirmedDB()
+          ns.Raids.Load(assert(ns.Snapshot.Validate(tree({ raid = "raid00002", code = "SA0002" }), "0.1.0")),
+            "pasted")
+          assert(ns.Selection.ChooseRaid("raid00002", true))
+          ns.Popup.SetDBPick("Doran Vale")
+          local group = wow.state.group
+          ns = wow.start({ saved = { BureaucracyForeverDB = BureaucracyForeverDB } })
+          wow.state.group, wow.state.groupIsRaid, wow.state.lootMethod = group, true, { "master", 0, 0 }
+          assert.are.equal("Doran Vale", ns.Popup.DBPick())
+          drop({ { id = 1 } })
+          local attempt = assert(click(ns.Popup.TryAgain, key))
+          assert.are.same({ "Bram Ironvein", { slot = 1, candidate = 4 } }, { attempt.winner, wow.gives[1] })
+        end)
+
+        it("after a /reload with no pick saved for its raid, gives nothing", function()
+          local key = unconfirmedDB()
+          BureaucracyForeverDB.dbPick = nil
+          local group = wow.state.group
+          ns = wow.start({ saved = { BureaucracyForeverDB = BureaucracyForeverDB } })
+          wow.state.group, wow.state.groupIsRaid, wow.state.lootMethod = group, true, { "master", 0, 0 }
+          drop({ { id = 1 } })
+          assert.are.same({ nil, "no pick" }, { click(ns.Popup.TryAgain, key) })
+          assert.are.same({}, wow.gives)
+        end)
+
         it("voids it with the undo line that names no winner", function()
           local key = unconfirmedDB()
           local op = assert(click(ns.Popup.NotHandedOut, key))

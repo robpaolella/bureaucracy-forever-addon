@@ -340,10 +340,11 @@ function Popup.Build()
   return model
 end
 
--- The raid's remembered disenchanter or bank character (D/B), or nil. Saved per raid in
+-- The remembered disenchanter or bank character (D/B) of raidId (by default the selected raid), or
+-- nil. Saved per raid in
 -- BureaucracyForeverDB.dbPick[raidId]; with no raid loaded it lasts until the game closes.
-function Popup.DBPick()
-  local raidId = ns.Selection.Status().activeRaid
+function Popup.DBPick(raidId)
+  raidId = raidId or ns.Selection.Status().activeRaid
   if not raidId then return sessionPick end
   local picks = ns.db.dbPick
   return type(picks) == "table" and picks[raidId] or nil
@@ -547,13 +548,14 @@ end
 -- "window" (the loot window is closed), "changed" (the item isn't in the loot window), "not a
 -- candidate" (the game won't let the winner receive it now) or Tracking.Give's reasons. A refusal
 -- changes nothing and hands nothing out. A Disenchant/bank award names no winner: it goes to whom
--- its last hand-out went, or after a /reload to the raid's D/B pick.
+-- its last hand-out went, or after a /reload to its own raid's D/B pick ("no pick" when none).
 function Popup.TryAgain(key)
   local award, slot = handoutCheck(key)
   if not award then return nil, slot end
   local before = attemptOf(key)
-  local recipient = award.char or (before and before.winner) or Popup.DBPick()
-  local index = recipient and candidateIndex(slot, recipient)
+  local recipient = award.char or (before and before.winner) or Popup.DBPick(award.raid)
+  if not recipient then return nil, "no pick" end
+  local index = candidateIndex(slot, recipient)
   if not index then return nil, "not a candidate" end
   local attempt, reason = ns.Tracking.Give(slot, index)
   if not attempt then return nil, reason end
