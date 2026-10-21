@@ -146,13 +146,6 @@ describe("Hub", function()
     assert.are.same({}, wow.printed)
   end)
 
-  it("logs a resend request while nothing is connected to send it", function()
-    ns.Hub.sendRequest = nil
-    receive(EXAMPLE[1])
-    wow.advance(10)
-    assert.is_true(logged("Q;k4m8q2;2"))
-  end)
-
   it("drops and logs a sender's oldest incomplete message when a fifth starts", function()
     local ids = { "aaaaa1", "aaaaa2", "aaaaa3", "aaaaa4", "aaaaa5" }
     for _, msgid in ipairs(ids) do receive("O;" .. msgid .. ";1/2;SA0001;Zoé Brûlé;K;x") end
@@ -279,11 +272,6 @@ describe("Hub", function()
       assert.are.same({ BO, "k4m8q2", { 1, 3 } }, got)
     end)
 
-    it("is logged while nothing is connected", function()
-      receive("Q;k4m8q2;2", BO)
-      assert.is_true(logged("Bo Marsh asked again for k4m8q2"))
-    end)
-
     it("is logged and dropped when malformed", function()
       local got
       ns.Hub.onRequest = function() got = true end
@@ -293,6 +281,222 @@ describe("Hub", function()
       assert.is_nil(got)
       assert.are.equal(5, #ns.log)
       assert.are.same({}, wow.printed)
+    end)
+  end)
+end)
+
+describe("Hub sending", function()
+  local ns, Records, Hub
+
+  local function logged(text)
+    for _, entry in ipairs(ns.log) do
+      if entry.text:find(text, 1, true) then return true end
+    end
+    return false
+  end
+
+  local count = 0
+  -- An award made on this add-on, as Records returns it.
+  local function award(note)
+    count = count + 1
+    return (assert(Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale", user = "u_ana",
+      method = "HR", roll = 91, note = note, id = string.format("aw-%08d", count) })))
+  end
+
+  local function bodies()
+    local list = {}
+    for _, message in ipairs(wow.addonMessages) do list[#list + 1] = message.text end
+    return list
+  end
+
+  before_each(function()
+    ns = wow.start()
+    Records, Hub = ns.Records, ns.Hub
+    wow.state.player = "Rae Quill"
+    wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
+    ns.Raids.Load(assert(ns.Snapshot.Validate(snapshot(RAID), "0.1.0")), "pasted")
+    assert.is_true(ns.Selection.ChooseRaid(RAID, true))
+  end)
+
+  it("sends a burst of operations as BFLOOT1 messages to the raid, one a second", function()
+    local ops = { award(), award(), award() }
+    for _, op in ipairs(ops) do assert.is_true(Hub.SendOp(op, RAID)) end
+    assert.are.equal(1, #wow.addonMessages)
+    wow.advance(0.5)
+    assert.are.equal(1, #wow.addonMessages)
+    wow.advance(0.5)
+    assert.are.equal(2, #wow.addonMessages)
+    wow.advance(1)
+    assert.are.equal(3, #wow.addonMessages)
+    for i, message in ipairs(wow.addonMessages) do
+      assert.are.same({ "BFLOOT1", "RAID" }, { message.prefix, message.channel })
+      assert.is_nil(message.target)
+      local chunk = assert(ns.Sync.ParseChunk(message.text))
+      assert.are.same({ 1, 1, "SA0001", "Rae Quill" }, { chunk.n, chunk.total, chunk.raid, chunk.author })
+      assert.are.equal(ns.OpText.Encode(ops[i]), chunk.piece)
+    end
+  end)
+
+  it("sends to the party in a party, every chunk of a long operation", function()
+    wow.state.groupIsRaid = false
+    assert.is_true(Hub.SendOp(award(string.rep("Traded after the roll. ", 8)), RAID))
+    wow.advance(1)
+    assert.are.equal(2, #wow.addonMessages)
+    assert.are.same({ "PARTY", "PARTY" }, { wow.addonMessages[1].channel, wow.addonMessages[2].channel })
+    assert.is_truthy(wow.addonMessages[2].text:find("^O;%w+;2/2;"))
+  end)
+
+  it("sends nothing during a boss fight, then everything queued once it ends", function()
+    Hub.SendOp(award(), RAID)
+    Hub.SendOp(award(), RAID)
+    wow.bossFight(true)
+    Hub.SendOp(award(), RAID)
+    wow.advance(1)
+    wow.advance(60)
+    assert.are.equal(1, #wow.addonMessages)
+    wow.bossFight(false)
+    assert.are.equal(2, #wow.addonMessages)
+    wow.advance(1)
+    assert.are.equal(3, #wow.addonMessages)
+  end)
+
+  it("keeps a message the game didn't send at the head, logs it once and tries again", function()
+    local op = award()
+    wow.state.sendResult = 3 -- AddonMessageThrottle
+    Hub.SendOp(op, RAID)
+    Hub.SendOp(award(), RAID)
+    wow.advance(5)
+    wow.advance(5)
+    assert.are.same({}, wow.addonMessages)
+    local failures = 0
+    for _, entry in ipairs(ns.log) do
+      if entry.text:find("didn't send a message (3)", 1, true) then failures = failures + 1 end
+    end
+    assert.are.equal(1, failures)
+    wow.state.sendResult = nil
+    wow.advance(5)
+    assert.are.equal(1, #wow.addonMessages)
+    assert.is_truthy(wow.addonMessages[1].text:find(op.id, 1, true))
+    wow.advance(1)
+    assert.are.equal(2, #wow.addonMessages)
+  end)
+
+  it("logs and keeps the record when the queue is full", function()
+    local accepted, refused = 0, nil
+    for _ = 1, 120 do
+      local op = award()
+      if Hub.SendOp(op, RAID) then accepted = accepted + 1 else refused = refused or op end
+    end
+    assert.is_truthy(refused)
+    assert.is_true(logged("the sending queue is full, so " .. refused.id .. " wasn't sent"))
+    assert.is_truthy(Records.Get(refused.id))
+    wow.advance(0)
+    for _ = 1, 150 do wow.advance(1) end
+    assert.are.equal(accepted, #wow.addonMessages)
+    assert.are.same({}, wow.printed)
+  end)
+
+  it("sends nothing outside a group, and drops what was waiting on leaving it", function()
+    wow.state.group, wow.state.groupIsRaid = nil, false
+    local op = award()
+    assert.is_false(Hub.SendOp(op, RAID))
+    assert.is_true(logged("not in a group, so " .. op.id .. " wasn't sent"))
+    assert.is_truthy(Records.Get(op.id))
+    wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE, BO }, true
+    Hub.SendOp(award(), RAID)
+    Hub.SendOp(award(), RAID)
+    Hub.sendRequest(ZOE, "Q;k4m8q2;2")
+    wow.state.group, wow.state.groupIsRaid = nil, false
+    wow.advance(1)
+    wow.advance(1)
+    assert.is_true(logged("not in a group, so 2 messages weren't sent"))
+    Hub.sendRequest(ZOE, "Q;k4m8q2;1")
+    assert.is_true(logged("not in a group, so Q;k4m8q2;1 to Zoé Brûlé wasn't sent"))
+    wow.advance(5)
+    assert.are.equal(1, #wow.addonMessages)
+  end)
+
+  it("sends nothing for an operation with no loaded raid", function()
+    assert.is_false(Hub.SendOp(award(), nil))
+    assert.is_false(Hub.SendOp(award(), OTHER))
+    assert.are.same({}, wow.addonMessages)
+    assert.is_true(logged("has no loaded raid"))
+  end)
+
+  it("never sends again an operation applied from another officer", function()
+    for _, body in ipairs(ns.Sync.EncodeOp({ type = "award", id = "aw-9d2f6h1j", boss = "lb_lucifron",
+      item = 16805, char = "Ana Vale", user = "u_ana", method = "HR", roll = 91, sender = ZOE,
+      at = 1792001200 }, "SA0001", ZOE)) do
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", body, "RAID", ZOE)
+    end
+    assert.is_truthy(Records.Get("aw-9d2f6h1j"))
+    wow.advance(60)
+    assert.are.same({}, wow.addonMessages)
+  end)
+
+  it("whispers a Q request's body, paced with the rest", function()
+    Hub.SendOp(award(), RAID)
+    wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "O;k4m8q2;1/2;SA0001;Zoé Brûlé;K;x", "RAID", ZOE)
+    wow.advance(10)
+    assert.are.equal(2, #wow.addonMessages)
+    assert.are.same({ prefix = "BFLOOT1", text = "Q;k4m8q2;2", channel = "WHISPER", target = ZOE },
+      wow.addonMessages[2])
+  end)
+
+  describe("answers a Q request", function()
+    local msgid, sent
+
+    before_each(function()
+      Hub.SendOp(award(string.rep("Traded after the roll. ", 8)), RAID)
+      wow.advance(1)
+      sent = bodies()
+      msgid = sent[1]:match("^O;(%w+);")
+    end)
+
+    it("by whispering only the chunks named to the sender", function()
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;" .. msgid .. ";2", "WHISPER", BO)
+      wow.advance(1)
+      wow.advance(1)
+      assert.are.equal(3, #wow.addonMessages)
+      assert.are.same({ prefix = "BFLOOT1", text = sent[2], channel = "WHISPER", target = BO },
+        wow.addonMessages[3])
+    end)
+
+    it("by logging a chunk it never had, and sending the others", function()
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;" .. msgid .. ";1,7", "WHISPER", BO)
+      wow.advance(1)
+      wow.advance(1)
+      assert.are.same({ sent[1], sent[2], sent[1] }, bodies())
+      assert.is_true(logged("asked for chunk 7 of " .. msgid))
+    end)
+
+    it("for the first of a full queue held through a boss fight", function()
+      wow.bossFight(true)
+      local first = award()
+      assert.is_true(Hub.SendOp(first, RAID))
+      for _ = 2, 100 do assert.is_true(Hub.SendOp(award(), RAID)) end
+      assert.is_false(Hub.SendOp(award(), RAID))
+      wow.bossFight(false)
+      wow.advance(1)
+      local firstId = wow.addonMessages[3].text:match("^O;(%w+);")
+      assert.is_truthy(wow.addonMessages[3].text:find(first.id, 1, true))
+      for _ = 1, 100 do wow.advance(1) end
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;" .. firstId .. ";1", "WHISPER", BO)
+      wow.advance(1)
+      assert.are.same({ wow.addonMessages[3].text, BO },
+        { wow.addonMessages[#wow.addonMessages].text, wow.addonMessages[#wow.addonMessages].target })
+    end)
+
+    it("by logging a message it no longer holds, and sending nothing", function()
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;zzzzzz;1", "WHISPER", BO)
+      -- A full queue's worth of operations later, the first is no longer held.
+      for _ = 1, 100 do Hub.SendOp(award(), RAID) end
+      for _ = 1, 100 do wow.advance(1) end
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;" .. msgid .. ";1", "WHISPER", BO)
+      wow.advance(1)
+      assert.are.equal(102, #wow.addonMessages)
+      assert.is_true(logged("Bo Marsh asked again for zzzzzz, which is no longer held"))
+      assert.is_true(logged("Bo Marsh asked again for " .. msgid .. ", which is no longer held"))
     end)
   end)
 end)
