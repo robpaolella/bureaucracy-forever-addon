@@ -206,7 +206,7 @@ end)
 local PACE = 1          -- seconds between two messages
 local FAILED_WAIT = 5   -- seconds before trying a message the game didn't send again
 local QUEUE_SIZE = 100  -- messages waiting to be sent
-local SENT_KEPT = 50    -- recent operations whose messages are kept to resend
+local SENT_KEPT = 100   -- recent operations kept to resend: at least a full queue's worth
 
 -- Each queued message: { body, target (a whisper; nil for the group), failed }.
 local queue, waiting, fighting, nextAt = {}, false, false, 0
@@ -227,16 +227,10 @@ end
 local function sendHead()
   local channel = groupChannel()
   if not channel then
-    -- Out of the group: its messages are dropped (catch-up covers them), whispers stay.
-    local kept, dropped = {}, 0
-    for _, message in ipairs(queue) do
-      if message.target then kept[#kept + 1] = message else dropped = dropped + 1 end
-    end
-    queue = kept
-    if dropped > 0 then
-      ns.Log("Sync: not in a group, so " .. dropped .. " messages weren't sent; catch-up covers them.")
-    end
-    if #queue == 0 then return 0 end
+    -- Out of the group: nothing more is sent, and catch-up covers what was waiting.
+    ns.Log("Sync: not in a group, so " .. #queue .. " messages weren't sent; catch-up covers them.")
+    queue = {}
+    return 0
   end
   local message = queue[1]
   local result = C_ChatInfo.SendAddonMessage(Sync.PREFIX, message.body,
@@ -266,9 +260,11 @@ pump = function()
   C_Timer.After(wait, pump)
 end
 
--- Queues messages (a list of { body, target }), all or none; false when the queue is too full.
+-- Queues messages (a list of { body, target }), all or none. Returns false and why not: "not in
+-- a group" or "the sending queue is full".
 local function enqueue(messages)
-  if #queue + #messages > QUEUE_SIZE then return false end
+  if not groupChannel() then return false, "not in a group" end
+  if #queue + #messages > QUEUE_SIZE then return false, "the sending queue is full" end
   for _, message in ipairs(messages) do queue[#queue + 1] = message end
   if not waiting then pump() end
   return true
@@ -283,16 +279,13 @@ function Hub.SendOp(op, raidId)
     ns.Log("Sync: " .. op.id .. " has no loaded raid, so it wasn't sent; catch-up covers it.")
     return false
   end
-  if not groupChannel() then
-    ns.Log("Sync: not in a group, so " .. op.id .. " wasn't sent; catch-up covers it.")
-    return false
-  end
   local msgid = Sync.NewMsgId()
   local bodies = Sync.EncodeOp(op, snapshot.code, bare(UnitName("player")), msgid)
   local messages = {}
   for n, body in ipairs(bodies) do messages[n] = { body = body } end
-  if not enqueue(messages) then
-    ns.Log("Sync: the sending queue is full, so " .. op.id .. " wasn't sent; catch-up covers it.")
+  local queued, why = enqueue(messages)
+  if not queued then
+    ns.Log("Sync: " .. why .. ", so " .. op.id .. " wasn't sent; catch-up covers it.")
     return false
   end
   sent[msgid] = bodies
@@ -303,9 +296,8 @@ end
 
 -- Whispers a Q to target, paced with the rest.
 function Hub.sendRequest(target, body)
-  if not enqueue({ { body = body, target = target } }) then
-    ns.Log("Sync: the sending queue is full, so " .. body .. " to " .. target .. " wasn't sent.")
-  end
+  local queued, why = enqueue({ { body = body, target = target } })
+  if not queued then ns.Log("Sync: " .. why .. ", so " .. body .. " to " .. target .. " wasn't sent.") end
 end
 
 -- Re-sends the chunks of msgid that sender asked for again, as whispers.
@@ -322,8 +314,9 @@ function Hub.onRequest(sender, msgid, chunks)
       ns.Log("Sync: " .. sender .. " asked for chunk " .. n .. " of " .. msgid .. ", which has none.")
     end
   end
-  if not enqueue(messages) then
-    ns.Log("Sync: the sending queue is full, so " .. msgid .. " wasn't sent again to " .. sender .. ".")
+  local queued, why = enqueue(messages)
+  if not queued then
+    ns.Log("Sync: " .. why .. ", so " .. msgid .. " wasn't sent again to " .. sender .. ".")
   end
 end
 

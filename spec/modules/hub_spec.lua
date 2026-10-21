@@ -396,7 +396,7 @@ describe("Hub sending", function()
     assert.are.same({}, wow.printed)
   end)
 
-  it("sends nothing outside a group, and drops the group's messages on leaving it", function()
+  it("sends nothing outside a group, and drops what was waiting on leaving it", function()
     wow.state.group, wow.state.groupIsRaid = nil, false
     local op = award()
     assert.is_false(Hub.SendOp(op, RAID))
@@ -409,9 +409,11 @@ describe("Hub sending", function()
     wow.state.group, wow.state.groupIsRaid = nil, false
     wow.advance(1)
     wow.advance(1)
-    assert.is_true(logged("not in a group, so 1 messages weren't sent"))
-    assert.are.same({ "WHISPER", "Q;k4m8q2;2" }, { wow.addonMessages[2].channel, wow.addonMessages[2].text })
-    assert.are.equal(2, #wow.addonMessages)
+    assert.is_true(logged("not in a group, so 2 messages weren't sent"))
+    Hub.sendRequest(ZOE, "Q;k4m8q2;1")
+    assert.is_true(logged("not in a group, so Q;k4m8q2;1 to Zoé Brûlé wasn't sent"))
+    wow.advance(5)
+    assert.are.equal(1, #wow.addonMessages)
   end)
 
   it("sends nothing for an operation with no loaded raid", function()
@@ -468,13 +470,30 @@ describe("Hub sending", function()
       assert.is_true(logged("asked for chunk 7 of " .. msgid))
     end)
 
+    it("for the first of a full queue held through a boss fight", function()
+      wow.bossFight(true)
+      local first = award()
+      Hub.SendOp(first, RAID)
+      for _ = 2, 98 do Hub.SendOp(award(), RAID) end
+      wow.bossFight(false)
+      wow.advance(1)
+      local firstId = wow.addonMessages[3].text:match("^O;(%w+);")
+      assert.is_truthy(wow.addonMessages[3].text:find(first.id, 1, true))
+      for _ = 1, 100 do wow.advance(1) end
+      wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;" .. firstId .. ";1", "WHISPER", BO)
+      wow.advance(1)
+      assert.are.same({ wow.addonMessages[3].text, BO },
+        { wow.addonMessages[#wow.addonMessages].text, wow.addonMessages[#wow.addonMessages].target })
+    end)
+
     it("by logging a message it no longer holds, and sending nothing", function()
       wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;zzzzzz;1", "WHISPER", BO)
-      for _ = 1, 50 do Hub.SendOp(award(), RAID) end
-      for _ = 1, 50 do wow.advance(1) end
+      -- A full queue's worth of operations later, the first is no longer held.
+      for _ = 1, 100 do Hub.SendOp(award(), RAID) end
+      for _ = 1, 100 do wow.advance(1) end
       wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "Q;" .. msgid .. ";1", "WHISPER", BO)
       wow.advance(1)
-      assert.are.equal(52, #wow.addonMessages)
+      assert.are.equal(102, #wow.addonMessages)
       assert.is_true(logged("Bo Marsh asked again for zzzzzz, which is no longer held"))
       assert.is_true(logged("Bo Marsh asked again for " .. msgid .. ", which is no longer held"))
     end)
