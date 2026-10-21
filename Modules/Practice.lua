@@ -70,4 +70,3 @@ function Practice.Generate(members, drop)
     end
   end
 end
-
