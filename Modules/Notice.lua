@@ -126,6 +126,15 @@ local function build()
   local background = frame:CreateTexture(nil, "BACKGROUND")
   background:SetAllPoints()
   background:SetColorTexture(0, 0, 0, 0.92)
+  -- The approved design's metallic frame, as a thin grey edge (textures only: no backdrop API).
+  for _, edge in ipairs({ { "TOPLEFT", "TOPRIGHT", nil, 2 }, { "BOTTOMLEFT", "BOTTOMRIGHT", nil, 2 },
+    { "TOPLEFT", "BOTTOMLEFT", 2 }, { "TOPRIGHT", "BOTTOMRIGHT", 2 } }) do
+    local line = frame:CreateTexture(nil, "BORDER")
+    line:SetColorTexture(0.6, 0.6, 0.6, 1)
+    line:SetPoint(edge[1], frame, edge[1], 0, 0)
+    line:SetPoint(edge[2], frame, edge[2], 0, 0)
+    if edge[3] then line:SetWidth(edge[3]) else line:SetHeight(edge[4]) end
+  end
   frame.icon = frame:CreateTexture(nil, "ARTWORK")
   frame.icon:SetTexture(ALERT)
   frame.icon:SetSize(36, 36)
