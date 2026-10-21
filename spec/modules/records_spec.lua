@@ -269,6 +269,50 @@ describe("Records", function()
     end)
   end)
 
+  describe("discard", function()
+    it("throws away the no-raid awards and operations, and returns how many awards", function()
+      local award = Records.Award(ana())
+      Records.Confirm(award.id)
+      Records.Award(ana({ item = 1 }))
+      selectRaid()
+      assert.are.equal(2, Records.Discard())
+      assert.is_nil(ns.db.noRaid)
+      assert.is_nil(ns.db.noRaidOps)
+      assert.is_nil(Records.Get(award.id))
+    end)
+
+    it("drops the site voids waiting for the discarded keys only", function()
+      local award = Records.Award(ana())
+      local replaced = Records.Replace(award.id, ana({ id = "aw-00000009", char = "Bo Marsh" }))
+      ns.db.siteVoids = {
+        [award.id] = { raid = RAID, env = "staging", reason = "x", at = 1 },
+        ["aw-00000009"] = { raid = RAID, env = "staging", reason = "y", at = 1 },
+        ["aw-other0001"] = { raid = RAID, env = "staging", reason = "z", at = 1 },
+      }
+      assert.is_table(replaced)
+      assert.are.equal(2, Records.Discard())
+      assert.are.same({ ["aw-other0001"] = { raid = RAID, env = "staging", reason = "z", at = 1 } },
+        ns.db.siteVoids)
+    end)
+
+    it("leaves a raid's awards and operations alone", function()
+      selectRaid()
+      local kept = Records.Award(ana())
+      ns.Selection.ChooseOff()
+      assert.are.equal(0, Records.Discard())
+      assert.is_table(Records.Get(kept.id))
+      assert.are.equal(1, #Records.Ops(RAID))
+    end)
+
+    it("works while it is not a guild run, and with nothing to discard", function()
+      assert.are.equal(0, Records.Discard())
+      Records.Award(ana())
+      ns.Selection.ChooseOff()
+      assert.are.equal(1, Records.Discard())
+      assert.is_nil(ns.db.noRaid)
+    end)
+  end)
+
   describe("not a guild run", function()
     local key, before
 
