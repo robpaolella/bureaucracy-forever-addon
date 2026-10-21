@@ -15,6 +15,7 @@ read_globals = {
   "UIParent", "Minimap", "GameTooltip", "UISpecialFrames", "GetCursorPosition", "GetInstanceInfo",
   "GetItemInfo", "IsInRaid", "GetNumGroupMembers", "GetRaidRosterInfo", "ItemRefTooltip",
   "TooltipDataProcessor", "UnitIsGroupLeader", "UnitIsGroupAssistant", "issecretvalue", "Enum", "C_PartyInfo", "C_RestrictedActions",
+  "IsShiftKeyDown",
   -- The desktop helper's inbox (Inbox.lua), read at load.
   "BureaucracyLootInbox",
 }

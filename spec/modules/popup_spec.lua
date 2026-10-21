@@ -455,7 +455,8 @@ describe("Popup", function()
       for _, row in ipairs(m.rows) do
         assert.are.same({ false, "Chat is locked until the fight ends" },
           { row.buttons[1].enabled, row.buttons[1].tooltip })
-        assert.is_true(row.buttons[2].enabled)
+        assert.are.same({ false, "Chat is locked until the fight ends" },
+          { row.buttons[2].enabled, row.buttons[2].tooltip })
       end
       assert.are.same({ nil, "fight" }, { give(1) })
       assert.are.same({}, wow.gives)
@@ -499,6 +500,202 @@ describe("Popup", function()
       assert.are.same({}, wow.gives)
     end)
 
+    describe("disenchant/bank (#39)", function()
+      -- Clicks the slot's D/B button as it was drawn just now.
+      local function giveDB(slot)
+        local shown
+        for _, row in ipairs((ns.Popup.Build() or { rows = {} }).rows) do
+          if row.slot == slot then shown = row end
+        end
+        local result
+        local button = shown and shown.buttons[2]
+        wow.click(function()
+          result = { ns.Popup.GiveDB(slot, shown and shown.item, button and button.pick) }
+        end)
+        return result[1], result[2]
+      end
+
+      it("lists the raid's members by name, with no pick yet (popup-db)", function()
+        raid()
+        drop({ { id = 1 } })
+        local m = ns.Popup.Build()
+        assert.are.same({ title = "Disenchant/bank: give to", note = "Remembered for this raid.",
+          members = {
+            { name = "Ashla Brightwater", selected = false }, { name = "Bram Ironvein", selected = false },
+            { name = "Doran Vale", selected = false }, { name = "Masterlooter", selected = false },
+            { name = "Mirel Stone", selected = false }, { name = "Tovin Hale", selected = false },
+          } }, m.dbMenu)
+        local db = m.rows[1].buttons[2]
+        assert.are.same({ "D/B: choose ▾", "db", true, "Disenchant/bank: choose the character to give to." },
+          { db.text, db.action, db.enabled, db.tooltip })
+        assert.is_nil(db.pick)
+      end)
+
+      it("no pick gives nothing", function()
+        raid()
+        drop({ { id = 1 } })
+        assert.are.same({ nil, "no pick" }, { giveDB(1) })
+        assert.are.same({}, wow.gives)
+        assert.are.same({}, wow.sent)
+        assert.is_nil(ns.Records.Ops("raid00001")[1])
+      end)
+
+      it("choosing a name remembers it for the raid, ticks it and gives nothing", function()
+        raid()
+        drop({ { id = 1 } })
+        assert.is_true(ns.Popup.SetDBPick("Doran Vale"))
+        assert.are.same({}, wow.gives)
+        assert.are.same({}, wow.sent)
+        assert.are.same({ raid00001 = "Doran Vale" }, ns.db.dbPick)
+        local m = ns.Popup.Build()
+        local ticked = {}
+        for _, member in ipairs(m.dbMenu.members) do
+          if member.selected then ticked[#ticked + 1] = member.name end
+        end
+        assert.are.same({ "Doran Vale" }, ticked)
+        local db = m.rows[1].buttons[2]
+        assert.are.same({ "D/B: Doran ▾", "Doran Vale", true }, { db.text, db.pick, db.enabled })
+        assert.are.equal("Disenchant/bank: give to Doran Vale. Right-click or Shift-click to choose someone"
+          .. " else.", db.tooltip)
+        assert.are.same({ nil, "not in raid" }, { ns.Popup.SetDBPick("Nobody Here") })
+        assert.are.same({ raid00001 = "Doran Vale" }, ns.db.dbPick)
+      end)
+
+      it("keeps a pick per raid, and reads an old single pick as none", function()
+        raid()
+        ns.db.dbPick = "Doran Vale" -- an older shape: nothing wrote it, so it counts as no pick
+        assert.is_nil(ns.Popup.DBPick())
+        assert.is_true(ns.Popup.SetDBPick("Doran Vale"))
+        ns.Raids.Load(assert(ns.Snapshot.Validate(tree({ raid = "raid00002" }), "0.1.0")), "pasted")
+        assert(ns.Selection.ChooseRaid("raid00002"))
+        assert.is_nil(ns.Popup.DBPick())
+        assert.is_true(ns.Popup.SetDBPick("Mirel Stone"))
+        assert(ns.Selection.ChooseRaid("raid00001"))
+        assert.are.equal("Doran Vale", ns.Popup.DBPick())
+        assert.are.same({ raid00001 = "Doran Vale", raid00002 = "Mirel Stone" }, ns.db.dbPick)
+      end)
+
+      it("hands out to the pick by name, records Disenchant/bank with no winner, posts the line", function()
+        raid()
+        drop({ { id = 1, candidates = { "Doran Vale", "Masterlooter", "Bram Ironvein" } } })
+        ns.Popup.SetDBPick("Bram Ironvein")
+        local attempt = assert(giveDB(1))
+        assert.are.same({ { slot = 1, candidate = 3 } }, wow.gives)
+        local award = ns.Records.Get(attempt.awardKey)
+        assert.are.same({ "announced", "lb_lucifron", 1, "DISENCHANT_BANK", "Masterlooter" },
+          { award.state, award.boss, award.item, award.method, award.sender })
+        assert.is_nil(award.char)
+        assert.is_nil(award.user)
+        assert.are.same({ { channel = "RAID", text = link(1) .. " → disenchant/bank "
+          .. "<BF1;A;SA0001;" .. attempt.awardKey .. ";1;ifron;DISENCHANT_BANK;;>" } }, wow.sent)
+        assert.is_falsy(wow.sent[1].text:find("Bram", 1, true))
+        local row = ns.Popup.Build().rows[1]
+        assert.are.same({ { text = "Handing out to Bram Ironvein…", note = ANNOUNCED }, {} },
+          { row.handout, row.buttons })
+        assert.are.same({ nil, "not ready" }, { giveDB(1) })
+        confirm(1, "Bram Ironvein")
+        assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+      end)
+
+      it("remembers the pick, so the next item is one click too", function()
+        raid()
+        drop({ { id = 1 }, { id = 3 } })
+        ns.Popup.SetDBPick("Mirel Stone")
+        assert(giveDB(1))
+        assert(giveDB(2))
+        assert.are.equal(2, #wow.gives)
+        assert.are.equal(2, #wow.sent)
+      end)
+
+      it("ends the row's roll-off, so the next roll can be called", function()
+        raid({ reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "HR") },
+          [2] = { holder("Bram Ironvein", "HR"), holder("Mirel Stone", "HR") } } })
+        drop({ { id = 1 }, { id = 2 } })
+        wow.click(function() assert(ns.Rolls.Start(1, 1)) end)
+        ns.Popup.SetDBPick("Tovin Hale")
+        assert(giveDB(1))
+        local result
+        wow.click(function() result = ns.Rolls.Start(2, 2) end)
+        assert.is_truthy(result)
+      end)
+
+      it("hands nothing out to a pick who isn't a candidate, and the row says why", function()
+        raid()
+        drop({ { id = 1, candidates = { "Masterlooter", "Ashla Brightwater" } } })
+        ns.Popup.SetDBPick("Doran Vale")
+        assert.are.same({ nil, "not a candidate" }, { giveDB(1) })
+        assert.are.same({}, wow.gives)
+        assert.are.same({}, wow.sent)
+        assert.is_nil(ns.Records.Ops("raid00001")[1])
+        assert.are.equal("The game won't let Doran Vale receive this item (usually: not nearby when the boss"
+          .. " died). Right-click D/B to choose someone else.", ns.Popup.Build().rows[1].dbNote)
+        -- Left the raid: the row says that instead.
+        wow.state.group = { "Masterlooter", "Ashla Brightwater" }
+        assert.are.same({ nil, "not a candidate" }, { giveDB(1) })
+        assert.are.equal("Doran Vale isn't in the raid. Right-click D/B to choose someone else.",
+          ns.Popup.Build().rows[1].dbNote)
+        -- A new pick clears the note, and so does the loot window closing.
+        ns.Popup.SetDBPick("Ashla Brightwater")
+        assert.is_nil(ns.Popup.Build().rows[1].dbNote)
+        ns.Popup.SetDBPick("Masterlooter")
+        wow.state.loot[1].candidates = { "Ashla Brightwater" }
+        giveDB(1)
+        wow.closeLoot()
+        drop({ { id = 1 } })
+        assert.is_nil(ns.Popup.Build().rows[1].dbNote)
+      end)
+
+      it("is greyed in a boss fight, before the boss is picked and while handing out", function()
+        raid({ bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 2 } },
+          { id = "lb_magmadar", name = "Magmadar", trash = false, items = { 2 } },
+          { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+        ns.Popup.SetDBPick("Doran Vale")
+        drop({ { id = 2 } })
+        assert.is_false(ns.Popup.Build().rows[1].buttons[2].enabled)
+        assert.are.same({ nil, "not ready" }, { giveDB(1) })
+        ns.Popup.PickBoss("lb_trash")
+        wow.bossFight(true)
+        assert.are.same({ nil, "fight" }, { giveDB(1) })
+        wow.bossFight(false)
+        assert(giveDB(1))
+        assert.are.same({}, ns.Popup.Build().rows[1].buttons)
+        assert.are.equal(1, #wow.gives)
+      end)
+
+      it("does nothing if the pick changed after the button was drawn", function()
+        raid()
+        drop({ { id = 1 } })
+        ns.Popup.SetDBPick("Doran Vale")
+        local result
+        wow.click(function() result = { ns.Popup.GiveDB(1, 1, "Mirel Stone") } end)
+        assert.are.same({ nil, "changed" }, result)
+        assert.are.same({}, wow.gives)
+      end)
+
+      it("hands out and saves even when the line can't be built, and says so", function()
+        raid({ code = "MC0001" }) -- not a valid raid code for a chat line
+        drop({ { id = 1 } })
+        ns.Popup.SetDBPick("Doran Vale")
+        local attempt = assert(giveDB(1))
+        assert.are.equal(1, #wow.gives)
+        assert.are.same({}, wow.sent)
+        assert.is_nil(attempt.announced)
+        assert.are.equal("DISENCHANT_BANK", ns.Records.Get(attempt.awardKey).method)
+        assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale to disenchant or"
+          .. " bank, but its raid chat line couldn't be posted.", 1, true))
+      end)
+
+      it("with no raid loaded, keeps the pick only until the game closes", function()
+        setup()
+        drop({ { id = 1 } })
+        assert.is_true(ns.Popup.SetDBPick("Doran Vale"))
+        assert.is_nil(ns.db.dbPick)
+        local m = ns.Popup.Build()
+        assert.are.same({ "D/B: Doran ▾", "Remembered until you close the game." },
+          { m.rows[1].buttons[2].text, m.dbMenu.note })
+      end)
+    end)
+
     describe("when the game doesn't confirm (#12)", function()
       local GROUP = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein", "Tovin Hale" }
 
@@ -528,6 +725,84 @@ describe("Popup", function()
         local award = ns.Records.Get(key)
         assert.are.same({ "not-confirmed", nil }, { award.state, award.voided })
       end
+
+      describe("a Disenchant/bank award (#39)", function()
+        -- Gives item 1 to the D/B pick and lets the wait run out. Returns the award key.
+        local function unconfirmedDB(fields)
+          raid(fields)
+          drop({ { id = 1 } })
+          ns.Popup.SetDBPick("Bram Ironvein")
+          local attempt
+          wow.click(function() attempt = assert(ns.Popup.GiveDB(1, 1, "Bram Ironvein")) end)
+          wow.advance(ns.Tracking.confirmWait)
+          assert.are.equal("not-confirmed", ns.Records.Get(attempt.awardKey).state)
+          return attempt.awardKey
+        end
+
+        it("tries again to the same character, even after the pick changed", function()
+          local key = unconfirmedDB()
+          ns.Popup.SetDBPick("Doran Vale")
+          local attempt = assert(click(ns.Popup.TryAgain, key))
+          assert.are.same({ slot = 1, candidate = 4 }, wow.gives[2])
+          assert.are.equal("Bram Ironvein", attempt.winner)
+          assert.are.equal(1, #wow.sent)
+          confirm(1, "Bram Ironvein")
+          assert.are.equal("confirmed", ns.Records.Get(key).state)
+        end)
+
+        it("after a /reload, tries again to its own raid's pick, not the selected raid's", function()
+          local key = unconfirmedDB()
+          ns.Raids.Load(assert(ns.Snapshot.Validate(tree({ raid = "raid00002", code = "SA0002" }), "0.1.0")),
+            "pasted")
+          assert(ns.Selection.ChooseRaid("raid00002", true))
+          ns.Popup.SetDBPick("Doran Vale")
+          local group = wow.state.group
+          ns = wow.start({ saved = { BureaucracyForeverDB = BureaucracyForeverDB } })
+          wow.state.group, wow.state.groupIsRaid, wow.state.lootMethod = group, true, { "master", 0, 0 }
+          assert.are.equal("Doran Vale", ns.Popup.DBPick())
+          drop({ { id = 1 } })
+          local attempt = assert(click(ns.Popup.TryAgain, key))
+          assert.are.same({ "Bram Ironvein", { slot = 1, candidate = 4 } }, { attempt.winner, wow.gives[1] })
+        end)
+
+        it("after a /reload with no pick saved for its raid, gives nothing", function()
+          local key = unconfirmedDB()
+          BureaucracyForeverDB.dbPick = nil
+          local group = wow.state.group
+          ns = wow.start({ saved = { BureaucracyForeverDB = BureaucracyForeverDB } })
+          wow.state.group, wow.state.groupIsRaid, wow.state.lootMethod = group, true, { "master", 0, 0 }
+          drop({ { id = 1 } })
+          assert.are.same({ nil, "no pick" }, { click(ns.Popup.TryAgain, key) })
+          assert.are.same({}, wow.gives)
+        end)
+
+        it("voids it with the undo line that names no winner", function()
+          local key = unconfirmedDB()
+          local op = assert(click(ns.Popup.NotHandedOut, key))
+          assert.is_true(ns.Records.Get(key).voided)
+          assert.are.same({ channel = "RAID", text = "Undo: " .. link(1) .. " is no longer going to"
+            .. " disenchant/bank <BF1;V;SA0001;" .. op.id .. ";" .. key .. ">" }, wow.sent[2])
+        end)
+
+        it("gives it to a reserve holder instead, correcting disenchant/bank", function()
+          local key = unconfirmedDB()
+          local attempt = assert(click(ns.Popup.GiveElse, key, "Ashla Brightwater"))
+          assert.is_truthy(wow.sent[2].text:find("→ Ashla Brightwater (hard reserve), not disenchant/bank <",
+            1, true))
+          assert.are.equal("HR", ns.Records.Get(attempt.awardKey).method)
+        end)
+
+        it("tells the officer when the undo or correction line can't be built", function()
+          local key = unconfirmedDB({ code = "MC0001" })
+          assert(click(ns.Popup.GiveElse, key, "Ashla Brightwater"))
+          assert.is_truthy(wow.printed[#wow.printed]:find("instead of disenchant/bank, but its raid chat", 1,
+            true))
+          key = unconfirmedDB({ code = "MC0001" })
+          assert(click(ns.Popup.NotHandedOut, key))
+          assert.is_truthy(wow.printed[#wow.printed]:find("is no longer going to disenchant/bank, but", 1,
+            true))
+        end)
+      end)
 
       it("stays not confirmed when the loot window closes with no choice made", function()
         local key = unconfirmed()

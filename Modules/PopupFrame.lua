@@ -1,8 +1,9 @@
 -- PopupFrame: draws the loot pop-up (#77) from the content model Popup.Build() makes (#10).
 -- It opens on LOOT_OPENED for the loot master, closes on LOOT_CLOSED, and redraws when the officer
 -- picks a boss, while a candidate's name is still loading, when a boss fight starts or ends and when
--- the game confirms a hand-out. Give hands out (#38) and Call roll starts a roll-off (#13); D/B is
--- #39's.
+-- the game confirms a hand-out. Give hands out (#38) and Call roll starts a roll-off (#13). D/B (#39)
+-- gives to the raid's pick in one click; a right-click or Shift-click, or a click with no pick yet,
+-- opens the list to choose one.
 local _, ns = ...
 
 local PopupFrame = {}
@@ -17,9 +18,15 @@ local BADGE_COLORS = {
 local NO_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local SPINNER = "Interface\\COMMON\\StreamCircle"
 local GOLD = { 1, 0.82, 0 }
+-- Game icons for the tick and the arrows: the game's font has no such characters.
+local TICK = "Interface\\Buttons\\UI-CheckBox-Check"
+local ARROW_DOWN = "|TInterface\\Buttons\\Arrow-Down-Up:12:12|t"
+local ARROW_UP = "|TInterface\\Buttons\\Arrow-Up-Up:12:12|t"
+local DB_SHOWN = 12 -- names the D/B list shows at once; the wheel scrolls the rest
 
-local frame, menu
-local rows, entries = {}, {} -- widgets reused from one draw to the next
+local frame, menu, dbList
+local rows, entries, dbEntries = {}, {}, {} -- widgets reused from one draw to the next
+local dbRow, dbOffset = nil, 0 -- the row whose D/B list is open, and how far it is scrolled
 local generation = 0 -- bumped by every LOOT_OPENED and LOOT_CLOSED, so a stale wait does nothing
 local open = false -- the loot window is open and the pop-up belongs to it
 local dismissed = false -- the officer closed the pop-up with its X; it stays shut for this loot window
@@ -63,6 +70,7 @@ end
 -- For the tests: the row widgets and the boss list's entries.
 function PopupFrame.rows() return rows end
 function PopupFrame.pickEntries() return entries end
+function PopupFrame.dbEntries() return dbEntries end
 
 local function build()
   -- The same standard window as the officers' window: the client confirmed this template.
@@ -124,7 +132,41 @@ local function build()
   frame.boss:SetScript("OnClick", function()
     if menu:IsShown() then menu:Hide() else menu:Show() end
   end)
-  frame:SetScript("OnHide", function() menu:Hide() end)
+
+  -- The D/B list drops from a row's D/B button: its title, the names, then its hints.
+  dbList = CreateFrame("Frame", nil, frame)
+  PopupFrame.dbList = dbList
+  dbList:SetFrameStrata("TOOLTIP")
+  dbList:SetSize(210, 100)
+  dbList.background = dbList:CreateTexture(nil, "BACKGROUND")
+  dbList.background:SetAllPoints()
+  dbList.background:SetColorTexture(0.08, 0.08, 0.08, 1)
+  dbList.title = newText(dbList, "GameFontNormal")
+  dbList.title:SetPoint("TOPLEFT", dbList, "TOPLEFT", 8, -6)
+  dbList.more = newText(dbList, "GameFontDisableSmall")
+  dbList.note = newText(dbList, "GameFontDisableSmall")
+  dbList:EnableMouseWheel(true)
+  dbList:SetScript("OnMouseWheel", function(_, delta)
+    dbOffset = dbOffset - delta
+    PopupFrame.Refresh()
+  end)
+  dbList:SetScript("OnHide", function() dbRow, dbOffset = nil, 0 end)
+  dbList:Hide()
+  frame:SetScript("OnHide", function()
+    menu:Hide()
+    dbList:Hide()
+  end)
+end
+
+-- Opens the D/B list under a row's D/B button, or closes it when it is open there already.
+local function toggleDBList(row)
+  if dbList:IsShown() and dbRow == row then
+    dbList:Hide()
+  else
+    dbRow, dbOffset = row, 0
+    dbList:Show()
+  end
+  PopupFrame.Refresh()
 end
 
 local function newRow()
@@ -190,6 +232,28 @@ local function newRow()
   end)
   row.db = newButton(row, 110, 20)
   row.db:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -26)
+  row.db:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  if row.db.SetMotionScriptsWhileDisabled then row.db:SetMotionScriptsWhileDisabled(true) end
+  row.db:SetScript("OnEnter", function(self)
+    local tip = row.data and row.data.buttons[2] and row.data.buttons[2].tooltip
+    if not tip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(tip, 1, 1, 1)
+    GameTooltip:Show()
+  end)
+  row.db:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  row.db:SetScript("OnClick", function(_, mouseButton)
+    local button = row.data and row.data.buttons[2]
+    if not (button and button.enabled) then return end
+    if not button.pick or mouseButton == "RightButton" or IsShiftKeyDown() then
+      toggleDBList(row)
+      return
+    end
+    dbList:Hide()
+    local ok, why = ns.Popup.GiveDB(row.data.slot, row.data.item, button.pick)
+    if not ok then ns.Log("D/B for " .. row.data.link .. " refused: " .. tostring(why)) end
+    PopupFrame.Refresh()
+  end)
   return row
 end
 
@@ -225,7 +289,9 @@ local function drawRow(row, data, y)
   local below = 40
   below = addLine(row, row.detail, contenders and data.text or nil, below)
   local notes = data.skippedText
-  if data.unavailable then notes = (notes and (notes .. "\n") or "") .. data.unavailable end
+  for _, note in ipairs({ data.unavailable or false, data.dbNote or false }) do
+    if note then notes = (notes and (notes .. "\n") or "") .. note end
+  end
   below = addLine(row, row.skipped, notes, below)
   -- While the game confirms a hand-out the row says so in its box, with a turning spinner, in place
   -- of buttons.
@@ -295,6 +361,61 @@ local function drawMenu(boss, redraw)
   menu:SetHeight(y + 6)
 end
 
+-- The D/B list, under its row's D/B button: up to DB_SHOWN names from dbOffset on, the pick
+-- ticked. Choosing a name remembers it and gives nothing.
+local function drawDBList(list)
+  local members = list.members
+  dbOffset = math.max(0, math.min(dbOffset, #members - DB_SHOWN))
+  dbList:ClearAllPoints()
+  dbList:SetPoint("TOPRIGHT", dbRow.db, "BOTTOMRIGHT", 0, -2)
+  dbList.title:SetText(list.title)
+  local y, shown = 26, math.min(DB_SHOWN, #members)
+  for i = 1, shown do
+    local member = members[dbOffset + i]
+    local entry = dbEntries[i]
+    if not entry then
+      entry = newButton(dbList, 198, 18)
+      entry.tick = entry:CreateTexture(nil, "ARTWORK")
+      entry.tick:SetSize(14, 14)
+      entry.tick:SetPoint("LEFT", entry, "LEFT", 2, 0)
+      entry.tick:SetTexture(TICK)
+      entry.label:ClearAllPoints()
+      entry.label:SetPoint("LEFT", entry, "LEFT", 20, 0)
+      dbEntries[i] = entry
+    end
+    entry:ClearAllPoints()
+    entry:SetPoint("TOPLEFT", dbList, "TOPLEFT", 6, -y)
+    setButton(entry, member.name, true)
+    if member.selected then entry.tick:Show() else entry.tick:Hide() end
+    entry.background:SetColorTexture(0.08, 0.08, 0.08, 1)
+    entry.member = member
+    entry:SetScript("OnClick", function()
+      ns.Popup.SetDBPick(member.name)
+      dbList:Hide()
+      PopupFrame.Refresh()
+    end)
+    entry:Show()
+    y = y + 20
+  end
+  for i = shown + 1, #dbEntries do dbEntries[i]:Hide() end
+  local below, above = #members - dbOffset - shown, dbOffset
+  dbList.more:ClearAllPoints()
+  if below > 0 or above > 0 then
+    dbList.more:SetPoint("TOPLEFT", dbList, "TOPLEFT", 8, -(y + 2))
+    dbList.more:SetText(below > 0 and (ARROW_DOWN .. " " .. below .. " more · scroll")
+      or (ARROW_UP .. " " .. above .. " more · scroll"))
+    dbList.more:Show()
+    y = y + 16
+  else
+    dbList.more:SetText("")
+    dbList.more:Hide()
+  end
+  dbList.note:ClearAllPoints()
+  dbList.note:SetPoint("TOPLEFT", dbList, "TOPLEFT", 8, -(y + 2))
+  dbList.note:SetText(list.note)
+  dbList:SetHeight(y + 22)
+end
+
 -- Draws the model, or hides the pop-up when there is none. Returns the model.
 function PopupFrame.Refresh()
   if not frame then build() end
@@ -359,6 +480,11 @@ function PopupFrame.Refresh()
     y = drawRow(rows[i], data, y)
   end
   for i = #model.rows + 1, #rows do rows[i]:Hide() end
+  -- The open D/B list stays only while its row still offers an enabled D/B button.
+  if dbList:IsShown() then
+    local button = dbRow and dbRow:IsShown() and dbRow.data.buttons[2]
+    if button and button.enabled then drawDBList(model.dbMenu) else dbList:Hide() end
+  end
   frame.foot:ClearAllPoints()
   frame.foot:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
   frame.foot:SetText(model.foot)
