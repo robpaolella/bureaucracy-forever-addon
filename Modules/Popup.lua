@@ -1,6 +1,7 @@
--- Popup: the loot pop-up's content model (#10). Pure: reads the open loot window, the loaded raid
--- and the group, and returns what the pop-up shows; nothing is drawn (the frame is #77).
+-- Popup: the loot pop-up's content model (#10). Build reads the open loot window, the loaded
+-- raid and the group, and returns what the pop-up shows; nothing is drawn (the frame is #77).
 -- Only the loot master gets a model (design Q3), and none on a run that is not a guild run.
+-- Give is the officer's click on a Give button (#38): it hands out, records and announces.
 local _, ns = ...
 
 local Popup = {}
@@ -15,6 +16,14 @@ local LABELS = {
   ["hr-single"] = "Hard reserve", ["hr-multi"] = "Hard reserve roll-off",
   sr = "Soft reserve", open = "Open roll",
 }
+local FIGHT_NOTICE = "Boss fight in progress. The game locks chat for add-ons, so awards wait until it ends."
+local FIGHT_TOOLTIP = "Chat is locked until the fight ends"
+local ANNOUNCED = "Announced in raid chat. Waiting for the game to confirm (a few seconds)."
+local NOT_ANNOUNCED = "Not announced in raid chat: the line couldn't be posted. Waiting for the game to"
+  .. " confirm (a few seconds)."
+-- The game's limits that lock chat: on during a boss fight only (beta, #3). Its Combat limit (every
+-- fight) and Map limit (the whole time in an instance) leave chat alone.
+local CHAT_LIMITS = { "Encounter", "Chat" }
 local UNKNOWN_BOSS_NOTICE = "These items drop from more than one boss. Pick the boss before awarding."
 local NO_RESERVES_NOTICE = "No reserves loaded, so every item is an open roll."
 
@@ -22,6 +31,24 @@ local bare = ns.Rules.Bare
 local chosenBoss -- the boss row id the officer picked for this loot window
 
 ns.On("LOOT_CLOSED", function() chosenBoss = nil end)
+
+-- Whether the game locks chat for add-ons now (a boss fight). A call that fails counts as no lock.
+function Popup.ChatLocked()
+  if C_ChatInfo and C_ChatInfo.InChatMessagingLockdown then
+    local ok, on = pcall(C_ChatInfo.InChatMessagingLockdown)
+    if ok and on then return true end
+  end
+  local active = C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive
+  local types = Enum and Enum.AddOnRestrictionType
+  if not (active and types) then return false end
+  for _, name in ipairs(CHAT_LIMITS) do
+    if types[name] ~= nil then
+      local ok, on = pcall(active, types[name])
+      if ok and on then return true end
+    end
+  end
+  return false
+end
 
 -- True when the player is the master looter.
 local function isLootMaster()
@@ -119,10 +146,13 @@ local function skippedList(resolved, earlier)
   return list
 end
 
--- One row. earlier is the list of awards assumed for earlier copies of the item.
-local function resolveRow(it, ctx, earlier, copyNote)
+-- One row. earlier is the list of awards assumed for earlier copies of the item. pendingKey is the
+-- award of the row's own hand-out, still waiting for the game: it doesn't count as received yet.
+local function resolveRow(it, ctx, earlier, copyNote, pendingKey)
   local awards = {}
-  for _, a in ipairs(ctx.awards) do awards[#awards + 1] = a end
+  for _, a in ipairs(ctx.awards) do
+    if not (pendingKey and a.key == pendingKey) then awards[#awards + 1] = a end
+  end
   for _, a in ipairs(earlier) do awards[#awards + 1] = a end
   local cands, unknown = candidates(it.slot)
   local args = { item = it.item, reserves = ctx.reserves, awards = awards, roster = ctx.roster,
@@ -142,7 +172,7 @@ local function resolveRow(it, ctx, earlier, copyNote)
   for _, h in ipairs(resolved.contenders) do row.contenders[#row.contenders + 1] = h.char end
   if mode == "hr-single" or (mode == "sr" and #resolved.contenders == 1) then
     local winner = resolved.contenders[1]
-    row.winner, row.action = winner.char, "give"
+    row.winner, row.user, row.action = winner.char, winner.user, "give"
     if unknown and cands then
       local listed
       for _, name in ipairs(cands) do listed = listed or bare(name) == bare(winner.char) end
@@ -187,8 +217,13 @@ local function resolveRow(it, ctx, earlier, copyNote)
   return row
 end
 
--- The buttons of a row, once the boss is known: Give and D/B need a boss picked.
-local function addButtons(row, boss)
+-- The buttons of a row, once the boss is known: Give and D/B need a boss picked. In a boss fight
+-- the Give and roll buttons wait, with a tooltip saying why. A row being handed out has none.
+local function addButtons(row, boss, locked)
+  if row.handout then
+    row.buttons = {}
+    return
+  end
   local primary
   if row.action == "give" then
     primary = { text = "Give to " .. row.winner, action = "give",
@@ -199,7 +234,8 @@ local function addButtons(row, boss)
   else
     primary = { text = "Call open roll", action = "openroll", enabled = true }
   end
-  local pick = ns.db.dbPick -- chosen by #13
+  if locked then primary.enabled, primary.tooltip = false, FIGHT_TOOLTIP end
+  local pick = ns.db.dbPick -- chosen by #39
   row.buttons = { primary, { text = "D/B: " .. (pick and pick:match("^%S+") or "choose") .. " ▾",
     action = "db", enabled = boss.resolved } }
 end
@@ -216,9 +252,11 @@ end
 
 -- The model for the open loot window, or nil and why: "not loot master", "not a guild run" or
 -- "no items". Fields: title, boss ({ name, id, resolved, notice, menuTitle, menu = { { id, name,
--- selected, killed } } }), notice (no reserves), syncLink, rows (every item of every loot-window
--- page; each: slot, item, link, copy, mode, label, contenders, winner, skipped, skippedText, note,
--- text, action, unavailable, buttons), count, foot, recheck.
+-- selected, killed } } }), notice (no reserves), fight (the boss fight note, while chat is locked),
+-- syncLink, rows (every item of every loot-window page; each: slot, item, link, copy, mode, label,
+-- contenders, winner, user, skipped, skippedText, note, text, action, unavailable, handout (while
+-- the game confirms a hand-out: { text, note }), buttons (each: text, action, enabled, tooltip)),
+-- count, foot, recheck.
 function Popup.Build()
   if not isLootMaster() then return nil, "not loot master" end
   if ns.Selection.IsQuiet() then return nil, "not a guild run" end
@@ -237,20 +275,30 @@ function Popup.Build()
     end
   end
   local boss = bossControl(raidId, snapshot, items)
+  local locked = Popup.ChatLocked()
+  local handouts = {}
+  for _, a in ipairs(ns.Tracking.Pending()) do
+    if a.status == "pending" and not a.windowClosed then handouts[a.slot] = a end
+  end
   local total, seen, earlier, copyNotes = {}, {}, {}, {}
   for _, it in ipairs(items) do total[it.item] = (total[it.item] or 0) + 1 end
   local model = { boss = boss, rows = {}, count = #items, foot = footLine(raidId, snapshot) }
   for _, it in ipairs(items) do
     seen[it.item] = (seen[it.item] or 0) + 1
     earlier[it.item] = earlier[it.item] or {}
-    local row = resolveRow(it, ctx, earlier[it.item], copyNotes[it.item])
+    local handout = handouts[it.slot]
+    local row = resolveRow(it, ctx, earlier[it.item], copyNotes[it.item], handout and handout.awardKey)
     if total[it.item] > 1 then
       row.copy = string.format("Copy %d of %d", seen[it.item], total[it.item])
       if row.action == "give" then
         copyNotes[it.item] = string.format("Copy %d goes to the %s", seen[it.item], modeWords(row.mode))
       end
     end
-    addButtons(row, boss)
+    if handout then
+      row.handout = { text = "Handing out to " .. handout.winner .. "…",
+        note = handout.announced and ANNOUNCED or NOT_ANNOUNCED }
+    end
+    addButtons(row, boss, locked)
     model.recheck = model.recheck or row.recheck
     model.rows[#model.rows + 1] = row
   end
@@ -258,8 +306,69 @@ function Popup.Build()
   if not snapshot then
     model.notice, model.syncLink = NO_RESERVES_NOTICE, "Sync"
   end
+  if locked then model.fight = FIGHT_NOTICE end
   return model
 end
+
+-- The officer clicked a row's Give button: hands the item to the winner, found by name among
+-- this corpse's candidates (their order changes per corpse), records the award as announced and
+-- posts its line in raid chat. A line that can't be built is not posted, and the officer is
+-- told; the hand-out and the award stand. item and winner are what the clicked button showed: if
+-- the row now names another item or winner, nothing happens. Returns the hand-out (Tracking's
+-- attempt, with awardKey and announced), or nil and why: "fight" (chat is locked), "not ready"
+-- (no Give enabled for the slot), "changed", "not a candidate" or Tracking.Give's reasons.
+function Popup.Give(slot, item, winner)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local model = Popup.Build()
+  local row
+  for _, r in ipairs(model and model.rows or {}) do
+    if r.slot == slot then row = r end
+  end
+  if not (row and row.action == "give" and row.buttons[1] and row.buttons[1].enabled) then
+    return nil, "not ready"
+  end
+  if row.item ~= item or row.winner ~= winner then return nil, "changed" end
+  local index
+  for i = 1, MAX_CANDIDATES do
+    local name = GetMasterLootCandidate(slot, i)
+    if not name then break end
+    if bare(name) == bare(row.winner) then
+      index = i
+      break
+    end
+  end
+  if not index then return nil, "not a candidate" end
+  local attempt, reason = ns.Tracking.Give(slot, index)
+  if not attempt then return nil, reason end
+  local method = row.mode == "hr" and "HR" or "SR"
+  local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = row.winner,
+    user = row.user, method = method })
+  local line, problem
+  if op then
+    attempt.awardKey = op.id
+    local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
+    line, problem = ns.OpText.BuildLine("award", { raid = snapshot.code, key = op.id, item = row.item,
+      link = row.link, boss = model.boss.id, method = method, winner = row.winner, practice = op.practice })
+  else
+    problem = "the award wasn't saved (" .. tostring(why) .. ")"
+  end
+  if line then
+    C_ChatInfo.SendChatMessage(line, IsInRaid() and "RAID" or "PARTY")
+    attempt.announced = true
+  else
+    ns.Log("Award line for " .. row.link .. " not posted: " .. problem)
+    ns.Print(row.link .. " is being handed to " .. row.winner .. ", but its raid chat line couldn't be"
+      .. " posted. Type /bf log for why.")
+  end
+  return attempt
+end
+
+-- Once the game confirms a hand-out made here, its award is confirmed. Not confirmed is #12's.
+ns.Tracking.On("confirmed", function(attempt)
+  if not attempt.awardKey then return end
+  local ok, why = ns.Records.Confirm(attempt.awardKey)
+  if not ok then ns.Log("Confirming the award " .. attempt.awardKey .. " failed: " .. tostring(why)) end
+end)
 
 -- The officer picks the boss (a boss row id of the loaded raid, "Trash" included) for this loot
 -- window. Returns true, or nil and why.

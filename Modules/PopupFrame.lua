@@ -1,7 +1,7 @@
 -- PopupFrame: draws the loot pop-up (#77) from the content model Popup.Build() makes (#10).
 -- It opens on LOOT_OPENED for the loot master, closes on LOOT_CLOSED, and redraws when the officer
--- picks a boss or while a candidate's name is still loading. The buttons are drawn only: giving,
--- rolling and D/B belong to #11, #12 and #13.
+-- picks a boss, while a candidate's name is still loading, when a boss fight starts or ends and when
+-- the game confirms a hand-out. Give hands out (#38); rolling and D/B belong to #13 and #39.
 local _, ns = ...
 
 local PopupFrame = {}
@@ -9,10 +9,13 @@ ns.PopupFrame = PopupFrame
 
 local WIDTH, TEXT_WIDTH, PAD = 560, 380, 10
 local ROW_MIN, RECHECK_SECONDS = 46, 1
+local BOX_WIDTH = WIDTH - 2 * PAD - 40 -- the hand-out box, from the text column to the row's right
 local BADGE_COLORS = {
   hr = { 0.85, 0.4, 0.1 }, sr = { 0.2, 0.55, 0.85 }, open = { 0.45, 0.45, 0.45 },
 }
 local NO_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+local SPINNER = "Interface\\COMMON\\StreamCircle"
+local GOLD = { 1, 0.82, 0 }
 
 local frame, menu
 local rows, entries = {}, {} -- widgets reused from one draw to the next
@@ -89,6 +92,8 @@ local function build()
   end
   frame.close:HookScript("OnClick", function() dismissed = true end)
 
+  frame.fight = newText(frame, "GameFontNormal")
+  frame.fight:SetWidth(WIDTH - 2 * PAD)
   frame.notice = newText(frame, "GameFontNormal")
   frame.notice:SetWidth(WIDTH - 2 * PAD)
   frame.link = newButton(frame, 90, 16)
@@ -136,8 +141,45 @@ local function newRow()
   row.beside = newText(row, "GameFontHighlightSmall")
   row.detail = newText(row, "GameFontHighlightSmall")
   row.skipped = newText(row, "GameFontDisableSmall")
+  -- The hand-out box, as the design draws it: a grey edge round a dark inside.
+  row.box = CreateFrame("Frame", nil, row)
+  row.box.edge = row.box:CreateTexture(nil, "BACKGROUND")
+  row.box.edge:SetAllPoints()
+  row.box.edge:SetColorTexture(0.5, 0.5, 0.5, 1)
+  row.box.inside = row.box:CreateTexture(nil, "BORDER")
+  row.box.inside:SetPoint("TOPLEFT", row.box, "TOPLEFT", 1, -1)
+  row.box.inside:SetPoint("BOTTOMRIGHT", row.box, "BOTTOMRIGHT", -1, 1)
+  row.box.inside:SetColorTexture(0.04, 0.04, 0.04, 1)
+  row.box:Hide()
+  row.spinner = row.box:CreateTexture(nil, "ARTWORK")
+  row.spinner:SetSize(14, 14)
+  row.spinner:SetPoint("TOPLEFT", row.box, "TOPLEFT", 6, -6)
+  row.spinner:SetTexture(SPINNER)
+  row.handout = newText(row.box, "GameFontNormal")
+  row.handout:SetWidth(BOX_WIDTH - 32)
+  row.handout:SetPoint("TOPLEFT", row.box, "TOPLEFT", 24, -6)
+  row.handout:SetTextColor(unpack(GOLD))
+  row.handoutNote = newText(row.box, "GameFontHighlightSmall")
+  row.handoutNote:SetWidth(BOX_WIDTH - 12)
   row.primary = newButton(row, 150, 20)
   row.primary:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -2)
+  -- A greyed button still shows why when hovered.
+  if row.primary.SetMotionScriptsWhileDisabled then row.primary:SetMotionScriptsWhileDisabled(true) end
+  row.primary:SetScript("OnEnter", function(self)
+    local tip = row.data and row.data.buttons[1] and row.data.buttons[1].tooltip
+    if not tip then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(tip, 1, 1, 1)
+    GameTooltip:Show()
+  end)
+  row.primary:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  row.primary:SetScript("OnClick", function()
+    local button = row.data and row.data.buttons[1]
+    if not (button and button.enabled and button.action == "give") then return end
+    local ok, why = ns.Popup.Give(row.data.slot, row.data.item, row.data.winner)
+    if not ok then ns.Log("Give for " .. row.data.link .. " refused: " .. tostring(why)) end
+    PopupFrame.Refresh()
+  end)
   row.db = newButton(row, 110, 20)
   row.db:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -26)
   return row
@@ -177,10 +219,40 @@ local function drawRow(row, data, y)
   local notes = data.skippedText
   if data.unavailable then notes = (notes and (notes .. "\n") or "") .. data.unavailable end
   below = addLine(row, row.skipped, notes, below)
+  -- While the game confirms a hand-out the row says so in its box, with a turning spinner, in place
+  -- of buttons.
+  local handout, box = data.handout, row.box
+  if handout then
+    row.handout:SetText(handout.text)
+    local inside = 6 + row.handout:GetStringHeight() + 4
+    row.handoutNote:ClearAllPoints()
+    row.handoutNote:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -inside)
+    row.handoutNote:SetText(handout.note)
+    inside = inside + row.handoutNote:GetStringHeight() + 6
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", row, "TOPLEFT", 40, -below)
+    box:SetSize(BOX_WIDTH, inside)
+    box:Show()
+    row:SetScript("OnUpdate", function()
+      if row.spinner.SetRotation then row.spinner:SetRotation(-GetTime() * 4) end
+    end)
+    below = below + inside + 4
+  else
+    box:Hide()
+    row:SetScript("OnUpdate", nil)
+  end
   local height = math.max(ROW_MIN, below + 4)
   row:SetHeight(height)
-  setButton(row.primary, data.buttons[1].text, data.buttons[1].enabled)
-  setButton(row.db, data.buttons[2].text, data.buttons[2].enabled)
+  row.data = data
+  for i, button in ipairs({ row.primary, row.db }) do
+    local b = data.buttons[i]
+    if b then
+      setButton(button, b.text, b.enabled)
+      button:Show()
+    else
+      button:Hide()
+    end
+  end
   row:Show()
   return y + height + 6
 end
@@ -226,6 +298,16 @@ function PopupFrame.Refresh()
   local boss = model.boss
   frame.title:SetText(model.title)
   local y = 32
+  frame.fight:ClearAllPoints()
+  if model.fight then
+    frame.fight:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
+    frame.fight:SetText(model.fight)
+    frame.fight:Show()
+    y = y + frame.fight:GetStringHeight() + 8
+  else
+    frame.fight:SetText("")
+    frame.fight:Hide()
+  end
   if boss.notice or model.notice then
     frame.notice:ClearAllPoints()
     frame.notice:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
@@ -300,3 +382,11 @@ ns.On("LOOT_CLOSED", function()
   open = false
   if frame then frame:Hide() end
 end)
+
+-- A boss fight starting or ending, or the game settling a hand-out, changes what the rows show.
+local function redraw()
+  if open then PopupFrame.Refresh() end
+end
+ns.On("ADDON_RESTRICTION_STATE_CHANGED", redraw)
+ns.Tracking.On("confirmed", redraw)
+ns.Tracking.On("unconfirmed", redraw)

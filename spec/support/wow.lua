@@ -197,8 +197,28 @@ local function installGlobals(metadata)
     end,
   }
 
-  -- Chat: lines the add-on sent, hidden add-on messages, the chat log switch.
+  -- The game's add-on limits, as wow.state.limits[name] = true (names from the beta, #3). The
+  -- numbers are the stand-in's own: the add-on must look them up by name. A test may have set
+  -- other parts of Enum before the start.
+  _G.Enum = _G.Enum or {}
+  _G.Enum.AddOnRestrictionType = { Combat = 0, Map = 1, Encounter = 2, Chat = 3 }
+  _G.C_RestrictedActions = {
+    IsAddOnRestrictionActive = function(value)
+      for name, v in pairs(_G.Enum.AddOnRestrictionType) do
+        if v == value then return wow.state.limits[name] or false end
+      end
+      return false
+    end,
+  }
+
+  -- Chat: lines the add-on sent, hidden add-on messages, the chat log switch. In chat lockdown
+  -- a line is blocked even from a click.
   local function sendChat(text, channel, _, target)
+    if wow.state.chatLockdown then
+      wow.blocked[#wow.blocked + 1] = "SendChatMessage"
+      wow.fire("ADDON_ACTION_BLOCKED", wow.addonName, "SendChatMessage")
+      return
+    end
     wow.sent[#wow.sent + 1] = { text = text, channel = channel, target = target }
   end
   _G.SendChatMessage = protected("SendChatMessage", sendChat)
@@ -279,7 +299,7 @@ function wow.start(options)
   wow.printed, wow.sent, wow.addonMessages, wow.gives, wow.blocked = {}, {}, {}, {}, {}
   wow.prefixes = {}
   wow.state = { loot = {}, lootThreshold = 2, lootMethod = { "group", 0, 0 }, player = "Masterlooter",
-    chatLog = false, chatLockdown = false,
+    chatLog = false, chatLockdown = false, limits = {},
     items = {}, screen = options.screen or { width = 1920, height = 1080 }, cursor = { 0, 0 },
     time = 1792000000, instance = { name = "Eastern Kingdoms", type = "none", id = 0 } }
   local metadata, files = wow.readToc()
@@ -351,6 +371,16 @@ end
 function wow.openLoot(items)
   wow.state.loot = items
   wow.fire("LOOT_OPENED", false)
+end
+
+-- A boss fight starts (true) or ends: like the beta showed, the Encounter and Chat limits and
+-- chat lockdown switch on together, then off the moment the boss dies.
+function wow.bossFight(on)
+  wow.state.chatLockdown = on
+  for _, name in ipairs({ "Encounter", "Chat" }) do
+    wow.state.limits[name] = on or nil
+    wow.fire("ADDON_RESTRICTION_STATE_CHANGED", _G.Enum.AddOnRestrictionType[name], on and 1 or 0)
+  end
 end
 
 function wow.closeLoot()

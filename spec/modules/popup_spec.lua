@@ -324,4 +324,174 @@ describe("Popup", function()
       end
     end)
   end)
+
+  describe("giving (#38)", function()
+    local BOSSES = {
+      { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2, 3 } },
+      { id = "lb_trash", name = "Trash", trash = true, items = {} },
+    }
+    local ANNOUNCED = "Announced in raid chat. Waiting for the game to confirm (a few seconds)."
+
+    -- A raid whose code and boss ids make a valid chat line, unless fields say otherwise.
+    local function raid(fields)
+      local t = { code = "SA0001", bosses = BOSSES, reserves = { [1] = { holder("Ashla Brightwater", "HR") },
+        [2] = { holder("Doran Vale", "SR") } } }
+      for k, v in pairs(fields or {}) do t[k] = v end
+      setup(t)
+    end
+
+    -- Clicks the slot's Give button as it was drawn just now.
+    local function give(slot)
+      local shown
+      for _, row in ipairs((ns.Popup.Build() or { rows = {} }).rows) do
+        if row.slot == slot then shown = row end
+      end
+      local result
+      wow.click(function() result = { ns.Popup.Give(slot, shown and shown.item, shown and shown.winner) } end)
+      return result[1], result[2]
+    end
+
+    local function confirm(slot, who)
+      wow.fire("LOOT_SLOT_CLEARED", slot)
+      wow.fire("CHAT_MSG_LOOT", who .. " receives loot: " .. wow.state.loot[slot].link .. ".")
+    end
+
+    it("hands out to the winner's candidate slot by name, posts the line and records it", function()
+      raid()
+      drop({ { id = 1, candidates = { "Doran Vale", "Masterlooter", "Ashla Brightwater" } } })
+      local attempt = assert(give(1))
+      assert.are.same({ { slot = 1, candidate = 3 } }, wow.gives)
+      local award = ns.Records.Get(attempt.awardKey)
+      assert.are.same({ "announced", "lb_lucifron", 1, "Ashla Brightwater", "ashlabrightwater", "HR",
+        "Masterlooter" }, { award.state, award.boss, award.item, award.char, award.user, award.method,
+        award.sender })
+      assert.are.same({ { channel = "RAID", text = link(1) .. " → Ashla Brightwater (hard reserve) "
+        .. "<BF1;A;SA0001;" .. attempt.awardKey .. ";1;ifron;HR;;Ashla Brightwater>" } }, wow.sent)
+      assert.are.same({}, wow.blocked)
+      confirm(1, "Ashla Brightwater")
+      assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+    end)
+
+    it("announces a soft reserve as one, in party chat outside a raid", function()
+      raid()
+      wow.state.groupIsRaid = false
+      wow.state.group = { "Masterlooter", "Doran Vale" }
+      drop({ { id = 2 } })
+      local attempt = assert(give(1))
+      assert.are.equal("PARTY", wow.sent[1].channel)
+      assert.is_truthy(wow.sent[1].text:find("→ Doran Vale (soft reserve) <BF1;A;SA0001;", 1, true))
+      assert.are.equal("SR", ns.Records.Get(attempt.awardKey).method)
+    end)
+
+    it("shows the row as handing out until the game confirms, and refuses a second click", function()
+      raid()
+      drop({ { id = 1 }, { id = 2 } })
+      give(1)
+      local row = ns.Popup.Build().rows[1]
+      assert.are.same({ { text = "Handing out to Ashla Brightwater…", note = ANNOUNCED }, {} },
+        { row.handout, row.buttons })
+      -- Its own award, just saved, doesn't turn the row into "already received".
+      assert.are.same({ "hr", "Ashla Brightwater" }, { row.mode, row.text })
+      assert.is_nil(row.skippedText)
+      assert.is_nil(ns.Popup.Build().rows[2].handout)
+      assert.are.same({ nil, "not ready" }, { give(1) })
+      assert.are.equal(1, #wow.gives)
+      assert.are.equal(1, #wow.sent)
+      confirm(1, "Ashla Brightwater")
+      assert.is_nil(ns.Popup.Build().rows[1].handout)
+    end)
+
+    it("does nothing if the winner changed after the button was drawn", function()
+      raid({ reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } } })
+      drop({ { id = 1 } })
+      local shown = ns.Popup.Build().rows[1]
+      assert.are.equal("Ashla Brightwater", shown.winner)
+      wow.state.loot[1].candidates = { "Masterlooter", "Doran Vale" } -- Ashla can't receive it now
+      local result
+      wow.click(function() result = { ns.Popup.Give(1, shown.item, shown.winner) } end)
+      assert.are.same({ nil, "changed" }, result)
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+      assert.is_nil(ns.Records.Ops("raid00001")[1])
+    end)
+
+    it("leaves the award announced when the game doesn't confirm", function()
+      raid()
+      drop({ { id = 1 } })
+      local attempt = give(1)
+      wow.advance(ns.Tracking.confirmWait)
+      assert.are.equal("announced", ns.Records.Get(attempt.awardKey).state)
+      assert.is_nil(ns.Popup.Build().rows[1].handout)
+    end)
+
+    it("hands out and saves even when the line can't be built, and says so", function()
+      raid({ code = "MC0001" }) -- not a valid raid code for a chat line
+      drop({ { id = 1 } })
+      local attempt = assert(give(1))
+      assert.are.equal(1, #wow.gives)
+      assert.are.same({}, wow.sent)
+      assert.is_nil(attempt.announced)
+      assert.are.equal("announced", ns.Records.Get(attempt.awardKey).state)
+      assert.is_truthy(wow.printed[#wow.printed]:find("its raid chat line couldn't be posted", 1, true))
+      assert.is_truthy(ns.log[#ns.log].text:find("raid code", 1, true))
+      assert.are.equal("Not announced in raid chat: the line couldn't be posted. Waiting for the game to"
+        .. " confirm (a few seconds).", ns.Popup.Build().rows[1].handout.note)
+      confirm(1, "Ashla Brightwater")
+      assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+    end)
+
+    it("waits out a boss fight: no hand-out or chat, buttons greyed with why (popup-fight)", function()
+      raid()
+      drop({ { id = 1 }, { id = 3 } })
+      wow.bossFight(true)
+      local m = ns.Popup.Build()
+      assert.are.equal("Boss fight in progress. The game locks chat for add-ons, so awards wait until"
+        .. " it ends.", m.fight)
+      for _, row in ipairs(m.rows) do
+        assert.are.same({ false, "Chat is locked until the fight ends" },
+          { row.buttons[1].enabled, row.buttons[1].tooltip })
+        assert.is_true(row.buttons[2].enabled)
+      end
+      assert.are.same({ nil, "fight" }, { give(1) })
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+      assert.is_nil(ns.Records.Ops("raid00001")[1])
+      wow.bossFight(false)
+      m = ns.Popup.Build()
+      assert.is_nil(m.fight)
+      assert.is_true(m.rows[1].buttons[1].enabled and m.rows[2].buttons[1].enabled)
+      assert.is_nil(m.rows[1].buttons[1].tooltip)
+      assert.is_truthy(give(1))
+    end)
+
+    it("counts the Encounter limit or chat lockdown as a fight, not the Combat or Map limits", function()
+      raid()
+      wow.state.limits = { Combat = true, Map = true }
+      assert.is_false(ns.Popup.ChatLocked())
+      wow.state.limits = { Encounter = true }
+      assert.is_true(ns.Popup.ChatLocked())
+      wow.state.limits = {}
+      wow.state.chatLockdown = true
+      assert.is_true(ns.Popup.ChatLocked())
+    end)
+
+    it("can't give to a winner whose name hasn't loaded (popup-unavailable)", function()
+      raid()
+      drop({ { id = 1, candidates = { "Masterlooter", "Unknown" } } })
+      assert.are.same({ nil, "not ready" }, { give(1) })
+      assert.are.same({}, wow.gives)
+      assert.are.same({}, wow.sent)
+      assert.is_nil(ns.Records.Ops("raid00001")[1])
+    end)
+
+    it("gives nothing for a roll, an open roll or before the boss is picked", function()
+      raid({ bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 2 } },
+        { id = "lb_magmadar", name = "Magmadar", trash = false, items = { 2 } },
+        { id = "lb_trash", name = "Trash", trash = true, items = {} } } })
+      drop({ { id = 2 }, { id = 3 } })
+      assert.are.same({ nil, "not ready" }, { give(1) }) -- no boss picked yet
+      assert.are.same({ nil, "not ready" }, { give(2) }) -- an open roll
+      assert.are.same({}, wow.gives)
+    end)
+  end)
 end)
