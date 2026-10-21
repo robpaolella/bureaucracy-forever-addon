@@ -15,6 +15,17 @@ ns.Raids = Raids
 Raids.afterLoad = nil
 Raids.beforeRemove = nil
 
+-- Others that run after a snapshot is stored, after afterLoad: Raids.OnLoad(hook), hook(raidId).
+local loadHooks = {}
+function Raids.OnLoad(hook)
+  loadHooks[#loadHooks + 1] = hook
+end
+
+local function afterLoad(raidId)
+  if Raids.afterLoad then Raids.afterLoad(raidId) end
+  for _, hook in ipairs(loadHooks) do hook(raidId) end
+end
+
 local ORIGINS = { pasted = true, inbox = true }
 
 local function store()
@@ -56,7 +67,7 @@ function Raids.Load(snapshot, origin)
   local raids = store()
   raids[snapshot.raid] = raids[snapshot.raid] or {}
   raids[snapshot.raid][origin] = { snapshot = snapshot, loadedAt = time() }
-  if Raids.afterLoad then Raids.afterLoad(snapshot.raid) end
+  afterLoad(snapshot.raid)
   return snapshot.raid
 end
 
@@ -85,9 +96,7 @@ function Raids.ReplaceInbox(snapshots)
   end
   table.sort(added)
   table.sort(left)
-  if Raids.afterLoad then
-    for _, snapshot in ipairs(snapshots) do Raids.afterLoad(snapshot.raid) end
-  end
+  for _, snapshot in ipairs(snapshots) do afterLoad(snapshot.raid) end
   return added, left
 end
 

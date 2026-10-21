@@ -219,3 +219,74 @@ describe("Sync's O messages", function()
     end)
   end
 end)
+
+describe("Sync's C messages", function()
+  local Sync
+
+  before_each(function()
+    Sync = wow.start().Sync
+  end)
+
+  -- Parses every body and joins the pieces' ids, as a receiver holding all chunks would.
+  local function receive(bodies)
+    local pieces = {}
+    for n, body in ipairs(bodies) do
+      local chunk = assert(Sync.ParseRequest(body))
+      assert.are.same({ "k4m8q2", n, #bodies, "SA0001" }, { chunk.msgid, chunk.n, chunk.total, chunk.raid })
+      pieces[n] = chunk.piece
+    end
+    return assert(Sync.ParseIds(table.concat(pieces)))
+  end
+
+  it("sends a short list of ids as one chunk, 1/1, and gives it back", function()
+    local bodies = Sync.EncodeRequest({ "aw-9d2f6h1j", "rp-3n7b5x0c" }, "SA0001", "k4m8q2")
+    assert.are.same({ "C;k4m8q2;SA0001;1/1;aw-9d2f6h1j,rp-3n7b5x0c" }, bodies)
+    assert.are.same({ "aw-9d2f6h1j", "rp-3n7b5x0c" }, receive(bodies))
+  end)
+
+  it("sends holding none as one chunk with no ids", function()
+    local bodies = Sync.EncodeRequest({}, "SA0001", "k4m8q2")
+    assert.are.same({ "C;k4m8q2;SA0001;1/1;" }, bodies)
+    assert.are.same({}, receive(bodies))
+  end)
+
+  it("cuts a long list into pieces of at most 160 bytes, each message under 255", function()
+    local ids = {}
+    for i = 1, 100 do ids[i] = string.format("aw-%08d", i) end
+    local bodies = Sync.EncodeRequest(ids, "SA0001", "k4m8q2")
+    assert.are.equal(8, #bodies) -- 100 ids of 11 bytes and 99 commas: 1199 bytes
+    for _, body in ipairs(bodies) do
+      assert.is_true(#assert(Sync.ParseRequest(body)).piece <= 160)
+      assert.is_true(#(Sync.PREFIX .. "\t" .. body) < 255)
+    end
+    assert.are.same(ids, receive(bodies))
+  end)
+
+  it("escapes the raid code, and gives it back", function()
+    local chunk = assert(Sync.ParseRequest(Sync.EncodeRequest({}, "SA;001", "k4m8q2")[1]))
+    assert.are.equal("SA;001", chunk.raid)
+  end)
+
+  local malformed = {
+    ["another type"] = "O;k4m8q2;SA0001;1/1;aw-9d2f6h1j",
+    ["a reqid too short"] = "C;k4m8q;SA0001;1/1;aw-9d2f6h1j",
+    ["a reqid with capitals"] = "C;K4M8Q2;SA0001;1/1;aw-9d2f6h1j",
+    ["an empty raid"] = "C;k4m8q2;;1/1;aw-9d2f6h1j",
+    ["n over N"] = "C;k4m8q2;SA0001;2/1;aw-9d2f6h1j",
+    ["n of 0"] = "C;k4m8q2;SA0001;0/1;aw-9d2f6h1j",
+    ["a missing count"] = "C;k4m8q2;SA0001;aw-9d2f6h1j",
+    ["a ; in the ids"] = "C;k4m8q2;SA0001;1/1;aw-9d2f6h1j;x",
+    ["a space in the ids"] = "C;k4m8q2;SA0001;1/1;aw-9d2f6h1j, rp-3n7b5x0c",
+  }
+  for name, body in pairs(malformed) do
+    it("reports a body with " .. name .. " as malformed", function()
+      assert.are.same({ nil, "malformed" }, { Sync.ParseRequest(body) })
+    end)
+  end
+
+  it("refuses a whole list with an id that isn't valid", function()
+    for _, text in ipairs({ ",", "aw-9d2f6h1j,", "aw-9d2f6h1j,,rp-3n7b5x0c", "short" }) do
+      assert.is_nil(Sync.ParseIds(text))
+    end
+  end)
+end)
