@@ -570,23 +570,16 @@ local function confirm(question, hint, yes, no, onYes)
   dialog:Show()
 end
 
--- The same dialog as a notice: its one button closes it.
-local function notify(text, hint)
-  confirm(text, hint, "", "OK", nil)
-  dialog.yes:Hide()
-  dialog.no:ClearAllPoints()
-  dialog.no:SetPoint("BOTTOM", dialog, "BOTTOM", 0, 14)
-end
-
--- The notice when the selected raid has left the helper's list. Choose a raid now (the raid
--- question, #53) is added with that question.
+-- The notice when the selected raid has left the helper's list. Choose a raid now opens the raid
+-- question with the raids still loaded (ask-gone, #53).
 local function goneNotice(gone)
   local n = #ns.Raids.Awards(gone.raid)
   local kept = n == 0 and "It had no awards."
     or string.format("Its %s %s kept and still sent to the site.", plural(n, "award", "awards"),
       agree(n, "is", "are"))
-  notify(WHITE:format(goneName(gone)) .. " has left the helper's list: it was cancelled or has ended.",
-    kept .. " You'll be asked which raid it is when you next enter a raid instance.")
+  confirm(WHITE:format(goneName(gone)) .. " has left the helper's list: it was cancelled or has ended.",
+    kept .. " You'll be asked which raid it is when you next enter a raid instance.",
+    "Choose a raid now", "OK", function() ns.StartQuestion.AskGone() end)
 end
 
 local function buildDialog()
@@ -644,6 +637,7 @@ local function choose(choice)
   end
   UI.RefreshSync()
 end
+UI.Choose = choose
 
 -- Notes the raid as chosen by this paste when the paste changed the selection to it.
 local function notePasted(raidId, before)
@@ -1012,6 +1006,7 @@ end
 
 -- Draws the tab: the status bar, the raid table, the helper line and the paste box with its result.
 function UI.RefreshSync()
+  if ns.StartQuestion then ns.StartQuestion.Recheck() end
   if not sync.child or not window:IsShown() or not UI.tabs.Sync:IsShown() then return end
   local raids, status, inbox = ns.Raids.Status()
   for _, pool in pairs(sync.cells) do
@@ -1455,6 +1450,13 @@ local function buildButton()
   placeButton(buttonAngle())
   if read().minimap and read().minimap.hidden then button:Hide() end
   UI.RefreshBadge()
+end
+
+-- The pieces the raid question (StartQuestion.lua) draws with.
+for key, value in pairs({ plain = plain, raidName = raidName, goneName = goneName, whenText = whenText,
+  reserveCounts = reserveCounts, plural = plural, newNote = newNote, setNote = setNote, RADIO = RADIO,
+  WHITE = WHITE }) do
+  UI.parts[key] = value
 end
 
 ns.On("ADDON_LOADED", function(name)
