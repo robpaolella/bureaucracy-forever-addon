@@ -68,7 +68,7 @@ end
 
 -- Incomplete O and C messages, by sender, kind and msgid (a C's reqid), and each sender's in the
 -- order they started. An entry: { key, kind, sender, msgid, total, raid, author (nil for a C),
--- pieces = { [n] = piece }, count }.
+-- pieces = { [n] = piece }, count, lastAt (when the last new chunk came) }.
 local partials, started = {}, {}
 
 local function forget(entry)
@@ -92,10 +92,13 @@ local function missing(entry)
   return table.concat(list, ",")
 end
 
--- Every 10 seconds while chunks are missing, asks the sender for them; after three asks, drops it.
-local function retry(entry, asked)
-  C_Timer.After(RETRY_EVERY, function()
+-- Every 10 seconds with no new chunk while chunks are missing, asks the sender for them; after
+-- three asks, drops it. A new chunk starts the count again: a long C arrives paced over a minute.
+local function retry(entry, asked, wait)
+  C_Timer.After(wait or RETRY_EVERY, function()
     if partials[entry.key] ~= entry then return end
+    local quiet = GetTime() - entry.lastAt
+    if quiet < RETRY_EVERY then return retry(entry, 0, RETRY_EVERY - quiet) end
     if asked == RETRIES then return drop(entry, "chunks still missing") end
     local body = "Q;" .. entry.msgid .. ";" .. missing(entry)
     Hub.sendRequest(entry.sender, body)
@@ -197,6 +200,7 @@ local function collect(kind, chunk, sender)
   if entry.pieces[chunk.n] then return end
   entry.pieces[chunk.n] = chunk.piece
   entry.count = entry.count + 1
+  entry.lastAt = GetTime()
   if entry.count == entry.total then complete(entry, raidId) end
 end
 

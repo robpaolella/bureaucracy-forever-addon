@@ -1314,6 +1314,41 @@ describe("Hub catch-up", function()
       assert.are.equal(1, #calls)
     end)
 
+    it("arriving paced over more than 40 seconds is rebuilt, with nothing asked again", function()
+      local requests = {}
+      Hub.sendRequest = function(target, body) requests[#requests + 1] = { target, body } end
+      local ids = {}
+      for i = 1, 600 do ids[i] = string.format("aw-%08d", i) end
+      local bodies = request(ids)
+      assert.are.equal(45, #bodies)
+      for _, body in ipairs(bodies) do
+        receive(body, ZOE, "WHISPER")
+        wow.advance(1)
+      end
+      assert.are.same({ { ZOE, "r00001", RAID, {} } }, calls)
+      assert.are.same({}, requests)
+    end)
+
+    it("asks again 10 seconds after the last new chunk, and drops 40 seconds after it", function()
+      local requests = {}
+      Hub.sendRequest = function(target, body) requests[#requests + 1] = { target, body } end
+      local ids = {}
+      for i = 1, 50 do ids[i] = string.format("aw-%08d", i) end
+      local bodies = request(ids)
+      receive(bodies[1], ZOE, "WHISPER")
+      wow.advance(8)
+      receive(bodies[2], ZOE, "WHISPER")
+      wow.advance(9)
+      assert.are.same({}, requests)
+      wow.advance(1)
+      assert.are.same({ { ZOE, "Q;r00001;3,4" } }, requests)
+      for _ = 1, 29 do wow.advance(1) end
+      assert.are.equal(3, #requests)
+      assert.is_false(logged("dropped Zoé Brûlé's message r00001"))
+      wow.advance(1)
+      assert.is_true(logged("dropped Zoé Brûlé's message r00001 (chunks still missing)"))
+    end)
+
     it("from two senders, or under an O's msgid, is kept apart", function()
       local op = Sync.EncodeOp({ type = "confirm", id = "cf-00000001", key = "aw-00000001", at = 1792000100 },
         "SA0001", BO, "r00001")
