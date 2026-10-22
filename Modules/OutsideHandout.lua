@@ -3,7 +3,11 @@
 -- threshold); the officer is asked how it was won, pre-filled from the reserves, and the answer is
 -- recorded as an award (confirmed: the game already handed it out), sent to the other officers
 -- (Hub.SendOwn) and posted in raid chat. Nothing is recorded until the officer answers. Later puts it
--- off: it joins this session's list of unanswered hand-outs (Unanswered), kept in memory only.
+-- off: it joins the list of unanswered hand-outs (Unanswered).
+-- A hand-out with a raid is saved in BureaucracyForeverDB.outside[raidId] from the moment it is
+-- reported until it is recorded (#137), so /reload and logging out lose none; it is never sent or
+-- exported. After a reload it is not asked again by itself: it is in Unanswered. One made with no raid
+-- selected is kept in memory only, and only once put off with Later.
 -- Several hand-outs are asked one at a time, in order; in a boss fight the question waits until the
 -- fight ends, as notices do. On a run that is not a guild run nothing is asked or kept.
 local _, ns = ...
@@ -26,9 +30,48 @@ local p, frame   -- UI's drawing parts, and the question's frame
 -- The question on screen: { handout, held (the winner's reserve kind), user, method, roll, boss, askBoss }.
 local shown
 local queue = {} -- hand-outs waiting to be asked, oldest first
-local unanswered = {} -- hand-outs put off with Later this session, oldest first
+local memory = {} -- this session's no-raid hand-outs put off with Later, oldest first
 local fighting = false
 local closing = false -- the add-on itself is hiding the question
+
+-- The saved hand-outs of a raid (BureaucracyForeverDB.outside[raidId]), or nil.
+local function savedOf(raidId)
+  return type(ns.db.outside) == "table" and ns.db.outside[raidId] or nil
+end
+
+local function isSaved(h)
+  for _, other in ipairs(savedOf(h.raid) or {}) do
+    if other == h then return true end
+  end
+  return false
+end
+
+local function save(h)
+  if not h.raid or isSaved(h) then return end
+  if type(ns.db.outside) ~= "table" then ns.db.outside = {} end
+  ns.db.outside[h.raid] = ns.db.outside[h.raid] or {}
+  table.insert(ns.db.outside[h.raid], h)
+end
+
+-- Takes the hand-out out of the saved data and the session's list.
+local function forget(h)
+  local list = h.raid and savedOf(h.raid) or {}
+  for i, other in ipairs(list) do
+    if other == h then table.remove(list, i) break end
+  end
+  if h.raid and list[1] == nil and ns.db.outside then ns.db.outside[h.raid] = nil end
+  for i, other in ipairs(memory) do
+    if other == h then table.remove(memory, i) break end
+  end
+end
+
+local function isActive(h)
+  if shown and shown.handout == h then return true end
+  for _, w in ipairs(queue) do
+    if w == h then return true end
+  end
+  return false
+end
 
 local function plain(text) return (tostring(text):gsub("|", "||")) end
 
@@ -187,21 +230,43 @@ end
 -- when it was handed out: its award goes there; nil for none, held as no raid), boss (the loot
 -- window's boss row id, or nil to ask), picked (the boss the officer picked when asked before) }), or
 -- queues it behind the one on screen; in a boss fight it waits until the fight ends.
--- One from the unanswered list leaves it while it is asked. Used for each outside hand-out, and for
--- answering one put off with Later (#137).
+-- One with a raid is saved first (once) and stays saved until recorded; one from the unanswered
+-- list leaves it while it is asked. Used for each outside hand-out, and for answering one put off
+-- with Later or left from an earlier session (#137).
 function OutsideHandout.Ask(handout)
   if ns.Selection.IsQuiet() then return end
-  for i, h in ipairs(unanswered) do
-    if h == handout then table.remove(unanswered, i) break end
+  save(handout)
+  for i, h in ipairs(memory) do
+    if h == handout then table.remove(memory, i) break end
   end
   queue[#queue + 1] = handout
   showNext()
 end
 
--- This session's hand-outs put off with Later, oldest first: { winner, link, item, quantity, at, raid,
--- boss, picked }, as Ask takes them.
--- Kept in memory only; nothing in it is saved, posted or sent.
-function OutsideHandout.Unanswered() return unanswered end
+-- The hand-outs not being asked, oldest first: { winner, link, item, quantity, at, raid, boss, picked },
+-- as Ask takes them. The saved ones (set aside with Later, or left from an earlier session) and this
+-- session's no-raid ones set aside with Later. One whose question is open or waiting is left out.
+-- Empty when the run is not a guild run (the saved ones stay saved).
+-- A new list each call; nothing in it is posted or sent.
+function OutsideHandout.Unanswered()
+  if ns.Selection.IsQuiet() then return {} end
+  local all = {}
+  for _, list in pairs(type(ns.db.outside) == "table" and ns.db.outside or {}) do
+    for _, h in ipairs(list) do all[#all + 1] = h end
+  end
+  for _, h in ipairs(memory) do all[#all + 1] = h end
+  local order = {}
+  for i, h in ipairs(all) do order[h] = i end
+  table.sort(all, function(x, y)
+    if (x.at or 0) ~= (y.at or 0) then return (x.at or 0) < (y.at or 0) end
+    return order[x] < order[y]
+  end)
+  local list = {}
+  for _, h in ipairs(all) do
+    if not isActive(h) then list[#list + 1] = h end
+  end
+  return list
+end
 
 -- For the tests: the question on screen and the hand-outs waiting.
 function OutsideHandout.Shown() return shown end
@@ -222,13 +287,14 @@ function OutsideHandout.PickBoss(bossId)
   frame.menu:Hide()
 end
 
--- Later: closes the question, keeps the hand-out in the unanswered list, and asks the next.
+-- Later: closes the question, puts the hand-out back in the unanswered list (a no-raid one in memory
+-- only), and asks the next.
 function OutsideHandout.Later()
   if not shown then return end
   local h = shown.handout
   h.picked = shown.askBoss and shown.boss or nil
   hide()
-  if not ns.Selection.IsQuiet() then unanswered[#unanswered + 1] = h end
+  if not h.raid and not ns.Selection.IsQuiet() then memory[#memory + 1] = h end
   showNext()
 end
 
@@ -259,6 +325,7 @@ function OutsideHandout.Record()
     return nil, why
   end
   hide()
+  forget(h)
   ns.Hub.SendOwn(op, why)
   ns.Hub.SendOwn(ns.Records.Confirm(op.id))
   local snapshot = ns.Raids.Get(op.raid)
