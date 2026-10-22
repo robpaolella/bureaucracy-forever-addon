@@ -933,11 +933,15 @@ local function bossName(raids, id)
   return plain(tostring(id))
 end
 
--- Attach: moves the no-raid awards to the picked raid, so they copy out with it.
+-- Attach: moves the no-raid awards to the picked raid, so they copy out with it, and sends their
+-- operations to the other officers.
 local function attach()
   local raids, status = ns.Raids.Status()
   local raid = attachPicked(raids, status)
-  if raid then ns.Records.Attach(raid.id) end
+  if raid then
+    local _, moved = ns.Records.Attach(raid.id)
+    for _, op in ipairs(moved or {}) do ns.Hub.SendOwn(op, "recorded") end
+  end
   UI.RefreshSync()
 end
 

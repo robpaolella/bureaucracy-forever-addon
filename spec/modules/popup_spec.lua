@@ -1418,6 +1418,122 @@ describe("Popup", function()
           assert.are.same({ true, "[Practice] Loot · Lucifron" }, { m.practice, m.title })
         end)
       end)
+
+      describe("sending to the other officers (#98)", function()
+        local RESERVES = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } }
+
+        -- The operations sent to the group once the sending queue has run, in order, each as
+        -- { type, id, raid code }, rebuilt from its O messages.
+        local function sentOps()
+          for _ = 1, 60 do wow.advance(1) end
+          local whole, order = {}, {}
+          for _, message in ipairs(wow.addonMessages) do
+            local chunk = message.text:find("^O;") and assert(ns.Sync.ParseChunk(message.text))
+            if chunk then
+              if not whole[chunk.msgid] then
+                whole[chunk.msgid] = { raid = chunk.raid }
+                order[#order + 1] = chunk.msgid
+              end
+              whole[chunk.msgid][chunk.n] = chunk.piece
+            end
+          end
+          local ops = {}
+          for i, msgid in ipairs(order) do
+            local op = assert(ns.OpText.Decode(table.concat(whole[msgid])))
+            ops[i] = { op.type, op.id, whole[msgid].raid }
+          end
+          return ops
+        end
+
+        -- The raid's operations as sentOps shows them.
+        local function heldOps()
+          local ops = {}
+          for i, op in ipairs(ns.Records.Ops("raid00001")) do ops[i] = { op.type, op.id, "SA0001" } end
+          return ops
+        end
+
+        local function copy(value)
+          if type(value) ~= "table" then return value end
+          local t = {}
+          for k, v in pairs(value) do t[k] = copy(v) end
+          return t
+        end
+
+        it("sends a give, its confirm and an undo once each, with the raid", function()
+          raid()
+          drop({ { id = 1 } })
+          local key = assert(give(1)).awardKey
+          confirm(1, "Ashla Brightwater")
+          assert.is_truthy(click(ns.Popup.Choose, key, "undo"))
+          local held = heldOps()
+          assert.are.same({ "award", "confirm", "void" }, { held[1][1], held[2][1], held[3][1] })
+          assert.are.same(heldOps(), sentOps())
+        end)
+
+        it("sends a not confirmed, a give to someone else and a not handed out once each", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          local attempt = assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
+          wow.advance(ns.Tracking.confirmWait)
+          assert.is_truthy(click(ns.Popup.NotHandedOut, attempt.awardKey))
+          local types = {}
+          for i, op in ipairs(heldOps()) do types[i] = op[1] end
+          assert.are.same({ "award", "not-confirmed", "replace", "not-confirmed", "void" }, types)
+          assert.are.same(heldOps(), sentOps())
+        end)
+
+        it("sends a D/B award", function()
+          raid()
+          drop({ { id = 1 } })
+          assert.is_true(ns.Popup.SetDBPick("Doran Vale"))
+          assert(click(ns.Popup.GiveDB, 1, 1, "Doran Vale"))
+          confirm(1, "Doran Vale")
+          assert.are.same(heldOps(), sentOps())
+          assert.are.same({ "award", "confirm" }, { heldOps()[1][1], heldOps()[2][1] })
+        end)
+
+        it("sends nothing in practice mode", function()
+          raid({ reserves = RESERVES })
+          wow.slash("/bf practice")
+          wow.state.group = GROUP
+          drop({ { id = 1 } })
+          local key = assert(give(1)).awardKey
+          wow.advance(ns.Tracking.confirmWait)
+          assert.is_truthy(click(ns.Popup.NotHandedOut, key))
+          assert.are.equal(3, #ns.Records.Ops("raid00001"))
+          assert.are.same({}, sentOps())
+        end)
+
+        it("sends nothing made while not a guild run, though a void of a held award is recorded", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          assert.is_true(ns.Selection.ChooseOff())
+          assert.is_truthy(click(ns.Popup.NotHandedOut, key))
+          assert.are.equal("void", ns.Records.Ops("raid00001")[3].type)
+          local sent = sentOps()
+          assert.are.same({ heldOps()[1], heldOps()[2] }, sent)
+        end)
+
+        it("leaves two add-ons in one group with the same records after a give, a not confirmed "
+          .. "and a replace", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
+          confirm(1, "Doran Vale")
+          sentOps()
+          local messages, mine = copy(wow.addonMessages), copy(ns.db)
+          assert.are.equal(4, #mine.ops.raid00001)
+          -- The other officer's add-on, in the same group with the same raid, hears every message.
+          setup({ code = "SA0001", bosses = BOSSES, reserves = RESERVES }, GROUP)
+          wow.state.player = "Doran Vale"
+          for _, message in ipairs(messages) do
+            if message.text:find("^O;") then
+              wow.fire("CHAT_MSG_ADDON", message.prefix, message.text, message.channel, "Masterlooter")
+            end
+          end
+          assert.are.same(mine.awards, ns.db.awards)
+          assert.are.same(mine.ops, ns.db.ops)
+          -- What it applied, it never sends on.
+          assert.are.same({}, sentOps())
+        end)
+      end)
     end)
   end)
 

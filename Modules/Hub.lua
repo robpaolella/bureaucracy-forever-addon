@@ -340,7 +340,9 @@ function Hub.SendOp(op, raidId)
     return false
   end
   local msgid = Sync.NewMsgId()
-  local bodies = Sync.EncodeOp(op, snapshot.code, bare(UnitName("player")), msgid)
+  -- Under the officer who made it, who may be another character of this account (an attached
+  -- no-raid award); the receiver then records this one as having forwarded it.
+  local bodies = Sync.EncodeOp(op, snapshot.code, ns.Records.Author(op), msgid)
   local messages = {}
   for n, body in ipairs(bodies) do messages[n] = { body = body } end
   local queued, why = enqueue(messages)
@@ -350,6 +352,16 @@ function Hub.SendOp(op, raidId)
   end
   remember(msgid, bodies)
   return true
+end
+
+-- Sends an operation this add-on just made, with the outcome Records returned for it (#98): only a
+-- newly saved one ("recorded" or "pending", never "replayed" or a refusal), for its own raid.
+-- Practice operations, those made while not a guild run and no-raid ones (Attach sends those) are
+-- never sent. Returns true once queued. Every place that makes a local operation calls it.
+function Hub.SendOwn(op, outcome)
+  if not op or (outcome ~= "recorded" and outcome ~= "pending") then return false end
+  if op.practice or not op.raid or ns.Selection.IsQuiet() then return false end
+  return Hub.SendOp(op, op.raid)
 end
 
 -- Whispers a Q to target, paced with the rest.

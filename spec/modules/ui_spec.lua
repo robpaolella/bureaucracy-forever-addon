@@ -1172,6 +1172,43 @@ describe("the Sync tab", function()
       assert.is_truthy(ns.Sync.CopyOut("raid00001"):find(award.id, 1, true))
     end)
 
+    it("sends the attached awards' operations to the other officers, once (#98)", function()
+      local award = made()
+      local confirm = assert(ns.Records.Confirm(award.id))
+      wow.state.group, wow.state.groupIsRaid = { "Masterlooter", "Ashla Brightwater" }, true
+      paste(pasteText("raid00001"))
+      local function sentIds()
+        for _ = 1, 10 do wow.advance(1) end
+        local ids = {}
+        for _, message in ipairs(wow.addonMessages) do
+          local chunk = message.text:find("^O;") and assert(ns.Sync.ParseChunk(message.text))
+          if chunk then ids[#ids + 1] = { chunk.raid, assert(ns.OpText.Decode(chunk.piece)).id } end
+        end
+        return ids
+      end
+      assert.are.same({}, sentIds())
+      wow.click(function() sync.attach.scripts.OnClick() end)
+      local code = ns.Raids.Get("raid00001").code
+      assert.are.same({ { code, award.id }, { code, confirm.id } }, sentIds())
+    end)
+
+    it("sends attached operations under the character who made them, not the one attaching", function()
+      local maker = wow.state.player
+      local award = made()
+      local confirm = assert(ns.Records.Confirm(award.id))
+      wow.state.group, wow.state.groupIsRaid = { "Doran Vale", "Ashla Brightwater" }, true
+      wow.state.player = "Doran Vale"
+      paste(pasteText("raid00001"))
+      wow.click(function() sync.attach.scripts.OnClick() end)
+      for _ = 1, 10 do wow.advance(1) end
+      local authors = {}
+      for _, message in ipairs(wow.addonMessages) do
+        local chunk = message.text:find("^O;") and assert(ns.Sync.ParseChunk(message.text))
+        if chunk then authors[assert(ns.OpText.Decode(chunk.piece)).id] = chunk.author end
+      end
+      assert.are.same({ [award.id] = maker, [confirm.id] = maker }, authors)
+    end)
+
     it("attaches to another raid when it is picked from the menu", function()
       local award = made()
       paste(pasteText("raid00001"))
