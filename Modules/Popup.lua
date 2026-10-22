@@ -862,6 +862,8 @@ function Popup.TryAgain(key)
   return attempt
 end
 
+local otherHolders
+
 -- The people the award's item could go to instead: the item's other reserve holders, hard
 -- reserves first, each with the method the new award carries. Trials, holders who already have
 -- it and the site's blocked holders are left out. key is the award's key. Returns a list of
@@ -871,11 +873,18 @@ end
 function Popup.GiveElseList(key)
   local award, why = unconfirmedAward(key)
   if not award then return nil, why end
+  return otherHolders(key, award, true)
+end
+
+-- The award's item's reserve holders other than its winner, as GiveElseList lists them. atCorpse:
+-- the item is still on the corpse, so the open loot window (its candidates, practice mode's made-up
+-- reserves) counts; Pick winner's item has left it, so only the raid does.
+otherHolders = function(key, award, atCorpse)
   local snapshot = ns.Raids.Get(award.raid)
   local reserves = snapshot and snapshot.reserves or {}
   local holders = reserves[award.item] or reserves[tostring(award.item)] or {}
   -- Practice: the window's made-up holders, group and candidates stand in for the real ones.
-  local made = ns.Practice() and madeUp[award.item]
+  local made = atCorpse and ns.Practice() and madeUp[award.item]
   if made then holders = made.holders end
   local awards = {}
   for _, a in ipairs(snapshot and snapshot.awards or {}) do awards[#awards + 1] = a end
@@ -883,7 +892,7 @@ function Popup.GiveElseList(key)
     if a.key ~= key then awards[#awards + 1] = a end
   end
   -- A name not loaded yet ("Unknown") can't be matched, so then nobody counts as unable to receive.
-  local slot = findSlot(key, award.item)
+  local slot = atCorpse and findSlot(key, award.item)
   local cands, unknown
   if slot then cands, unknown = candidates(slot) end
   if unknown then cands = nil end
@@ -1035,6 +1044,191 @@ end
 function Popup.UndoButton()
   local locked = Popup.ChatLocked()
   return { enabled = not locked, tooltip = locked and NC_FIGHT_TOOLTIP or nil }
+end
+
+-- Pick winner (#126; design/115-pick-winner, version A): who has the item of an award undone after
+-- it left the corpse. Built from the award's key alone, so it works after a /reload; nothing is
+-- handed out. pick, the officer's picker as it stands: kind ("holder" with char, "roll" with member
+-- and roll as typed, "db" or "again"; nil before a choice), note (as typed; nil until edited), and id
+-- and newKey (Records.NewId: the correction's ids, so the line shown is the line posted).
+local PICK_INTRO = " Choose who has it now. Nothing is handed out: this records the winner and posts one"
+  .. " correction line."
+local PICK_FIGHT = "Boss fight in progress. The game locks chat for add-ons, so the correction waits until it"
+  .. " ends."
+local PICK_LOCKED = "Chat is locked until the fight ends."
+local PICK_WHY = {
+  choose = "Choose who gets it.", member = "Choose who it went to.",
+  ["roll needed"] = "Type their roll, 1 to 100.", ["bad roll"] = "A roll is 1 to 100.",
+  ["too long"] = "The note can be up to 200 characters.",
+  ["not a contender"] = REFUSALS["not a contender"], ["not in raid"] = REFUSALS["not in raid"],
+  fight = "Chat is locked in the boss fight. The correction waits until it ends.",
+  ["not loot master"] = "Only the loot master can change awards.",
+  ["not needed"] = "This award no longer needs a winner.",
+}
+local MAX_NOTE = 200
+
+-- The award, if it was undone after the game confirmed it and no one has it on the record since:
+-- the item left the corpse (derived, not stored). Or nil.
+local function needsWinner(key)
+  local award = ns.Records.Get(key)
+  if award and award.voided and award.state == "confirmed" and not award.replacedBy then return award end
+end
+
+-- The raid members who can be picked by open roll: the group but the previous winner, by name.
+local function rollMembers(award)
+  local list = {}
+  for _, name in ipairs(roster()) do
+    if not (award.char and bare(name) == bare(award.char)) then list[#list + 1] = name end
+  end
+  table.sort(list)
+  return list
+end
+
+-- The note the picker holds: as typed, else "Traded by" the previous winner (empty for the previous
+-- winner picked again, or a disenchant/bank award, which had none).
+local function pickNote(award, pick)
+  if pick.note then return pick.note end
+  if pick.kind == "again" or not award.char then return "" end
+  return "Traded by " .. award.char
+end
+
+-- The new award the pick makes (Records.Award's fields, the note included), or nil and why: "choose",
+-- "member", "roll needed", "bad roll", "not a contender", "not in raid" or "too long".
+local function pickedAward(key, award, pick)
+  local new = { boss = award.boss, item = award.item }
+  if pick.kind == "holder" then
+    local holder
+    for _, h in ipairs(otherHolders(key, award)) do
+      if h.char == pick.char then holder = h end
+    end
+    if not holder then return nil, "not a contender" end
+    if not holder.available then return nil, "not in raid" end
+    new.char, new.user, new.method = holder.char, holder.user, holder.method
+  elseif pick.kind == "roll" then
+    if not pick.member then return nil, "member" end
+    local inRaid
+    for _, name in ipairs(rollMembers(award)) do inRaid = inRaid or name == pick.member end
+    if not inRaid then return nil, "not in raid" end
+    local text = strtrim(pick.roll or "")
+    if text == "" then return nil, "roll needed" end
+    local roll = text:match("^%d+$") and tonumber(text)
+    if not (roll and roll >= 1 and roll <= 100) then return nil, "bad roll" end
+    new.char, new.method, new.roll = pick.member, "OPEN_ROLL", roll
+  elseif pick.kind == "db" then
+    new.method = "DISENCHANT_BANK"
+  elseif pick.kind == "again" and award.method ~= "DISENCHANT_BANK" then
+    new.char, new.user, new.method, new.roll = award.char, award.user, award.method, award.roll
+  else
+    return nil, "choose"
+  end
+  local note = strtrim(pickNote(award, pick))
+  if #note > MAX_NOTE then return nil, "too long" end
+  new.note = note ~= "" and note or nil
+  return new
+end
+
+-- The correction line's data for OpText.BuildLine.
+local function correctionData(key, award, new, id, newKey, practice)
+  local snapshot = ns.Raids.Get(award.raid)
+  return { raid = snapshot and snapshot.code, id = id, key = key, newKey = newKey, item = award.item,
+    link = linkOf(key, award), boss = award.boss, method = new.method, roll = new.roll, winner = new.char,
+    oldWinner = award.char, practice = practice }
+end
+
+-- The picker of an award that needs a winner, or nil when it doesn't ("not needed"). Fields: key,
+-- link, intro, fight (the boss fight note, while chat is locked), holders ({ char, method, kind,
+-- available, reason, selected }; hard reserves first), empty (nobody else reserved it), roll
+-- ({ selected, members = { { name, selected } }, member, roll, bad (the roll is shown in red) }), db
+-- ({ selected }), again (the previous winner: { char, method, kind, selected }; nil for a
+-- disenchant/bank award), note, line (the exact line Post correction posts) or text (why it can't
+-- post yet, or why the line can't be built), post ({ enabled, tooltip }), locked (why Post waits)
+-- and refusal (why the last Post was refused).
+function Popup.Picker(key, pick)
+  local award = needsWinner(key)
+  if not award then return nil, "not needed" end
+  local link = linkOf(key, award)
+  local locked = Popup.ChatLocked()
+  local model = { key = key, link = link, fight = locked and PICK_FIGHT or nil, holders = {},
+    note = pickNote(award, pick), refusal = refusals[key],
+    intro = link .. " was undone after " .. (award.char and (award.char .. " already had it.")
+      or "it went to disenchant/bank.") .. PICK_INTRO }
+  for _, h in ipairs(otherHolders(key, award)) do
+    local hard = h.method == "HR"
+    model.holders[#model.holders + 1] = { char = h.char, method = hard and LABELS["hr-single"] or LABELS.sr,
+      kind = hard and "hr" or "sr", available = h.available, reason = h.reason,
+      selected = pick.kind == "holder" and pick.char == h.char }
+  end
+  if #model.holders == 0 then model.empty = "Nobody else reserved this item." end
+  local members = {}
+  for i, name in ipairs(rollMembers(award)) do
+    members[i] = { name = name, selected = name == pick.member }
+  end
+  model.roll = { selected = pick.kind == "roll", members = members, member = pick.member,
+    roll = pick.roll or "" }
+  model.db = { selected = pick.kind == "db" }
+  if award.method ~= "DISENCHANT_BANK" then
+    local hard = award.method == "HR"
+    model.again = { char = award.char, kind = hard and "hr" or award.method == "SR" and "sr" or "open",
+      method = hard and LABELS["hr-single"] or award.method == "SR" and LABELS.sr or LABELS.open,
+      selected = pick.kind == "again" }
+  end
+  local new, why = pickedAward(key, award, pick)
+  model.roll.bad = pick.kind == "roll" and (why == "bad roll") or nil
+  if new then
+    local line, problem = ns.OpText.BuildLine("correction",
+      correctionData(key, award, new, pick.id, pick.newKey, award.practice))
+    model.line = line
+    if not line then model.text = "The raid chat line can't be posted: " .. problem .. "." end
+  else
+    model.text = PICK_WHY[why]
+  end
+  model.locked = locked and PICK_LOCKED or nil
+  model.post = { enabled = new ~= nil and not locked,
+    tooltip = model.locked or (not new and model.text) or nil }
+  return model
+end
+
+-- Post correction: records who has the award's item now, as a replacement of the voided award (the
+-- first void's reason stands), confirmed at once with no hand-out (the item left the corpse), and
+-- posts its one correction line. Each operation is sent to the other officers. A line that can't be
+-- built or posted is not posted: the record stands, the officer is told, and the second value is
+-- the window's note. Returns the replace operation, or nil and why: "fight", "not loot master",
+-- "not needed", pickedAward's reasons or Records.Replace's. A refusal changes nothing and posts
+-- nothing; it is kept for the picker (Refused) and logged.
+function Popup.Correct(key, pick)
+  local award = needsWinner(key)
+  local new, why
+  if Popup.ChatLocked() then why = "fight"
+  elseif not isLootMaster() then why = "not loot master"
+  elseif not award then why = "not needed"
+  else new, why = pickedAward(key, award, pick) end
+  local op, conf, outcome
+  if new then
+    new.id = pick.newKey
+    op, why = ns.Records.Replace(key, new, { id = pick.id })
+  end
+  if not op then
+    ns.Log("Pick winner for " .. (award and linkOf(key, award) or tostring(key)) .. " refused: "
+      .. tostring(why))
+    Popup.Refused(key, why, PICK_WHY[why])
+    return nil, why
+  end
+  Popup.Refused(key, nil)
+  ns.Hub.SendOwn(op, why)
+  conf, outcome = ns.Records.Confirm(op.award.id)
+  ns.Hub.SendOwn(conf, outcome)
+  if not conf then
+    ns.Log("Pick winner: the new award " .. op.award.id .. " wasn't confirmed: " .. tostring(outcome))
+  end
+  local data = correctionData(key, award, new, op.id, op.award.id, op.practice)
+  local who = new.char and (new.char .. " now has " .. data.link)
+    or (data.link .. " now goes to disenchant/bank")
+  if post("correction", data, nil, "Correction line for " .. data.link,
+    who .. " on the record, but its raid chat line couldn't be posted.") then
+    return op
+  end
+  return op, who .. " on the record, but the correction line couldn't be posted in raid chat. Tell the raid"
+    .. " yourself. Type /bf log for why."
 end
 
 -- The three choices of a not confirmed award, built from its key alone, so the Awards tab has them

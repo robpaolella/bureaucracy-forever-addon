@@ -93,6 +93,10 @@ local function newId(prefix)
   return id
 end
 
+-- A new id for an operation of kind ("award", "replace"...), held by nothing yet: the Pick winner
+-- picker shows the line it will post before recording it (#126).
+function Records.NewId(kind) return newId(PREFIX[kind]) end
+
 -- The same payload: every field but the times (spec 4.2).
 local function same(a, b)
   if type(a) ~= "table" or type(b) ~= "table" then return a == b end
