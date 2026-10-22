@@ -188,6 +188,8 @@ end
 ns.On("ADDON_LOADED", function(name)
   if name ~= ADDON_NAME then return end
   Inbox.Read(BureaucracyLootInbox)
+  -- Hand-outs of a raid that left the inbox, or was removed before, go with it (#143).
+  ns.Raids.DropHandouts()
   for _, problem in ipairs(read.problems) do ns.Print(problem) end
   for _, problem in ipairs(Inbox.Merge()) do ns.Print(problem) end
   -- The helper reads the chat log for awards sent live. Only when it is present, so nobody
