@@ -13,8 +13,8 @@ local function chooseRaid(ns)
     formatVersion = 1, raid = RAID, code = "SA0001", env = "staging", name = "Molten Core",
     startsAt = T0, durationMin = 240, generated = T0 - 100,
     addon = { version = "0.1.0", url = "https://example.invalid/addon" },
-    bosses = { { id = "b1", name = "Lucifron", trash = false, items = { 100 } },
-      { id = "b2", name = "Magmadar", trash = false, items = { 101 } } },
+    bosses = { { id = "boss1", name = "Lucifron", trash = false, items = { 100 } },
+      { id = "boss2", name = "Magmadar", trash = false, items = { 101 } } },
     reserves = {}, awards = {},
   }
   ns.Raids.Load(assert(ns.Snapshot.Validate(tree, "0.1.0")), "pasted")
@@ -22,7 +22,7 @@ local function chooseRaid(ns)
 end
 
 local function award(ns, fields)
-  local record = { key = "k" .. math.random(1e9), raid = RAID, boss = "b1", item = 100, char = "Ana Vale",
+  local record = { key = "k" .. math.random(1e9), raid = RAID, boss = "boss1", item = 100, char = "Ana Vale",
     method = "HR", at = T0 + 60, state = "confirmed", stateAt = T0 + 60 }
   for k, v in pairs(fields) do record[k] = v end
   ns.db.awards = ns.db.awards or {}
@@ -98,9 +98,9 @@ describe("the Awards tab", function()
   describe("the list", function()
     it("groups by boss, in time order inside each, with the columns' text", function()
       chooseRaid(ns)
-      award(ns, { boss = "b2", item = 101, char = "Bo Marsh", method = "SR", at = T0 + 600 })
-      award(ns, { boss = "b1", char = "Cy Dune", method = "OPEN_ROLL", roll = 91, at = T0 + 200 })
-      award(ns, { boss = "b1", char = "Ana Vale", method = "HR", at = T0 + 100 })
+      award(ns, { boss = "boss2", item = 101, char = "Bo Marsh", method = "SR", at = T0 + 600 })
+      award(ns, { boss = "boss1", char = "Cy Dune", method = "OPEN_ROLL", roll = 91, at = T0 + 200 })
+      award(ns, { boss = "boss1", char = "Ana Vale", method = "HR", at = T0 + 100 })
       local tab = open(ns)
       assert.are.same({
         { "Lucifron · 2 items" },
@@ -638,7 +638,7 @@ describe("the Awards tab's Undo", function()
   -- An award recorded in the selected raid, then given state: "confirmed" (the game said so, the
   -- default), "manual" (made by hand on the site) or left as "announced" or "not-confirmed".
   local function given(fields, state)
-    local f = { boss = "b1", item = 100, char = "Ana Vale", method = "HR" }
+    local f = { boss = "boss1", item = 100, char = "Ana Vale", method = "HR" }
     for k, v in pairs(fields or {}) do f[k] = v end
     local op = assert(ns.Records.Award(f))
     state = state or "confirmed"
@@ -827,17 +827,6 @@ describe("the Awards tab's Undo", function()
       assert.are.equal("1 award · 1 needs a winner", tab.summary:GetText())
     end)
 
-    it("Pick winner does nothing yet", function()
-      local key = given()
-      assert(ns.Records.Void(key))
-      local tab = openTab()
-      local sent = #wow.sent
-      local pick = needsRows(tab)[1].pick
-      if pick.scripts.OnClick then click(pick) end
-      assert.are.equal(sent, #wow.sent)
-      assert.are.equal(1, #needsRows(tab))
-    end)
-
     it("comes too for a confirmed Disenchant/bank award undone", function()
       local key = given({ char = nil, method = "DISENCHANT_BANK" })
       assert(ns.Records.Void(key))
@@ -856,18 +845,22 @@ describe("the Awards tab's Undo", function()
         assert(ns.Records.Void(given({ char = "Bo Marsh" }, "not-confirmed")))
         assert(ns.Records.Void(given({ char = "Cy Dune" }, "manual")))
         assert(ns.Records.Replace(given({ char = "Di Fenn" }),
-          { boss = "b1", item = 100, char = "Ed Gale", method = "SR" }))
+          { boss = "boss1", item = 100, char = "Ed Gale", method = "SR" }))
         local tab = openTab()
         assert.are.same({}, needsRows(tab))
         assert.is_falsy(tab.summary:GetText():find("needs a winner", 1, true))
       end)
 
-    it("shows Pick winner greyed for another officer", function()
+    it("shows Pick winner greyed for another officer, a click opening nothing", function()
       wow.state.lootMethod = { "master", nil, 2 }
       assert(ns.Records.Void(given()))
-      local pick = needsRows(openTab())[1].pick
+      local tab = openTab()
+      local pick = needsRows(tab)[1].pick
       assert.are.equal("Pick winner", pick.label:GetText())
       assert.is_false(pick:IsEnabled())
+      assert.is_nil(pick.scripts.OnClick)
+      assert.is_nil(tab.picks[1])
+      assert.is_false(tab.picker:IsShown())
     end)
 
     it("follows a practice award undone in the practice group, not counted in the summary", function()
@@ -879,6 +872,181 @@ describe("the Awards tab's Undo", function()
       assert.are.equal("- Practice awards (1) · never sent to the guild site", tab.shown[3].heading:GetText())
       assert.are.equal(1, #needsRows(tab))
       assert.are.equal(tab.shown[#tab.shown], needsRows(tab)[1])
+    end)
+  end)
+
+  describe("Pick winner", function()
+    local INTRO = LINK .. " was undone after Ana Vale already had it. Choose who has it now."
+      .. " Nothing is handed out: this records the winner and posts one correction line."
+
+    -- A confirmed award to Ana Vale undone, so it needs a winner; returns its key.
+    local function undone(fields)
+      local key = given(fields)
+      assert(ns.Records.Void(key))
+      return key
+    end
+
+    local function y(piece) return -piece.points[1].y end
+
+    -- Types text into an edit box, as the officer does.
+    local function typeInto(box, text)
+      box:SetText(text)
+      box.scripts.OnTextChanged(box, true)
+    end
+
+    it("opens the box under its row for the loot master, with nothing chosen; a second click closes it",
+      function()
+        undone()
+        given({ char = "Bo Marsh", at = time() + 60 })
+        local tab = openTab()
+        local needs = needsRows(tab)[1]
+        assert.is_false(tab.picker:IsShown())
+        click(needs.pick)
+        needs = needsRows(tab)[1]
+        local p = tab.picker
+        assert.are.equal(p, needs.picker)
+        assert.is_true(p:IsShown())
+        assert.are.same({ "TOPLEFT", tab.child, "TOPLEFT", 48 }, { p.points[1].point, p.points[1].relativeTo,
+          p.points[1].relativePoint, p.points[1].x })
+        assert.is_true(y(p) >= y(needs.item) + 20)
+        assert.is_true(y(rowOf(tab, "Bo Marsh").item) >= y(p) + p:GetHeight())
+        assert.are.equal(INTRO, p.intro:GetText())
+        assert.are.equal("|cffffd100Note for the guild site|r |cff808080(optional, never posted in chat)|r",
+          p.noteLabel:GetText())
+        assert.are.equal("Traded by Ana Vale", p.noteEdit:GetText())
+        assert.is_true(p.noteEdit:IsShown())
+        assert.are.equal("Posts in raid chat", p.previewHead:GetText())
+        assert.are.equal("Choose who gets it.", p.preview:GetText())
+        assert.are.equal("Post correction", p.post.label:GetText())
+        assert.is_false(p.post:IsEnabled())
+        assert.are.equal("Choose who gets it.", p.post.tip)
+        assert.are.equal("Cancel", p.cancel.label:GetText())
+        assert.is_true(p.cancel:IsEnabled())
+        -- In the box's order: intro, note box, preview, then the buttons side by side.
+        assert.is_true(y(p.intro) < y(p.noteLabel) and y(p.noteLabel) < y(p.noteEdit))
+        assert.is_true(y(p.noteEdit) < y(p.previewHead) and y(p.previewHead) < y(p.preview))
+        assert.is_true(y(p.preview) < y(p.post) and y(p.post) == y(p.cancel))
+        assert.is_true(p.post.points[1].x < p.cancel.points[1].x)
+        click(needs.pick)
+        assert.is_false(tab.picker:IsShown())
+        assert.is_nil(needsRows(tab)[1].picker)
+      end)
+
+    it("stays shown while the officer types a note, so the note box keeps the keyboard", function()
+      undone()
+      local tab = openTab()
+      click(needsRows(tab)[1].pick)
+      local hidden = 0
+      tab.picker.scripts.OnHide = function() hidden = hidden + 1 end
+      for _, text in ipairs({ "T", "Tr", "Tra" }) do typeInto(tab.picker.noteEdit, text) end
+      assert.are.equal(0, hidden)
+      assert.are.equal("Tra", tab.picker.noteEdit:GetText())
+      click(tab.picker.cancel)
+      assert.are.equal(1, hidden)
+    end)
+
+    it("is open under one row at a time", function()
+      undone()
+      undone({ char = "Bo Marsh", at = time() + 60 })
+      local tab = openTab()
+      click(needsRows(tab)[1].pick)
+      click(needsRows(tab)[2].pick)
+      assert.is_nil(needsRows(tab)[1].picker)
+      assert.are.equal(tab.picker, needsRows(tab)[2].picker)
+      assert.are.equal("Traded by Bo Marsh", tab.picker.noteEdit:GetText())
+    end)
+
+    it("Cancel closes it and changes nothing", function()
+      undone()
+      local tab = openTab()
+      click(needsRows(tab)[1].pick)
+      typeInto(tab.picker.noteEdit, "Lost a bet")
+      local ops, sent = #ns.Records.Ops(RAID), #wow.sent
+      click(tab.picker.cancel)
+      assert.is_false(tab.picker:IsShown())
+      assert.are.equal(ops, #ns.Records.Ops(RAID))
+      assert.are.equal(sent, #wow.sent)
+      assert.are.equal(1, #needsRows(tab))
+      click(needsRows(tab)[1].pick)
+      assert.are.equal("Traded by Ana Vale", tab.picker.noteEdit:GetText())
+    end)
+
+    it("closes when its award no longer needs a winner", function()
+      local key = undone()
+      local tab = openTab()
+      click(needsRows(tab)[1].pick)
+      assert(ns.Records.Replace(key, { boss = "boss1", item = 100, char = "Bo Marsh", method = "SR" }))
+      ns.UI.RefreshAwards()
+      assert.is_false(tab.picker:IsShown())
+      assert.is_nil(tab.pickOpen)
+    end)
+
+    it("Post correction records and posts the line shown, closes, and the row and summary follow", function()
+      given({ char = "Bo Marsh", at = time() - 60 })
+      local key = undone()
+      local tab = openTab()
+      assert.are.equal("1 award · 1 needs a winner", tab.summary:GetText())
+      click(needsRows(tab)[1].pick)
+      local p = tab.picker
+      click(p.db)
+      typeInto(p.noteEdit, "Sharded by mistake")
+      assert.is_true(p.post:IsEnabled())
+      local line = p.preview:GetText()
+      assert.are.equal("Correction: " .. LINK .. " → disenchant/bank, not Ana Vale", line:match("^(.-) <BF"))
+      local sent = #wow.sent
+      click(p.post)
+      assert.are.equal(sent + 1, #wow.sent)
+      assert.are.same({ text = line, channel = "RAID" }, wow.sent[#wow.sent])
+      assert.is_false(p:IsShown())
+      local new = ns.Records.Get(ns.Records.Get(key).replacedBy)
+      assert.are.equal("Sharded by mistake", new.note)
+      assert.are.equal("confirmed", new.state)
+      -- The struck row stays; the new one ends its boss group, with Undo and the corrected line under it.
+      assert.are.same({}, needsRows(tab))
+      assert.are.equal("2 awards", tab.summary:GetText())
+      assert.is_true(rowOf(tab, "Ana Vale").voided)
+      local row = tab.shown[#tab.shown]
+      assert.are.same({ grey(clock(new.at)), "|T1:14|t " .. LINK, "", "Disenchant/bank", "", "" },
+        { row.time:GetText(), row.item:GetText(), row.winner:GetText(), row.how:GetText(), row.roll:GetText(),
+          row.note:GetText() })
+      assert.are.equal("Lucifron · 3 items", tab.shown[1].heading:GetText())
+      assert.is_true(row.undo:IsShown())
+      local corrected = row.corrected
+      assert.are.equal("Corrected " .. clock(new.at), corrected:GetText())
+      assert.is_true(corrected:IsShown())
+      assert.are.same({ "TOPRIGHT", 616 }, { corrected.points[1].point, corrected.points[1].x })
+      assert.are.equal(y(row.undo) + 20 + 4, y(corrected))
+      assert.is_nil(rowOf(tab, "Bo Marsh").corrected)
+    end)
+
+    it("names the winner on the new row and keeps Undo working there", function()
+      local key = undone()
+      local tab = openTab()
+      click(needsRows(tab)[1].pick)
+      click(tab.picker.again)
+      click(tab.picker.post)
+      local row = tab.shown[#tab.shown]
+      assert.are.equal("Ana Vale", row.winner:GetText())
+      assert.are.equal("Corrected " .. clock(ns.Records.Get(ns.Records.Get(key).replacedBy).at),
+        row.corrected:GetText())
+      click(row.undo)
+      assert.is_true(ns.Records.Get(ns.Records.Get(key).replacedBy).voided)
+    end)
+
+    it("a refused Post correction leaves the box open and changes nothing", function()
+      undone()
+      local tab = openTab()
+      click(needsRows(tab)[1].pick)
+      click(tab.picker.db)
+      wow.state.chatLockdown = true -- a boss fight the tab hasn't redrawn for
+      local ops, sent = #ns.Records.Ops(RAID), #wow.sent
+      click(tab.picker.post)
+      assert.is_truthy(ns.log[#ns.log].text:find("refused: fight", 1, true))
+      assert.is_true(tab.picker:IsShown())
+      assert.are.equal(1, #needsRows(tab))
+      assert.are.equal(ops, #ns.Records.Ops(RAID))
+      assert.are.equal(sent, #wow.sent)
+      assert.is_false(tab.picker.post:IsEnabled())
     end)
   end)
 end)
