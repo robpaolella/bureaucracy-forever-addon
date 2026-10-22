@@ -42,14 +42,15 @@ local function protected(name, fn)
 end
 
 -- A frame, region or widget. It keeps what the add-on sets on it (shown, size, anchor, scripts,
--- text); the other calls it makes are quiet no-ops, because the stand-in draws nothing.
+-- text, text colour, letter limit); the other calls it makes are quiet no-ops, because the stand-in
+-- draws nothing.
 -- Fields the game's templates add (such as TitleText) are not faked: the add-on checks for them.
 local frameMethods = {}
 local frameMeta = { __index = frameMethods }
 for _, name in ipairs({
   "SetFrameStrata", "SetMovable", "EnableMouse", "SetClampedToScreen", "RegisterForDrag",
-  "RegisterForClicks", "SetAllPoints", "SetFont", "SetTextColor", "SetJustifyH",
-  "EnableMouseWheel", "SetMultiLine", "SetAutoFocus", "SetMaxLetters", "SetTextInsets",
+  "RegisterForClicks", "SetAllPoints", "SetFont", "SetJustifyH",
+  "EnableMouseWheel", "SetMultiLine", "SetAutoFocus", "SetTextInsets",
 }) do
   frameMethods[name] = function() end
 end
@@ -78,6 +79,8 @@ function frameMethods.GetParent(self) return self.parent end
 function frameMethods.SetID(self, id) self.id = id end
 function frameMethods.GetID(self) return self.id end
 function frameMethods.SetText(self, text) self.text = text end
+function frameMethods.SetTextColor(self, r, g, b) self.textColor = { r, g, b } end
+function frameMethods.SetMaxLetters(self, n) self.maxLetters = n end
 function frameMethods.GetText(self) return self.text end
 function frameMethods.SetSize(self, w, h) self.width, self.height = w, h end
 function frameMethods.SetWidth(self, w) self.width = w end
