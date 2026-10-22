@@ -352,6 +352,16 @@ function Hub.SendOp(op, raidId)
   return true
 end
 
+-- Sends an operation this add-on just made, with the outcome Records returned for it (#98): only a
+-- newly saved one ("recorded" or "pending", never "replayed" or a refusal), for its own raid.
+-- Practice operations, those made while not a guild run and no-raid ones (Attach sends those) are
+-- never sent. Returns true once queued. Every place that makes a local operation calls it.
+function Hub.SendOwn(op, outcome)
+  if not op or (outcome ~= "recorded" and outcome ~= "pending") then return false end
+  if op.practice or not op.raid or ns.Selection.IsQuiet() then return false end
+  return Hub.SendOp(op, op.raid)
+end
+
 -- Whispers a Q to target, paced with the rest.
 function Hub.sendRequest(target, body)
   local queued, why = enqueue({ { body = body, target = target } })

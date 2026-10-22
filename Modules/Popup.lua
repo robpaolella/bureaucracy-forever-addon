@@ -14,6 +14,8 @@
 -- the same on every redraw of the window.
 -- In practice mode (#17) every award made here is marked practice; the operations that follow an
 -- award (confirm, correction, undo) take the award's own mark, so switching changes only the next.
+-- Every operation recorded here is sent to the other officers right after it is saved
+-- (Hub.SendOwn, #98).
 local _, ns = ...
 
 local Popup = {}
@@ -606,6 +608,7 @@ local function handOut(model, row, chosen, roll, fromRolls)
   local user = fromRolls and row.users[bare(chosen)] or row.user
   local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = chosen,
     user = user, method = method, roll = roll, practice = ns.Practice() })
+  ns.Hub.SendOwn(op, why)
   local data
   if op then
     attempt.awardKey = op.id
@@ -811,6 +814,7 @@ function Popup.GiveDB(slot, item, pick)
   ns.Rolls.End(slot, item)
   local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, method = "DISENCHANT_BANK",
     practice = ns.Practice() })
+  ns.Hub.SendOwn(op, why)
   local data
   if op then
     attempt.awardKey = op.id
@@ -922,6 +926,7 @@ local function replaceWith(key, award, slot, index, fields, told)
   local link = GetLootSlotLink(slot)
   local op, why = ns.Records.Replace(key, { boss = award.boss, item = award.item, char = fields.char,
     user = fields.user, method = fields.method })
+  ns.Hub.SendOwn(op, why)
   local data
   if op then
     attempt.awardKey = op.award.id
@@ -989,6 +994,7 @@ function Popup.NotHandedOut(key)
   if not award then return nil, refused end
   local op, why = ns.Records.Void(key, { reason = "not handed out" })
   if not op then return nil, why end
+  ns.Hub.SendOwn(op, why)
   local link = linkOf(key, award)
   local snapshot = ns.Raids.Get(award.raid)
   post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
@@ -1014,6 +1020,7 @@ function Popup.Undo(key)
   if attempt and attempt.status == "pending" then return nil, "handing out" end
   local op, why = ns.Records.Void(key)
   if not op then return nil, why end
+  ns.Hub.SendOwn(op, why)
   local link = linkOf(key, award)
   local snapshot = ns.Raids.Get(award.raid)
   post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
@@ -1114,6 +1121,7 @@ local function confirmed(attempt)
     return
   end
   local ok, why = ns.Records.Confirm(attempt.awardKey)
+  ns.Hub.SendOwn(ok, why)
   if not ok then ns.Log("Confirming the award " .. attempt.awardKey .. " failed: " .. tostring(why)) end
 end
 ns.Tracking.On("confirmed", confirmed)
@@ -1124,6 +1132,7 @@ ns.Tracking.On("unconfirmed", function(attempt)
   local award = attempt.awardKey and ns.Records.Get(attempt.awardKey)
   if not award or award.voided then return end
   local ok, why = ns.Records.NotConfirmed(attempt.awardKey)
+  ns.Hub.SendOwn(ok, why)
   if ok then
     ns.Log("The game didn't confirm " .. attempt.link .. " to " .. attempt.winner)
   else

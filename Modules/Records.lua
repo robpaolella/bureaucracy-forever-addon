@@ -326,7 +326,8 @@ end
 
 -- Attaches every no-raid award and operation to a loaded raid (the selected one by default):
 -- each takes the raid's id and environment and keeps its key. Returns how many awards were
--- attached, or nil and why ("quiet", "not loaded").
+-- attached and the operations moved, now carrying the raid's id (to send: they never were), or
+-- nil and why ("quiet", "not loaded").
 function Records.Attach(raidId)
   if quiet("attach") then return nil, "quiet" end
   raidId = raidId or current()
@@ -348,7 +349,7 @@ function Records.Attach(raidId)
   for _, op in ipairs(ops) do
     if op.key then effect(awards, ops, op) end
   end
-  return #movedAwards
+  return #movedAwards, movedOps
 end
 
 -- Throws away every no-raid award and operation, and the site voids waiting for those awards'

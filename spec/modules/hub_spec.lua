@@ -489,6 +489,53 @@ describe("Hub sending", function()
     assert.are.same({}, wow.addonMessages)
   end)
 
+  describe("an operation made here (SendOwn, #98)", function()
+    local function sentIds()
+      for _ = 1, 10 do wow.advance(1) end
+      local ids = {}
+      for _, message in ipairs(wow.addonMessages) do
+        local chunk = message.text:find("^O;") and assert(ns.Sync.ParseChunk(message.text))
+        if chunk then ids[#ids + 1] = { chunk.raid, assert(ns.OpText.Decode(chunk.piece)).id } end
+      end
+      return ids
+    end
+
+    it("is sent once for its raid when recorded or pending", function()
+      local made = award()
+      local pending = assert(Records.Confirm("aw-notheld1"))
+      assert.is_true(Hub.SendOwn(made, "recorded"))
+      assert.is_true(Hub.SendOwn(pending, "pending"))
+      assert.are.same({ { "SA0001", made.id }, { "SA0001", pending.id } }, sentIds())
+    end)
+
+    it("is not sent when replayed or refused", function()
+      local made = award()
+      local again, outcome = Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
+        user = "u_ana", method = "HR", roll = 91, id = made.id, at = made.at })
+      assert.are.equal("replayed", outcome)
+      assert.is_false(Hub.SendOwn(again, outcome))
+      assert.is_false(Hub.SendOwn(Records.Void("aw-notheld1", { reason = string.rep("x", 201) })))
+      assert.are.same({}, sentIds())
+    end)
+
+    it("is not sent in practice mode, while not a guild run, or with no raid", function()
+      assert.is_false(Hub.SendOwn(Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
+        method = "HR", practice = true })))
+      local held = award()
+      -- No raid selected: the award is held as no raid, until Attach.
+      ns.db.activeRaid = nil
+      assert.is_false(Hub.SendOwn(Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
+        method = "HR" })))
+      ns.db.activeRaid = RAID
+      assert.is_true(ns.Selection.ChooseOff())
+      local voided, outcome = Records.Void(held.id)
+      assert.are.equal("recorded", outcome)
+      assert.is_false(Hub.SendOwn(voided, outcome))
+      assert.are.same({}, sentIds())
+      assert.is_false(logged("has no loaded raid"))
+    end)
+  end)
+
   it("whispers a Q request's body, paced with the rest", function()
     Hub.SendOp(award(), RAID)
     wow.fire("CHAT_MSG_ADDON", "BFLOOT1", "O;k4m8q2;1/2;SA0001;Zoé Brûlé;K;x", "RAID", ZOE)

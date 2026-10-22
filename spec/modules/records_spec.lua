@@ -255,7 +255,10 @@ describe("Records", function()
       selectRaid(RAID, { env = "production", code = "PA0001" })
       Records.Award(ana({ id = "aw-7f3k2m9q" }))
       assert.is_nil(Records.Get("aw-7f3k2m9q").voided)
-      assert.are.equal(1, Records.Attach())
+      local count, moved = Records.Attach()
+      assert.are.equal(1, count)
+      -- The operations moved, now in the raid, to send (#98): the raid's own award isn't one.
+      assert.are.same({ award, confirm, void }, moved)
 
       local attached, raidId = Records.Get(award.id)
       assert.are.same({ RAID, RAID, "production", "confirmed" },
