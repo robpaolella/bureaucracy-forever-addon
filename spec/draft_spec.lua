@@ -3,12 +3,15 @@ local Draft = dofile("release/Draft.lua")
 local TOC = "## Version: 0.0.0-dev\nCore.lua\nInbox.lua\n"
 
 -- A stand-in for git and GitHub: a straight line of commits on main, published tags and drafts.
--- Each commit: { pr = { number, title, body } } or { subject }, plus toc to change the .toc.
+-- Each commit: { pr = { number, title, body, how } } (how: nil squash-merged, "merge" merge-commit
+-- merged or "open": not in the closed list) or { subject }, plus toc to change the .toc.
 local function repo(commits)
   local self = { commits = {}, releases = {}, published = {}, calls = {}, waits = {}, built = {}, nextId = 1 }
   local index = {}
   function self.add(commit)
-    local sha = string.rep(string.format("%x", (#self.commits + 1) % 16), 40)
+    local n = #self.commits + 1
+    -- One repeated digit for the first few (tests name them), a unique number after that.
+    local sha = n < 16 and string.rep(string.format("%x", n), 40) or string.format("%040x", n)
     commit.sha = sha
     commit.toc = commit.toc or (self.commits[#self.commits] or { toc = TOC }).toc
     self.commits[#self.commits + 1] = commit
@@ -75,6 +78,18 @@ local function repo(commits)
         if release.id == tonumber(id) then return true, tostring(not release.published) .. "\n" end
       end
       return false, "HTTP 404"
+    end
+    if args[1] == "api" and args[2] == "--paginate" and args[3]:find("/pulls?", 1, true) then
+      -- The closed pull requests, as the list's jq prints them: squash-merged ones (pr[4] nil).
+      local out = {}
+      for _, commit in ipairs(self.commits) do
+        local pr = commit.pr
+        if pr and not pr[4] and not self.noList then
+          out[#out + 1] = "\30" .. commit.sha .. "\n" .. pr[1] .. "\n" .. pr[2] .. "\n"
+            .. (pr[3] or "") .. "\n"
+        end
+      end
+      return true, table.concat(out)
     end
     if args[1] == "api" and args[2] == "--paginate" then
       local out = {}
@@ -266,6 +281,75 @@ describe("Draft.run", function()
     assert.is_false(r.called("release create"))
   end)
 
+  describe("looking up pull requests", function()
+    local function many(n)
+      for i = 2, n do r.add(pr(i, "fix: fix " .. i, "Fix " .. i .. ".")) end
+    end
+
+    it("reads 200 squash-merged commits with one list call and none of their own", function()
+      many(200)
+      assert.equal("created", r.run().status)
+      assert.equal(1, r.count("pulls%?state=closed"))
+      assert.equal(0, r.count("commits/"))
+      local _, noted = r.drafts()[1].notes:gsub("Fix %d+%.", "")
+      assert.equal(199, noted)
+    end)
+
+    it("asks for a commit the list lacks by itself", function()
+      many(3)
+      local sha = r.add({ pr = { 9, "feat: merged by merge commit", "Release note: Merged.", "merge" } })
+      r.add({ subject = "fix: no pull request" })
+      r.run()
+      assert.equal(1, r.count("commits/" .. sha .. "/pulls"))
+      assert.equal(3, r.count("/pulls"))
+    end)
+
+    it("gives the same notes when the list call fails twice first", function()
+      many(4)
+      local expected = r.run()
+      local again = repo({ pr(1, "feat: first", "The add-on.") })
+      again.publish("v1.0.0")
+      for i = 2, 4 do again.add(pr(i, "fix: fix " .. i, "Fix " .. i .. ".")) end
+      again.flaky("pulls%?state=closed", 2)
+      local got = again.run()
+      assert.same({ 2, 5 }, again.waits)
+      assert.equal(expected.version, got.version)
+      assert.equal(r.drafts()[1].notes, again.drafts()[1].notes)
+    end)
+
+    it("fails naming the list call after four tries", function()
+      many(2)
+      r.flaky("pulls%?state=closed")
+      local ok, err = pcall(r.run)
+      assert.is_false(ok)
+      assert.matches("pulls?state=closed", err, 1, true)
+      assert.equal(4, r.count("pulls%?state=closed"))
+      assert.is_false(r.called("release create"))
+    end)
+
+    it("makes the same plan as asking for every commit", function()
+      local function build()
+        local fresh = repo({ pr(1, "feat: first", "The add-on.") })
+        fresh.publish("v1.0.0")
+        fresh.add(pr(2, "fix: squashed", "A squashed fix."))
+        fresh.add({ pr = { 3, "feat: merge commit", "Release note: Merge-commit feature.", "merge" } })
+        fresh.add({ subject = "fix: no pull request" })
+        fresh.add({ pr = { 4, "fix: still open", "Release note: An open one.", "open" } })
+        fresh.add(pr(5, "feat!: breaking", "Breaking."))
+        local logged = {}
+        fresh.env.log = function(text) logged[#logged + 1] = text end
+        return fresh, logged
+      end
+      local old, oldLog = build()
+      old.noList = true
+      local new, newLog = build()
+      assert.same(old.run("dry-run").version, new.run("dry-run").version)
+      assert.same(oldLog, newLog)
+      assert.is_true(#newLog > 0)
+      assert.is_true(new.count("/pulls") < old.count("/pulls"))
+    end)
+  end)
+
   describe("when GitHub fails for a moment", function()
     before_each(function() r.add(pr(2, "fix: a crash", "No more crash.")) end)
 
@@ -276,7 +360,8 @@ describe("Draft.run", function()
     end)
 
     it("retries the other read-only lookups too", function()
-      local patterns = { "release list", "api %-%-paginate", "releases/1 %-%-jq", "matching%-refs" }
+      local patterns = { "release list", "paginate repos/{owner}/{repo}/releases", "releases/1 %-%-jq",
+        "matching%-refs" }
       for _, pattern in ipairs(patterns) do
         local fresh = repo({ pr(1, "feat: first", "The add-on.") })
         fresh.publish("v1.0.0")
@@ -289,25 +374,26 @@ describe("Draft.run", function()
       end
     end)
 
-    it("gives the existing error after three tries, waiting 2s then 5s", function()
-      r.flaky("/pulls")
+    it("gives the existing error after four tries, waiting 2s, 5s then 20s", function()
+      r.add({ subject = "fix: no pull request" })
+      r.flaky("commits/")
       local ok, err = pcall(r.run)
       assert.is_false(ok)
       assert.matches("gh api repos/{owner}/{repo}/commits/", err, 1, true)
       assert.matches("failed: HTTP 502", err, 1, true)
-      assert.equal(3, r.count("/pulls"))
-      assert.same({ 2, 5 }, r.waits)
+      assert.equal(4, r.count("commits/"))
+      assert.same({ 2, 5, 20 }, r.waits)
     end)
 
-    it("keeps the tag check's own error after three tries", function()
+    it("keeps the tag check's own error after four tries", function()
       r.run()
       r.add(pr(3, "fix: another", "Another fix."))
       r.flaky("matching%-refs")
       local ok, err = pcall(r.run)
       assert.is_false(ok)
       assert.matches("couldn't check whether it had just been published", err, 1, true)
-      assert.equal(3, r.count("matching%-refs"))
-      assert.same({ 2, 5 }, r.waits)
+      assert.equal(4, r.count("matching%-refs"))
+      assert.same({ 2, 5, 20 }, r.waits)
       assert.is_false(r.called("release create"))
     end)
 
