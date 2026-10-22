@@ -78,11 +78,12 @@ function Rolls.CallLine(link, kind, names)
 end
 
 -- The officer clicked a row's Call roll or Call open roll: posts the call and starts reading
--- rolls for it. slot and item are what the clicked button showed. Returns the roll-off's result
--- (see Rolls.Result), or nil and why: "fight" (chat is locked), "not ready", "changed", "not a roll"
--- "another roll" (another row's roll-off is still reading: End it first, or wait for its hand-out)
--- or "line too long".
-function Rolls.Start(slot, item)
+-- rolls for it. slot and item are what the clicked button showed. forKey is a not confirmed award's
+-- key, for its give-else list's Call open roll (#118): an open roll for the row of that award, its
+-- result marked with forKey. Returns the roll-off's result (see Rolls.Result), or nil and why: "fight"
+-- (chat is locked), "not ready", "changed", "not a roll", "another roll" (another row's roll-off is
+-- still reading: End it first, or wait for its hand-out) or "line too long".
+function Rolls.Start(slot, item, forKey)
   if ns.Popup.ChatLocked() then return nil, "fight" end
   local model = ns.Popup.Build()
   local row
@@ -93,8 +94,13 @@ function Rolls.Start(slot, item)
   -- Rolls can't be told apart by item, so one roll-off reads at a time (the same row may call again).
   if current and not current.over and current.key ~= keyOf(slot, item) then return nil, "another roll" end
   if row.item ~= item then return nil, "changed" end
-  if row.action ~= "roll" and row.action ~= "openroll" then return nil, "not a roll" end
-  local kind = row.action == "openroll" and "open" or row.mode
+  local nc = row.notConfirmed
+  if forKey then
+    if not (nc and nc.key == forKey) then return nil, "changed" end
+  elseif nc or (row.action ~= "roll" and row.action ~= "openroll") then
+    return nil, "not a roll"
+  end
+  local kind = (forKey or row.action == "openroll") and "open" or row.mode
   local eligible
   if kind ~= "open" then
     eligible = {}
@@ -104,7 +110,7 @@ function Rolls.Start(slot, item)
   if not line then return nil, "line too long" end
   post(line)
   local off = { slot = slot, item = item, link = row.link, kind = kind, eligible = eligible, round = 1,
-    counted = {}, ignored = {}, hidden = false, key = keyOf(slot, item) }
+    counted = {}, ignored = {}, hidden = false, key = keyOf(slot, item), forKey = forKey }
   for _, e in ipairs(early) do
     off.ignored[#off.ignored + 1] = { name = e.name, roll = e.roll, reason = REASON_EARLY }
   end
@@ -167,12 +173,13 @@ end
 -- A roll-off's data for the pop-up: { item, link, kind ("hr", "sr" or "open"), round, entries (each:
 -- name, roll or nil while waiting; for an open roll, the players who rolled), rolled, total (nil for
 -- an open roll), ignored (each: name, roll, reason), winner (the highest roll; nil on a tie or when
--- hidden), tie (the tied names, or nil), hidden (a roll arrived hidden: pick from entries) }, or nil.
+-- hidden), tie (the tied names, or nil), hidden (a roll arrived hidden: pick from entries), forKey (the
+-- not confirmed award it was called for, or nil) }, or nil.
 function Rolls.Result(slot, item)
   local off = offs[keyOf(slot, item)]
   if not off then return nil end
   local result = { slot = slot, item = item, link = off.link, kind = off.kind, round = off.round,
-    entries = {}, rolled = #off.counted, ignored = {}, hidden = off.hidden }
+    entries = {}, rolled = #off.counted, ignored = {}, hidden = off.hidden, forKey = off.forKey }
   for i, e in ipairs(off.ignored) do result.ignored[i] = e end
   local byName = {}
   for _, r in ipairs(off.counted) do byName[bare(r.name)] = r.roll end
@@ -240,13 +247,14 @@ end
 
 ns.On("CHAT_MSG_SYSTEM", handleRoll)
 
--- A hand-out the game confirmed, or gave up on, ends the roll-off for that slot: later rolls are
--- for the next one.
+-- A hand-out the game confirmed, gave up on or confirmed late, ends the roll-off for that slot:
+-- later rolls are for the next one.
 local function handedOut(attempt)
   if current and current.slot == attempt.slot then current.over = true end
 end
 ns.Tracking.On("confirmed", handedOut)
 ns.Tracking.On("unconfirmed", handedOut)
+ns.Tracking.On("late", handedOut)
 
 ns.On("LOOT_CLOSED", function()
   offs, current, early = {}, nil, {}

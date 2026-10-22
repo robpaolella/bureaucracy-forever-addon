@@ -133,6 +133,22 @@ describe("Rolls", function()
       setup({ [1] = { holder("Ashla Brightwater", "HR") } })
       assert.are.equal("not a roll", select(2, call(1)))
     end)
+
+    it("calls an open roll for a not confirmed row, given its award's key (#118)", function()
+      setup({ [1] = { holder("Ashla Brightwater", "HR") } })
+      local key
+      wow.click(function() key = assert(ns.Popup.Give(1, 1, "Ashla Brightwater")).awardKey end)
+      wow.advance(ns.Tracking.confirmWait)
+      wow.sent = {}
+      assert.are.equal("not a roll", select(2, call(1)))
+      wow.click(function() assert.are.same({ nil, "changed" }, { ns.Rolls.Start(1, 1, "other") }) end)
+      assert.are.same({}, wow.sent)
+      local result
+      wow.click(function() result = ns.Rolls.Start(1, 1, key) end)
+      assert.are.same({ "open", key }, { result.kind, result.forKey })
+      assert.are.equal("Open roll for " .. link(1) .. ": everyone /roll", wow.sent[1].text)
+      assert.is_nil(ns.Rolls.Result(2, 2))
+    end)
   end)
 
   describe("reading rolls", function()
@@ -262,6 +278,19 @@ describe("Rolls", function()
       call(1)
       ns.Tracking.Give(1, 3)
       wow.advance(ns.Tracking.confirmWait) -- never confirmed
+      assert.is_truthy(call(2))
+    end)
+
+    it("stops reading once the game confirms a hand-out it gave up on", function()
+      setup()
+      ns.Tracking.Give(1, 3)
+      wow.advance(ns.Tracking.confirmWait)
+      call(1)
+      roll("Doran Vale", 50)
+      wow.fire("LOOT_SLOT_CLEARED", 1)
+      wow.fire("CHAT_MSG_LOOT", "Doran Vale receives loot: " .. link(1) .. ".")
+      roll("Ashla Brightwater", 90)
+      assert.are.equal(1, ns.Rolls.Result(1, 1).rolled)
       assert.is_truthy(call(2))
     end)
 
