@@ -577,8 +577,8 @@ describe("the raid question", function()
       assert.is_nil(view())
       wow.advance(0.1)
       local v = view()
-      assert.are.equal("You've entered " .. white("The Deadmines") .. " with your group. If it's a guild run, "
-        .. "pick its raid event. If not, choose the last option.", v.lead)
+      assert.are.equal("You've entered " .. white("The Deadmines") .. " with your group. "
+        .. "If it's a guild run, pick its raid event. If not, choose the last option.", v.lead)
       assert.is_true(v.rows[1][1])
       assert.is_false(v.rows[2][1])
       assert.are.same({}, wow.sent)
