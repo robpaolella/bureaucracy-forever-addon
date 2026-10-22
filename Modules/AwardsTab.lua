@@ -71,7 +71,8 @@ end
 
 local function row(snapshot, award)
   return { key = award.key, time = date("%H:%M", award.at), practiceTime = date("%a %H:%M", award.at),
-    boss = bossName(snapshot, award.boss), item = parts.itemText(award.item), winner = plain(award.char),
+    boss = bossName(snapshot, award.boss), item = parts.itemText(award.item),
+    winner = award.char and plain(award.char) or "",
     how = HOW[award.method] or plain(award.method), roll = award.roll,
     notConfirmed = award.state == "not-confirmed" and not award.voided,
     undoable = (award.state == "confirmed" or award.state == "manual") and not award.voided,
