@@ -111,7 +111,18 @@ function Raids.Remove(raidId, confirmed)
   end
   entry.pasted = nil
   if not entry.inbox then store()[raidId] = nil end
+  Raids.DropHandouts()
   return true
+end
+
+-- Drops the saved outside hand-outs (BureaucracyForeverDB.outside, #137) of every raid no longer
+-- loaded: they can't be recorded there (#143). Run on removing a pasted copy, and at login or
+-- /reload once the inbox is read. A question open or waiting for one stays as it is.
+function Raids.DropHandouts()
+  if type(ns.db.outside) ~= "table" then return end
+  for raidId in pairs(ns.db.outside) do
+    if not loaded(raidId) then ns.db.outside[raidId] = nil end
+  end
 end
 
 -- The loaded raid with this code (spec 2), as its id and snapshot. A code two loaded raids

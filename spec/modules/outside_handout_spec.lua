@@ -567,4 +567,279 @@ describe("the outside hand-out question", function()
       assert.are.same({}, O.Unanswered())
     end)
   end)
+  describe("in the Awards tab (#143)", function()
+    local ANSWER = "|cffffa000NEEDS AN ANSWER|r Given to %s from the game's loot menu"
+    local function saved(raidId) return ns.db.outside and ns.db.outside[raidId or "raid00001"] end
+
+    -- The game writes saved data to disk and reads it back: a copy, not the same table.
+    local function copy(value)
+      if type(value) ~= "table" then return value end
+      local out = {}
+      for k, v in pairs(value) do out[copy(k)] = copy(v) end
+      return out
+    end
+
+    -- A /reload, or a later login, in the same raid group, with the helper's file as given.
+    local function reload(inbox)
+      ns = wow.start({ saved = { BureaucracyForeverDB = copy(ns.db) }, inbox = inbox })
+      O = ns.OutsideHandout
+      wow.state.group = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
+      wow.state.groupIsRaid = true
+      wow.state.lootMethod = { "master", 0, 0 }
+      for _ = 1, 30 do wow.advance(1) end
+      wow.addonMessages = {}
+    end
+
+    -- The helper's file holding these snapshots, naming no newer add-on.
+    local function inboxOf(...)
+      local raids = {}
+      for i, t in ipairs({ ... }) do
+        t.addon = { version = "0.0.0", url = "https://example.invalid/addon" }
+        t.generated = t.generated + 1 -- the copy in use over the pasted one
+        raids[i] = { snapshot = t }
+      end
+      return { formatVersion = 1, written = 1791999000, raids = raids }
+    end
+
+    -- The Awards tab as drawn last: opening the window draws it; nothing here redraws it.
+    local function tab()
+      if not ns.UI.window:IsShown() then ns.UI.Toggle() end
+      return ns.UI.awards
+    end
+
+    -- Every drawn line: a heading alone, or a row's time, item, winner and its button's label.
+    local function lines()
+      local out = {}
+      for _, line in ipairs(tab().shown) do
+        if line.heading then out[#out + 1] = { line.heading:GetText() }
+        else
+          local b = line.answer or line.pick or line.undo
+          out[#out + 1] = { line.time:GetText(), line.item:GetText(), line.winner:GetText(),
+            b and b.label:GetText() or nil }
+        end
+      end
+      return out
+    end
+
+    local function answers()
+      local out = {}
+      for _, line in ipairs(tab().shown) do
+        if line.answerNeeded then out[#out + 1] = line end
+      end
+      return out
+    end
+
+    local function answer(i) click(answers()[i or 1].answer) end
+    local function grey(text) return "|cff808080" .. text .. "|r" end
+
+    -- A hand-out of item for winner in raidId, with no boss known, put off with Later.
+    local function putOff(item, winner, raidId)
+      O.Ask({ winner = winner, link = link(item), item = item, quantity = 1, at = time(),
+        raid = raidId or "raid00001" })
+      later()
+    end
+
+    it("lists one set aside in its boss's group in time order, counted as needing an answer", function()
+      ns.db.awards = { raid00001 = {
+        { key = "a1", raid = "raid00001", boss = "boss-lucif", item = 2, char = "Doran Vale", method = "SR",
+          at = time() - 60, state = "confirmed", stateAt = time() - 60 },
+        { key = "a2", raid = "raid00001", boss = "boss-lucif", item = 3, char = "Bram Ironvein",
+          method = "OPEN_ROLL", roll = 50, at = time() + 60, state = "confirmed", stateAt = time() + 60 },
+      } }
+      drop({ 1 })
+      local at = time()
+      giveFromMenu(1, "Ashla Brightwater")
+      later()
+      assert.are.same({
+        { "Lucifron · 3 items" },
+        { grey(date("%H:%M", at - 60)), "Item 2", "Doran Vale", "Undo" },
+        { grey(date("%H:%M", at)), "Item 1", ANSWER:format("Ashla Brightwater"), "Answer" },
+        { grey(date("%H:%M", at + 60)), "Item 3", "Bram Ironvein", "Undo" },
+      }, lines())
+      assert.is_true(answers()[1].answer:IsEnabled())
+      assert.are.equal("2 awards · 1 needs an answer", tab().summary:GetText())
+    end)
+
+    it("lists one with no boss known under Other, and a raid with only it isn't empty", function()
+      putOff(1, "Ashla Brightwater")
+      assert.are.same({ { "Other · 1 item" },
+        { grey(date("%H:%M", time())), "Item 1", ANSWER:format("Ashla Brightwater"), "Answer" } }, lines())
+      assert.are.equal("1 needs an answer", tab().summary:GetText())
+      assert.is_false(tab().title:IsShown())
+      assert.is_true(tab().scroll:IsShown())
+    end)
+
+    it("draws its row as the window opens on a reload, and none for an open, waiting or no-raid one",
+      function()
+        drop({ 1, 2 })
+        giveFromMenu(1, "Ashla Brightwater")
+        later()
+        reload()
+        assert.are.equal(1, #answers())
+        O.Ask(O.Unanswered()[1])
+        assert.are.equal(0, #answers())
+        assert.is_true(tab().title:IsShown())
+        later()
+        assert.are.equal(1, #answers())
+        drop({ 2 })
+        giveFromMenu(1, "Doran Vale")
+        O.Ask(O.Unanswered()[1])
+        assert.are.equal(1, #O.Waiting())
+        assert.are.equal(0, #answers())
+        later()
+        later()
+        assert.are.equal(2, #answers())
+        O.Ask({ winner = "Bram Ironvein", link = link(3), item = 3, quantity = 1, at = time() })
+        later()
+        assert.are.equal(3, #O.Unanswered())
+        assert.are.equal(2, #answers())
+      end)
+
+    it("asks again from Answer with the same pre-fill and boss, then records it once", function()
+      drop({ 1 })
+      giveFromMenu(1, "Ashla Brightwater")
+      local first = view()
+      later()
+      reload()
+      answer()
+      assert.are.same(first, view())
+      assert.are.equal("boss-lucif", O.Shown().boss)
+      assert.are.equal(0, #answers())
+      record()
+      assert.is_nil(saved())
+      assert.are.equal(1, #awards())
+      assert.are.equal("boss-lucif", awards()[1].boss)
+      assert.are.equal(1, #wow.sent)
+      local ops = sentOps()
+      assert.are.same({ "award", "confirm" }, { ops[1][1], ops[2][1] })
+      assert.are.equal(0, #answers())
+      assert.are.equal("1 award", tab().summary:GetText())
+    end)
+
+    it("asks again with the boss picked before, and Later brings the row back as it was", function()
+      putOff(1, "Ashla Brightwater")
+      answer()
+      O.PickBoss("boss-magma")
+      later()
+      local before = lines()
+      assert.are.same({ "Magmadar · 1 item" }, before[1])
+      answer()
+      assert.are.equal("boss-magma", O.Shown().boss)
+      assert.are.equal("Magmadar ▾", view().boss.button)
+      later()
+      assert.are.same(before, lines())
+    end)
+
+    it("asks from Answer only once a boss fight ends", function()
+      putOff(1, "Ashla Brightwater")
+      wow.bossFight(true)
+      answer()
+      assert.is_nil(view())
+      assert.are.equal(0, #answers())
+      wow.bossFight(false)
+      assert.are.equal(link(1), O.Shown().handout.link)
+    end)
+
+    it("queues Answer behind a question already open", function()
+      putOff(1, "Ashla Brightwater")
+      drop({ 2 })
+      giveFromMenu(1, "Doran Vale")
+      answer()
+      assert.are.equal(link(2), O.Shown().handout.link)
+      assert.are.equal(link(1), O.Waiting()[1].link)
+      assert.are.equal(0, #answers())
+      later()
+      assert.are.equal(link(1), O.Shown().handout.link)
+    end)
+
+    it("keeps Answer enabled once someone else is loot master, and records from it", function()
+      putOff(1, "Ashla Brightwater")
+      wow.state.lootMethod = { "master", nil, 2 }
+      ns.UI.RefreshAwards()
+      assert.is_true(tab().view.readOnly)
+      assert.is_true(answers()[1].answer:IsEnabled())
+      answer()
+      O.PickBoss("boss-lucif")
+      record()
+      assert.are.equal(1, #awards())
+      assert.is_nil(saved())
+      assert.are.equal(0, #answers())
+    end)
+
+    it("shows no row on a run that is not a guild run, keeping it saved, and again once chosen", function()
+      putOff(1, "Ashla Brightwater")
+      assert(ns.Selection.ChooseOff())
+      ns.UI.RefreshAwards() -- as going to the tab does
+      assert.are.equal(0, #answers())
+      assert.are.equal(1, #saved())
+      assert(ns.Selection.ChooseRaid("raid00001"))
+      ns.UI.RefreshAwards()
+      assert.are.equal(1, #answers())
+    end)
+
+    it("shows only the selected raid's rows", function()
+      ns.Raids.Load(assert(ns.Snapshot.Validate(tree({ raid = "raid00002", code = "SMC002" }), "0.1.0")),
+        "pasted")
+      putOff(1, "Ashla Brightwater")
+      putOff(2, "Doran Vale", "raid00002")
+      assert.are.equal(1, #answers())
+      assert.are.equal("Item 1", answers()[1].item:GetText())
+      assert(ns.Selection.ChooseRaid("raid00002"))
+      ns.UI.RefreshAwards() -- as going to the tab does
+      assert.are.equal(1, #answers())
+      assert.are.equal("Item 2", answers()[1].item:GetText())
+    end)
+
+    describe("of a raid taken off the list", function()
+      it("drops them when its last copy is removed", function()
+        putOff(1, "Ashla Brightwater")
+        assert(ns.Raids.Remove("raid00001"))
+        assert.is_nil(saved())
+        assert.are.same({}, O.Unanswered())
+      end)
+
+      it("keeps them when the pasted copy goes and the inbox's stays", function()
+        putOff(1, "Ashla Brightwater")
+        reload(inboxOf(tree()))
+        assert(ns.Raids.Remove("raid00001"))
+        assert.is_table(ns.Raids.Get("raid00001"))
+        assert.are.equal(1, #saved())
+      end)
+
+      it("drops them when it leaves the inbox at a reload with no pasted copy, not another raid's", function()
+        reload(inboxOf(tree(), tree({ raid = "raid00002", code = "SMC002" })))
+        assert(ns.Raids.Remove("raid00001"))
+        assert.is_table(ns.Raids.Get("raid00001"))
+        putOff(1, "Ashla Brightwater")
+        putOff(2, "Doran Vale", "raid00002")
+        reload(inboxOf(tree({ raid = "raid00002", code = "SMC002" })))
+        assert.is_nil(ns.Raids.Get("raid00001"))
+        assert.is_nil(saved())
+        assert.are.equal(1, #saved("raid00002"))
+      end)
+
+      it("drops a saved one whose raid isn't loaded at a reload", function()
+        putOff(1, "Ashla Brightwater")
+        ns.db.outside.raid00009 = { { winner = "Doran Vale", link = link(2), item = 2, quantity = 1,
+          at = time(), raid = "raid00009" } }
+        reload()
+        assert.is_nil(saved("raid00009"))
+        assert.are.equal(1, #saved())
+      end)
+
+      it("leaves an open question as it is: recording it fails as not loaded, and Later lets it go",
+        function()
+          drop({ 1 })
+          giveFromMenu(1, "Ashla Brightwater")
+          assert(ns.Raids.Remove("raid00001"))
+          assert.is_table(view())
+          assert.are.same({ nil, "not loaded" }, { O.Record() })
+          assert.are.same({}, awards())
+          assert.are.same({}, wow.sent)
+          later()
+          assert.is_nil(saved())
+          assert.are.same({}, O.Unanswered())
+        end)
+    end)
+  end)
 end)
