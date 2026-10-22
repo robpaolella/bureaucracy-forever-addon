@@ -288,3 +288,55 @@ describe("the loot master handover notice", function()
     assert.is_table(ns.Popup.Build())
   end)
 end)
+
+describe("the update notice at login", function()
+  local function inboxWith(version)
+    local snapshot = tree("raid00001", { version = version, url = URL })
+    snapshot.instance = 409
+    return { formatVersion = 1, written = 1791999940, raids = { { snapshot = snapshot } } }
+  end
+
+  it("shows when the inbox's raid names a newer version, though the inbox loads before the window", function()
+    local ns = wow.start({ inbox = inboxWith("9.0.0") })
+    local N = ns.Notice
+    assert.equals("update", N.Shown().key)
+    assert.is_true(N.frame:IsShown())
+    assert.matches("is out: |cff40ff409.0.0|r", N.frame.lead.text, 1, true)
+    assert.equals(URL, N.frame.link.text)
+    assert.is_nil(N.Pending())
+  end)
+
+  it("stays held through a fight that begins before the window is built, then shows once", function()
+    -- The fight starts as the inbox is read, which is before the notice window's own handler runs.
+    local real = inboxWith("9.0.0")
+    local fought = false
+    local file = setmetatable({}, { __index = function(_, key)
+      if not fought then
+        fought = true
+        wow.fire("ENCOUNTER_START", 1, "Boss", 0, 5)
+      end
+      return real[key]
+    end })
+    local ns = wow.start({ inbox = file })
+    local N = ns.Notice
+    assert.is_true(fought)
+    assert.is_nil(N.Shown())
+    assert.is_false(N.frame:IsShown())
+    assert.equals("update", N.Pending().key)
+    wow.bossFight(false)
+    assert.equals("update", N.Shown().key)
+    assert.is_true(N.frame:IsShown())
+    assert.is_nil(N.Pending())
+  end)
+
+  it("does not raise a second notice for the same version from a pasted snapshot", function()
+    local ns = wow.start({ inbox = inboxWith("9.0.0") })
+    local N = ns.Notice
+    N.frame:Hide()
+    local snapshot = assert(ns.Snapshot.Validate(
+      tree("raid00002", { version = "9.0.0", url = URL }), ns.version))
+    ns.Raids.Load(snapshot, "pasted")
+    assert.is_false(N.frame:IsShown())
+    assert.is_nil(N.Pending())
+  end)
+end)

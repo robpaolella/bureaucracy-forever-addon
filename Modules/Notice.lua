@@ -11,6 +11,7 @@ ns.Notice = Notice
 local WIDTH = 460
 local ALERT = "Interface\\DialogFrame\\DialogAlertIcon"
 local GREEN = "|cff40ff40%s|r"
+local WHITE = "|cffffffff%s|r"
 
 local p, frame            -- UI's drawing parts, and the notice's frame
 local shown               -- the notice on screen: { key, view }
@@ -82,11 +83,12 @@ local function draw()
   end
 end
 
--- Shows a notice, or holds it until the boss fight ends. A held one is replaced by a later one
+-- Shows a notice, or holds it until the boss fight ends or the window is built (the inbox loads
+-- its raids before this file's ADDON_LOADED handler runs). A held one is replaced by a later one
 -- with the same key. view: { icon, lead, hint, link, buttons = { { label, onClick } } }; with no
 -- buttons there is a Close. Clicking any button closes the notice, then runs its onClick.
 function Notice.Raise(key, view)
-  if fighting then
+  if fighting or not frame then
     pending = { key = key, view = view }
     return
   end
@@ -107,7 +109,7 @@ function Notice.CheckUpdate(addon)
   local version = addon.version:gsub("|", "||")
   Notice.Raise("update", {
     icon = ALERT,
-    lead = "A newer " .. p.WHITE:format("Bureaucracy Forever") .. " is out: " .. GREEN:format(version)
+    lead = "A newer " .. WHITE:format("Bureaucracy Forever") .. " is out: " .. GREEN:format(version)
       .. " (you have " .. (tostring(ns.version):gsub("|", "||")) .. ").",
     hint = "Copy the link (Ctrl+C), download it, replace the add-on folder, then /reload. "
       .. "The desktop helper updates it for you.",
@@ -197,6 +199,12 @@ local function build()
   frame:SetScript("OnHide", function() shown = nil end)
   frame:Hide()
   table.insert(UISpecialFrames, "BureaucracyForeverNotice")
+  -- A notice raised before this window existed shows now, unless a fight holds it.
+  if pending and not fighting then
+    local waiting = pending
+    pending = nil
+    Notice.Raise(waiting.key, waiting.view)
+  end
 end
 
 ns.On("ADDON_LOADED", function(name)
