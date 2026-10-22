@@ -181,6 +181,15 @@ function Raids.NoRaidAwards()
   return ns.db.noRaid or {}
 end
 
+-- The no-raid awards that are real, not practice: what the Sync tab counts, attaches and discards.
+function Raids.RealNoRaidAwards()
+  local real = {}
+  for _, award in ipairs(Raids.NoRaidAwards()) do
+    if not award.practice then real[#real + 1] = award end
+  end
+  return real
+end
+
 function Raids.HasAwards(raidId)
   return #Raids.Awards(raidId) > 0
 end

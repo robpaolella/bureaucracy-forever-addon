@@ -947,12 +947,12 @@ end
 
 -- Discard: asks first, then throws the no-raid awards away. They were never sent to the site.
 local function discard()
-  local n = #ns.Raids.NoRaidAwards()
+  local n = #ns.Raids.RealNoRaidAwards()
   confirm("Discard " .. WHITE:format(plural(n, "award", "awards")) .. " that "
     .. agree(n, "isn't", "aren't") .. " linked to a raid?",
     "They were never sent to the site. This can't be undone.", "Discard", "Cancel", function()
       -- An award made while the question was open was not asked about: ask again.
-      if #ns.Raids.NoRaidAwards() ~= n then
+      if #ns.Raids.RealNoRaidAwards() ~= n then
         UI.RefreshSync()
         return discard()
       end
@@ -963,7 +963,7 @@ end
 
 -- Draws the no-raid awards at y with Attach and Discard; returns the new y.
 local function drawNoRaid(y, raids, status)
-  local held = ns.Raids.NoRaidAwards()
+  local held = ns.Raids.RealNoRaidAwards()
   at(sync.noRaidNote, y)
   setNote(sync.noRaidNote, "warn", AMBER:format(plural(#held, "award", "awards") .. " "
     .. agree(#held, "isn't", "aren't") .. " linked to a raid.")
@@ -1031,7 +1031,7 @@ function UI.RefreshSync()
   at(sync.status, y)
   setNote(sync.status, UI.SyncStatus())
   y = y + sync.status:GetHeight() + 8
-  if #ns.Raids.NoRaidAwards() > 0 then
+  if #ns.Raids.RealNoRaidAwards() > 0 then
     y = drawNoRaid(y, raids, status)
   else
     sync.attachMenu:Hide()

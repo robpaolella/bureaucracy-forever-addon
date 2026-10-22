@@ -1113,6 +1113,11 @@ describe("the Sync tab", function()
       for k, v in pairs(fields or {}) do f[k] = v end
       return assert(ns.Records.Award(f))
     end
+    local function keys(list)
+      local ids = {}
+      for i, award in ipairs(list) do ids[i] = award.key end
+      return ids
+    end
     local function cellText(column, i) return sync.cells["noRaid" .. column][i]:GetText() end
     local function rowTexts(i)
       return { cellText("boss", i), cellText("item", i), cellText("char", i), cellText("method", i),
@@ -1152,6 +1157,38 @@ describe("the Sync tab", function()
         .. "a run that wasn't a guild run.", sync.noRaidHint:GetText())
       assert.are.same({ "Attach to:", "Attach", "Discard" },
         { sync.attachLabel:GetText(), sync.attach.label:GetText(), sync.discard.label:GetText() })
+    end)
+
+    it("counts, shows and discards real awards only, leaving practice ones", function()
+      made()
+      local practice = made({ practice = true, noRaid = true, item = 5 })
+      ns.UI.RefreshSync()
+      assert.are.equal("|cffffa0201 award isn't linked to a raid.|r They were made while no raid was chosen, "
+        .. "so they can't be sent to the site yet.", sync.noRaidNote.text:GetText())
+      assert.is_nil(sync.cells.noRaidboss[2])
+      wow.click(function() sync.discard.scripts.OnClick() end)
+      assert.are.equal("Discard |cffffffff1 award|r that isn't linked to a raid?", dialog()[1])
+      wow.click(function() ns.UI.dialog.yes.scripts.OnClick() end)
+      assert.are.same({ practice.id }, keys(ns.Raids.NoRaidAwards()))
+      assert.is_false(sync.noRaidNote:IsShown())
+    end)
+
+    it("shows no section when only practice awards have no raid", function()
+      made({ practice = true, noRaid = true })
+      ns.UI.RefreshSync()
+      assert.is_false(sync.noRaidNote:IsShown())
+      assert.is_false(sync.attach:IsShown())
+      assert.is_false(sync.discard:IsShown())
+    end)
+
+    it("doesn't ask again when a Test drop was awarded while the question was open", function()
+      made()
+      ns.UI.RefreshSync()
+      wow.click(function() sync.discard.scripts.OnClick() end)
+      made({ practice = true, noRaid = true, item = 5 })
+      wow.click(function() ns.UI.dialog.yes.scripts.OnClick() end)
+      assert.is_false(ns.UI.dialog:IsShown())
+      assert.are.equal(1, #ns.Raids.NoRaidAwards())
     end)
 
     it("says award in the singular", function()

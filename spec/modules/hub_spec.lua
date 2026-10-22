@@ -1278,6 +1278,29 @@ describe("Hub catch-up", function()
     end
   end)
 
+  it("never whispers a practice no-raid award after an Attach, and the raid holds none", function()
+    local real = assert(ns.Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
+      method = "HR", id = "aw-00000001", noRaid = true }))
+    local practice = assert(ns.Records.Award({ boss = "testdrop", item = 16805, char = "Ana Vale",
+      method = "HR", id = "aw-00000002", noRaid = true, practice = true }))
+    ns.Records.Void(practice.id)
+    assert.are.equal(1, (ns.Records.Attach(RAID)))
+    assert.are.same({ real.id }, (function()
+      local ids = {}
+      for _, op in ipairs(ns.Records.Ops(RAID)) do
+        assert.is_falsy(op.practice)
+        ids[#ids + 1] = op.id
+      end
+      return ids
+    end)())
+    wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE }, true
+    receive("H;SA0001;1;0;" .. ns.Digest.Of({}), ZOE)
+    local list = sent()
+    for _, m in ipairs(list) do
+      assert.is_nil(m[1]:find(practice.id, 1, true))
+    end
+  end)
+
   describe("H", function()
     it("is sent at login and on a /reload for every loaded raid, with the count and digest held", function()
       load(OTHER)

@@ -285,6 +285,59 @@ describe("Records", function()
     end)
   end)
 
+  describe("practice awards with no raid (#155)", function()
+    local real, practice, undo
+
+    local function keys(awards)
+      local ids = {}
+      for i, award in ipairs(awards) do ids[i] = award.key end
+      return ids
+    end
+    local function ids(ops)
+      local list = {}
+      for i, op in ipairs(ops) do list[i] = op.id end
+      return list
+    end
+
+    before_each(function()
+      real = Records.Award(ana())
+      practice = Records.Award(ana({ practice = true, noRaid = true, item = 1 }))
+      undo = Records.Void(practice.id)
+    end)
+
+    it("stay out of Attach, which counts and moves only the real ones", function()
+      selectRaid(RAID, { env = "production", code = "PA0001" })
+      local count, moved = Records.Attach()
+      assert.are.equal(1, count)
+      assert.are.same({ real }, moved)
+      assert.are.same({ practice.id }, keys(ns.Raids.NoRaidAwards()))
+      assert.are.same({ practice.id, undo.id }, ids(Records.Ops(nil)))
+      assert.are.same({ real.id }, keys(ns.Raids.Awards(RAID)))
+      assert.are.same({ real.id }, ids(Records.Ops(RAID)))
+      assert.is_nil(practice.raid)
+    end)
+
+    it("stay out of Discard, which counts and removes only the real ones", function()
+      ns.db.siteVoids = { [real.id] = { raid = RAID, env = "staging", reason = "x", at = 1 },
+        [practice.id] = { raid = RAID, env = "staging", reason = "y", at = 1 } }
+      selectRaid()
+      assert.are.equal(1, Records.Discard())
+      assert.are.same({ practice.id }, keys(ns.Raids.NoRaidAwards()))
+      assert.are.same({ practice.id, undo.id }, ids(Records.Ops(nil)))
+      assert.is_nil(ns.db.siteVoids[real.id])
+      assert.is_table(ns.db.siteVoids[practice.id])
+    end)
+
+    it("leave nothing to attach or discard when they are all there is", function()
+      Records.Discard()
+      selectRaid()
+      assert.are.equal(0, Records.Attach())
+      assert.are.equal(0, Records.Discard())
+      assert.are.same({ practice.id }, keys(ns.Raids.NoRaidAwards()))
+      assert.are.same({}, ns.Raids.RealNoRaidAwards())
+    end)
+  end)
+
   describe("discard", function()
     it("throws away the no-raid awards and operations, and returns how many awards", function()
       local award = Records.Award(ana())
