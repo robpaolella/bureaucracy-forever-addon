@@ -43,11 +43,15 @@ function ns.On(event, handler)
   table.insert(handlers[event], handler)
 end
 
-frame:SetScript("OnEvent", function(_, event, ...)
-  for _, handler in ipairs(handlers[event]) do
+-- ns.Fire(event, ...) runs the handlers of an event, as the game does; a Test drop (#108) opens and
+-- closes its made-up loot window with it.
+function ns.Fire(event, ...)
+  for _, handler in ipairs(handlers[event] or {}) do
     handler(...)
   end
-end)
+end
+
+frame:SetScript("OnEvent", function(_, event, ...) ns.Fire(event, ...) end)
 
 ns.On("ADDON_LOADED", function(name)
   if name ~= ADDON_NAME then return end

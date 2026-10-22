@@ -1269,15 +1269,29 @@ local function buildPracticeBox()
   box.label:SetPoint("LEFT", box.box, "RIGHT", 4, 0)
   box.label:SetText("Practice mode")
   box:SetScript("OnClick", function() ns.SetPractice(not ns.Practice()) end)
+  local test = newButton(UI.footer, "Test drop", 80)
+  UI.testDrop = test
+  test:SetPoint("RIGHT", UI.footer, "RIGHT", 0, 0)
+  test:SetScript("OnClick", function() ns.TestDrop.Open() end)
 end
 
 -- Draws practice mode's marker: the window's title and the footer's checkbox, then the pop-up's
 -- title and foot.
 function UI.RefreshPractice()
-  if not window then return end
   local on = ns.Practice()
+  if not on then ns.TestDrop.Close() end -- a Test drop's awards are practice ones: it ends with practice mode
+  if not window then return end
   UI.title:SetText((on and "[Practice] " or "") .. "Bureaucracy Forever")
   if on then UI.practiceBox.check:Show() else UI.practiceBox.check:Hide() end
+  -- The Test drop button shows only in practice mode, at the footer's right; the checkbox moves left of it.
+  UI.practiceBox:ClearAllPoints()
+  if on then
+    UI.testDrop:Show()
+    UI.practiceBox:SetPoint("RIGHT", UI.testDrop, "LEFT", -8, 0)
+  else
+    UI.testDrop:Hide()
+    UI.practiceBox:SetPoint("RIGHT", UI.footer, "RIGHT", 0, 0)
+  end
   ns.PopupFrame.Redraw()
 end
 

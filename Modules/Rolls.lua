@@ -118,7 +118,7 @@ function Rolls.Start(slot, item, forKey)
   if kind == "open" then
     off.everyone = {}
     for i = 1, 40 do
-      local name = GetMasterLootCandidate(slot, i)
+      local name = ns.LootWindow.Candidate(slot, i)
       if not name then break end
       off.everyone[#off.everyone + 1] = name
     end

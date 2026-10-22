@@ -104,7 +104,11 @@ local function build()
     setButton(frame.close, "X", true)
     frame.close:SetScript("OnClick", function() frame:Hide() end)
   end
-  frame.close:HookScript("OnClick", function() dismissed = true end)
+  -- Closing a Test drop's pop-up ends the Test drop: there is no loot window to bring it back.
+  frame.close:HookScript("OnClick", function()
+    dismissed = true
+    ns.TestDrop.Close()
+  end)
 
   frame.fight = newText(frame, "GameFontNormal")
   frame.fight:SetWidth(WIDTH - 2 * PAD)

@@ -76,8 +76,8 @@ end
 ns.On("LOOT_OPENED", function()
   local raidId = current()
   if not raidId then return end
-  for slot = 1, GetNumLootItems() do
-    local sources = { GetLootSourceInfo(slot) }
+  for slot = 1, ns.LootWindow.NumItems() do
+    local sources = { ns.LootWindow.SourceInfo(slot) }
     for i = 1, #sources, 2 do
       local corpses = saved(raidId).corpses
       if corpses[sources[i]] == nil then corpses[sources[i]] = time() end
