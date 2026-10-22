@@ -9,10 +9,10 @@ local Release = dofile("release/Release.lua")
 local Draft = {}
 Draft.TOC = "BureaucracyForever.toc"
 
--- Seconds to wait before the second and third try of a read-only GitHub lookup.
-local RETRY_WAITS = { 2, 5 }
+-- Seconds to wait before the second, third and fourth try of a read-only GitHub lookup.
+local RETRY_WAITS = { 2, 5, 20 }
 
--- A read-only GitHub lookup fails for a moment when GitHub does: try it up to three times, and
+-- A read-only GitHub lookup fails for a moment when GitHub does: try it up to four times, and
 -- only on a failed exit (a call that exits 0 is never repeated, empty output included).
 -- Never use it for a call that changes something: a repeat could delete twice or create twice.
 local function runRead(env, program, args)
@@ -66,7 +66,28 @@ end
 local PULL_JQ = [[(map(select(.merge_commit_sha == "%s")) + map(select(.merged_at)) + .)[0]
   | if . == null then "" else "\(.number)\n\(.title)\n\(.body // "")" end]]
 
-local function item(env, sha)
+-- The repo's merged pull requests by merge commit SHA, from one paged list: a squash-merged
+-- commit is found here without a call of its own. Each record starts with an RS character (\30).
+local MERGED_JQ = [[.[] | select(.merged_at and .merge_commit_sha)
+  | "\u001e\(.merge_commit_sha)\n\(.number)\n\(.title)\n\(.body // "")"]]
+
+local function mergedBySha(env, cache)
+  if cache.merged then return cache.merged end
+  local out = callRead(env, "gh", "api", "--paginate", "repos/{owner}/{repo}/pulls?state=closed&per_page=100",
+    "--jq", MERGED_JQ)
+  local merged = {}
+  for record in out:gmatch("\30([^\30]*)") do
+    local sha, number, title, body = record:match("^(%x+)\n(%d+)\n([^\n]*)\n(.*)$")
+    if sha then merged[sha] = { number = tonumber(number), title = title, body = (body:gsub("\n$", "")) } end
+  end
+  cache.merged = merged
+  return merged
+end
+
+local function item(env, sha, cache)
+  -- Only a commit the list doesn't know (open pull request, merge-commit merge, none) asks for itself.
+  local found = mergedBySha(env, cache)[sha]
+  if found then return found end
   local out = callRead(env, "gh", "api", "repos/{owner}/{repo}/commits/" .. sha .. "/pulls",
     "--jq", PULL_JQ:format(sha))
   local number, title, body = out:match("^(%d+)\n([^\n]*)\n?(.*)$")
@@ -80,7 +101,7 @@ local function planInput(env, previous, ref, cache)
   local items = {}
   local range = previous and (previous .. ".." .. ref) or ref
   for _, sha in ipairs(lines(call(env, "git", "rev-list", "--no-merges", "--reverse", range))) do
-    cache[sha] = cache[sha] or item(env, sha)
+    cache[sha] = cache[sha] or item(env, sha, cache)
     items[#items + 1] = cache[sha]
   end
   return {
