@@ -3,8 +3,10 @@
 -- three choices (#101), with its Give to someone else list and refusal text; another officer sees
 -- them greyed. A confirmed award has Undo (#40), and one undone after it left the corpse is followed
 -- by its NEEDS A WINNER row, whose Pick winner opens the picker in a box under it (#126,
--- design/115-pick-winner version A): choose who has it now, see the line, Post correction. Draws
--- into UI.tabs.Awards and UI.footer.
+-- design/115-pick-winner version A): choose who has it now, see the line, Post correction. A hand-out
+-- from the game's loot menu put off (OutsideHandout.Unanswered) has a NEEDS AN ANSWER row, drawn
+-- like NEEDS A WINNER, whose Answer asks its question again (#143). Draws into UI.tabs.Awards and
+-- UI.footer.
 local _, ns = ...
 
 local UI = ns.UI
@@ -27,6 +29,7 @@ local EMPTY_HINT = "Items you hand out with the pop-up, or from the game's loot 
   .. "with the time, boss, winner and how they won."
 local BUTTONS = { "Try again", "Someone else", "Not handed out" }
 local NEEDS_WINNER = AMBER:format("NEEDS A WINNER") .. " Undone after it left the corpse"
+local NEEDS_ANSWER = AMBER:format("NEEDS AN ANSWER") .. " Given to %s from the game's loot menu"
 -- The picker's box, from the item column to the right edge, and how many names it lists at once.
 local BOX_X = COLUMNS.item[1]
 local BOX_WIDTH = CONTENT_WIDTH - BOX_X
@@ -113,7 +116,8 @@ end
 -- (Popup.Choices); a voided one `voided` and its `note`. A confirmed one (or one made on the site)
 -- has `undoable`, its `refusal`, and for the loot master `undo` (Popup.UndoButton: enabled,
 -- tooltip). A voided confirmed award not replaced has `needsWinner`, and is followed by a row with
--- `winnerNeeded`, its key, boss, item and time.
+-- `winnerNeeded`, its key, boss, item and time. A hand-out of this raid not yet answered has a row
+-- with `answerNeeded`, its `handout` (for OutsideHandout.Ask), boss, item, winner and time.
 function UI.AwardsView()
   local raidId = ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
@@ -126,17 +130,25 @@ function UI.AwardsView()
     if r.notConfirmed or r.undoable then r.refusal = ns.Popup.Refusal(r.key) end
     if award.practice then practice[#practice + 1] = r else rows[#rows + 1] = r end
   end
+  for _, h in ipairs(ns.OutsideHandout.Unanswered()) do
+    if raidId and h.raid == raidId then
+      rows[#rows + 1] = { answerNeeded = true, handout = h, boss = bossName(snapshot, h.boss or h.picked),
+        item = parts.itemText(h.item), winner = plain(h.winner), at = h.at, time = date("%H:%M", h.at),
+        practiceTime = date("%a %H:%M", h.at) }
+    end
+  end
   local view = { readOnly = not me, banner = name and not me and BANNER:format(plain(name)) or nil }
   if #rows == 0 and #practice == 0 then
     view.empty = true
     return view
   end
   rows = ordered(rows)
-  local standing, unconfirmed, needed = 0, 0, 0
+  local standing, unconfirmed, needed, unanswered = 0, 0, 0, 0
   for _, r in ipairs(rows) do
-    if not (r.voided or r.winnerNeeded) then standing = standing + 1 end
+    if not (r.voided or r.winnerNeeded or r.answerNeeded) then standing = standing + 1 end
     if r.notConfirmed then unconfirmed = unconfirmed + 1 end
     if r.winnerNeeded then needed = needed + 1 end
+    if r.answerNeeded then unanswered = unanswered + 1 end
     local group = byBoss[r.boss]
     if not group then
       group = { boss = r.boss, rows = {} }
@@ -153,6 +165,7 @@ function UI.AwardsView()
   if standing > 0 then counts[#counts + 1] = plural(standing, "award", "awards") end
   if unconfirmed > 0 then counts[#counts + 1] = unconfirmed .. " not confirmed" end
   if needed > 0 then counts[#counts + 1] = needed .. " needs a winner" end
+  if unanswered > 0 then counts[#counts + 1] = unanswered .. " needs an answer" end
   view.summary = table.concat(counts, " · ")
   if #practice > 0 then
     view.practice = { heading = "Practice awards (" .. #practice .. ") · never sent to the guild site",
@@ -245,6 +258,22 @@ local function pickButton(index, y, key)
     tab.picks[index] = b
   end
   b.key = key
+  b:ClearAllPoints()
+  b:SetPoint("TOPLEFT", tab.child, "TOPLEFT", CONTENT_WIDTH - PICK_WIDTH, -y)
+  b:Show()
+  return b
+end
+
+-- Answer on a NEEDS AN ANSWER row: asks the hand-out's question again (or queues it, or holds it
+-- through a boss fight). Enabled for anyone: only the computer that made the hand-out has the row.
+local function answerButton(index, y, handout)
+  local b = tab.answers[index]
+  if not b then
+    b = newButton(tab.child, "Answer", PICK_WIDTH, BUTTON_HEIGHT)
+    b:SetScript("OnClick", function(self) ns.OutsideHandout.Ask(self.handout) end)
+    tab.answers[index] = b
+  end
+  b.handout = handout
   b:ClearAllPoints()
   b:SetPoint("TOPLEFT", tab.child, "TOPLEFT", CONTENT_WIDTH - PICK_WIDTH, -y)
   b:Show()
@@ -705,6 +734,7 @@ local function drawRow(r, y, used, practice)
   put(shown.time, "time", y, GREY:format(practice and r.practiceTime or r.time))
   put(shown.item, "item", y, colour(r.item))
   put(shown.winner, "winner", y, r.winnerNeeded and NEEDS_WINNER
+    or r.answerNeeded and NEEDS_ANSWER:format(r.winner)
     or colour(r.winner) .. (r.notConfirmed and " " .. AMBER:format("NOT CONFIRMED") or ""))
   put(shown.how, "how", y, r.how and colour(r.how) or "")
   put(shown.roll, "roll", y, r.roll and colour(tostring(r.roll)) or "")
@@ -713,7 +743,7 @@ local function drawRow(r, y, used, practice)
     and AMBER:format("Practice")) or "")
   local line = { time = shown.time, item = shown.item, winner = shown.winner, how = shown.how,
     roll = shown.roll, note = shown.note, voided = r.voided, notConfirmed = r.notConfirmed,
-    winnerNeeded = r.winnerNeeded }
+    winnerNeeded = r.winnerNeeded, answerNeeded = r.answerNeeded }
   tab.shown[#tab.shown + 1] = line
   if r.voided then
     used.strikes = used.strikes + 1
@@ -733,9 +763,12 @@ local function drawRow(r, y, used, practice)
     used.pickGreys = used.pickGreys + 1
     line.pick = greyIn(tab.pickGreys, used.pickGreys, "Pick winner", PICK_WIDTH,
       CONTENT_WIDTH - PICK_WIDTH, y)
+  elseif r.answerNeeded then
+    used.answers = used.answers + 1
+    line.answer = answerButton(used.answers, y, r.handout)
   end
   y = y + math.max(shown.item:GetStringHeight(), shown.winner:GetStringHeight(),
-    shown.how:GetStringHeight(), (line.undo or line.pick) and BUTTON_HEIGHT or 0) + ROW_GAP
+    shown.how:GetStringHeight(), (line.undo or line.pick or line.answer) and BUTTON_HEIGHT or 0) + ROW_GAP
   if r.corrected then
     used.correcteds = used.correcteds + 1
     y = correctedLine(used.correcteds, y, r.corrected)
@@ -819,7 +852,7 @@ function UI.RefreshAwards()
   tab.view = view
   hideAll({ tab.headings, tab.times, tab.items, tab.winners, tab.hows, tab.rolls, tab.notes,
     tab.buttons, tab.choices, tab.refusals, tab.strikes, tab.undos, tab.undoGreys, tab.picks, tab.pickGreys,
-    tab.correcteds })
+    tab.correcteds, tab.answers })
   tab.list:Hide()
   tab.listShown = false
   -- The picker hides only once it's known not to be drawn: hiding it would take the keyboard from
@@ -852,7 +885,7 @@ function UI.RefreshAwards()
   if list then
     tab.summary:SetText(view.summary)
     local used = { rows = 0, headings = 0, buttons = 0, choices = 0, refusals = 0, strikes = 0, undos = 0,
-      undoGreys = 0, picks = 0, pickGreys = 0, correcteds = 0 }
+      undoGreys = 0, picks = 0, pickGreys = 0, correcteds = 0, answers = 0 }
     local y = 0
     for _, group in ipairs(view.groups or {}) do
       y = drawHeading(group.heading, y, used)
@@ -894,7 +927,7 @@ local function build()
   tab.headings, tab.times, tab.items, tab.winners, tab.hows = {}, {}, {}, {}, {}
   tab.rolls, tab.notes, tab.buttons, tab.strikes, tab.shown = {}, {}, {}, {}, {}
   tab.choices, tab.refusals, tab.undos, tab.undoGreys, tab.picks, tab.pickGreys = {}, {}, {}, {}, {}, {}
-  tab.correcteds = {}
+  tab.correcteds, tab.answers = {}, {}
 
   -- The note of a correction recorded but not posted, above everything.
   tab.notice = parts.newNote(content)

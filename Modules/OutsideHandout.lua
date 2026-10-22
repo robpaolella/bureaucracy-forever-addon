@@ -8,6 +8,7 @@
 -- reported until it is recorded (#137), so /reload and logging out lose none; it is never sent or
 -- exported. After a reload it is not asked again by itself: it is in Unanswered. One made with no raid
 -- selected is kept in memory only, and only once put off with Later.
+-- A raid's saved hand-outs go when the raid is no longer loaded (Raids.DropHandouts, #143).
 -- Several hand-outs are asked one at a time, in order; in a boss fight the question waits until the
 -- fight ends, as notices do. On a run that is not a guild run nothing is asked or kept.
 local _, ns = ...
@@ -241,6 +242,7 @@ function OutsideHandout.Ask(handout)
   end
   queue[#queue + 1] = handout
   showNext()
+  ns.UI.RefreshAwards()
 end
 
 -- The hand-outs not being asked, oldest first: { winner, link, item, quantity, at, raid, boss, picked },
@@ -296,6 +298,7 @@ function OutsideHandout.Later()
   hide()
   if not h.raid and not ns.Selection.IsQuiet() then memory[#memory + 1] = h end
   showNext()
+  ns.UI.RefreshAwards()
 end
 
 -- Record and announce (a click: it posts a chat line): records the award with the answer in the
