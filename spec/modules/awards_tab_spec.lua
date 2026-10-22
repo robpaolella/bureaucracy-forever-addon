@@ -1119,11 +1119,21 @@ describe("the Awards tab's Undo", function()
         assert.is_false(p.post:IsEnabled())
       end)
 
-      it("says so when nobody else reserved it", function()
+      it("says so when nobody else reserved it, and the other choices work as usual (pick-none)", function()
         undone()
         local _, p = opened()
         assert.is_false(p.holders[1] and p.holders[1]:IsShown() or false)
         assert.are.equal("Nobody else reserved this item.", p.empty:GetText())
+        assert.is_true(p.empty:IsShown())
+        assert.is_false(p.more:IsShown())
+        -- Under Reserved it, above Anyone else.
+        assert.is_true(y(p.reserved) < y(p.empty) and y(p.empty) < y(p.others))
+        click(p.db)
+        assert.are.equal("Correction: " .. LINK .. " → disenchant/bank, not Ana Vale",
+          p.preview:GetText():match("^(.-) <BF1;R;"))
+        assert.is_true(p.post:IsEnabled())
+        click(p.again)
+        assert.is_true(p.post:IsEnabled())
         assert.is_true(p.empty:IsShown())
       end)
 
@@ -1316,6 +1326,204 @@ describe("the Awards tab's Undo", function()
           assert.are.equal("Corrected " .. clock(new.at), row.corrected:GetText())
           assert.is_true(row.undo:IsShown())
         end)
+
+      local RED, WHITE = { 1, 0.35, 0.35 }, { 1, 1, 1 }
+      local CHAT = "|cff33ff99Bureaucracy:|r " -- what ns.Print puts before a chat message
+
+      it("the Roll box takes at most 3 characters", function()
+        reserved()
+        undone()
+        local _, p = opened()
+        click(p.roll)
+        assert.are.equal(3, p.rollEdit.maxLetters)
+      end)
+
+      it("an invalid or empty roll: red, said in the preview, and no Post until valid (pick-roll-missing)",
+        function()
+          reserved()
+          undone()
+          local tab, p = opened()
+          click(p.roll)
+          click(p.member)
+          click(tab.menu.entries[3])
+          assert.are.equal("Type their roll, 1 to 100.", p.preview:GetText())
+          assert.are.same(WHITE, p.rollEdit.textColor)
+          typeInto(p.rollEdit, "920")
+          assert.are.same(RED, p.rollEdit.textColor)
+          assert.are.equal("A roll is 1 to 100.", p.preview:GetText())
+          assert.are.same({ 0.7, 0.7, 0.7 }, p.preview.textColor)
+          assert.is_false(p.post:IsEnabled())
+          assert.are.equal("A roll is 1 to 100.", p.post.tip)
+          for _, bad in ipairs({ "0", "abc", "101" }) do
+            typeInto(p.rollEdit, bad)
+            assert.are.same(RED, p.rollEdit.textColor)
+            assert.is_false(p.post:IsEnabled())
+          end
+          typeInto(p.rollEdit, "")
+          assert.are.same(WHITE, p.rollEdit.textColor)
+          assert.are.equal("Type their roll, 1 to 100.", p.preview:GetText())
+          assert.is_false(p.post:IsEnabled())
+          assert.are.equal("Type their roll, 1 to 100.", p.post.tip)
+          typeInto(p.rollEdit, "92")
+          assert.are.same(WHITE, p.rollEdit.textColor)
+          assert.are.equal("Correction: " .. LINK .. " → Eli Park (open roll, 92), not Ana Vale",
+            p.preview:GetText():match("^(.-) <BF1;R;"))
+          assert.is_true(p.post:IsEnabled())
+          assert.is_nil(p.post.tip)
+        end)
+
+      it("in a boss fight: the note bar, the choices working, and Post waiting until it ends (pick-fight)",
+        function()
+          reserved()
+          undone()
+          local _, p = opened()
+          click(p.db)
+          assert.is_false(p.fight:IsShown())
+          assert.is_false(p.locked:IsShown())
+          wow.bossFight(true)
+          assert.is_true(p.fight:IsShown())
+          assert.are.equal("Boss fight in progress. The game locks chat for add-ons, so the correction waits"
+            .. " until it ends.", p.fight.text:GetText())
+          assert.are.equal("warn", p.fight.kind)
+          -- The note bar sits under the intro, above Reserved it.
+          assert.is_true(y(p.intro) < y(p.fight) and y(p.fight) + p.fight:GetHeight() <= y(p.reserved))
+          assert.is_false(p.post:IsEnabled())
+          assert.are.equal("Chat is locked until the fight ends.", p.post.tip)
+          assert.is_true(p.locked:IsShown())
+          assert.are.equal("Chat is locked until the fight ends.", p.locked:GetText())
+          assert.is_true(p.locked.points[1].x > p.cancel.points[1].x)
+          -- The choices still work, and the line shows.
+          click(p.holders[2])
+          assert.is_true(seen(p.holders[2])[4])
+          assert.are.equal("Correction: " .. LINK .. " → Bo Marsh (soft reserve), not Ana Vale",
+            p.preview:GetText():match("^(.-) <BF1;R;"))
+          assert.is_false(p.post:IsEnabled())
+          wow.bossFight(false)
+          assert.is_false(p.fight:IsShown())
+          assert.is_false(p.locked:IsShown())
+          assert.is_true(seen(p.holders[2])[4])
+          assert.is_true(p.post:IsEnabled())
+          assert.is_nil(p.post.tip)
+          local line, sent = p.preview:GetText(), #wow.sent
+          click(p.post)
+          assert.are.same({ text = line, channel = "RAID" }, wow.sent[sent + 1])
+        end)
+
+      it("in practice mode: the title and a [Practice] line, and posts as usual (pick-practice)", function()
+        reserved()
+        wow.slash("/bf practice")
+        undone({ practice = true })
+        local tab = openTab()
+        assert.are.equal("[Practice] Bureaucracy Forever", ns.UI.title:GetText())
+        wow.click(function() tab.practiceToggle.scripts.OnClick() end)
+        click(needsRows(tab)[1].pick)
+        local p = tab.picker
+        click(p.holders[2])
+        local line = p.preview:GetText()
+        assert.are.equal("[Practice] Correction: " .. LINK .. " → Bo Marsh (soft reserve), not Ana Vale",
+          line:match("^(.-) <BF1P;R;"))
+        assert.is_true(p.post:IsEnabled())
+        local sent = #wow.sent
+        click(p.post)
+        assert.are.same({ text = line, channel = "RAID" }, wow.sent[sent + 1])
+        assert.is_false(p:IsShown())
+      end)
+
+      it("with many holders: hard reserves first, 6 shown, the wheel scrolls the rest (pick-crowded)",
+        function()
+          local list, group = {}, { "Masterlooter", "Ana Vale" }
+          for i = 1, 10 do
+            local char = string.format("Raider %02d", i)
+            list[i] = holder(char, i % 3 == 0 and "HR" or "SR")
+            group[#group + 1] = char
+          end
+          ns.Raids.Get(RAID).reserves[100] = list
+          wow.state.group = group
+          undone()
+          given({ char = "Bo Marsh", at = time() + 60 })
+          local tab, p = opened()
+          local function names()
+            local out = {}
+            for _, b in ipairs(p.holders) do
+              if b:IsShown() then out[#out + 1] = b.name:GetText() end
+            end
+            return out
+          end
+          assert.are.same({ "Raider 03", "Raider 06", "Raider 09", "Raider 01", "Raider 02", "Raider 04" },
+            names())
+          assert.are.equal("HARD RESERVE", p.holders[3].badge:GetText())
+          assert.are.equal("SOFT RESERVE", p.holders[4].badge:GetText())
+          assert.is_nil(p.holders[7])
+          assert.is_true(p.more:IsShown())
+          assert.are.equal("|TInterface\\Buttons\\Arrow-Down-Up:12:12|t 10 reserve holders · scroll for more",
+            p.more:GetText())
+          assert.is_false(p.empty:IsShown())
+          -- Nothing overlaps: the last holder, the scroll line, Anyone else, then the row under the box.
+          assert.is_true(y(p.holders[6]) < y(p.more) and y(p.more) + 16 <= y(p.others))
+          assert.is_true(y(rowOf(tab, "Bo Marsh").item) >= y(p) + p:GetHeight())
+          -- The wheel moves down to the end, then no further, and back.
+          p.holders[1].scripts.OnMouseWheel(p.holders[1], -1)
+          assert.are.equal("Raider 06", names()[1])
+          p.holders[1].scripts.OnMouseWheel(p.holders[1], -10)
+          assert.are.same({ "Raider 02", "Raider 04", "Raider 05", "Raider 07", "Raider 08", "Raider 10" },
+            names())
+          assert.are.equal("|TInterface\\Buttons\\Arrow-Up-Up:12:12|t 10 reserve holders · scroll for more",
+            p.more:GetText())
+          p.holders[1].scripts.OnMouseWheel(p.holders[1], 10)
+          assert.are.equal("Raider 03", names()[1])
+          -- A scrolled-to holder can be picked.
+          p.holders[1].scripts.OnMouseWheel(p.holders[1], -4)
+          click(p.holders[6])
+          assert.are.equal("Correction: " .. LINK .. " → Raider 10 (soft reserve), not Ana Vale",
+            p.preview:GetText():match("^(.-) <BF1;R;"))
+        end)
+
+      it("a correction whose line can't be posted stands, with the window's note and the chat message"
+        .. " (pick-unposted)", function()
+        reserved()
+        local key = undone()
+        local tab, p = opened()
+        click(p.holders[2])
+        _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
+        local sent, printed = #wow.sent, #wow.printed
+        click(p.post)
+        assert.are.equal(sent, #wow.sent)
+        local new = ns.Records.Get(ns.Records.Get(key).replacedBy)
+        assert.are.same({ "Bo Marsh", "confirmed" }, { new.char, new.state })
+        assert.is_false(p:IsShown())
+        assert.are.same({}, needsRows(tab))
+        assert.are.equal("Corrected " .. clock(new.at), tab.shown[#tab.shown].corrected:GetText())
+        assert.are.equal(CHAT .. "Bo Marsh now has " .. LINK .. " on the record, but its raid chat line"
+          .. " couldn't be posted. Type /bf log for why.", wow.printed[printed + 1])
+        assert.is_true(tab.notice:IsShown())
+        assert.are.equal("warn", tab.notice.kind)
+        assert.are.equal("Bo Marsh now has " .. LINK .. " on the record, but the correction line couldn't be"
+          .. " posted in raid chat. Tell the raid yourself. Type /bf log for why.", tab.notice.text:GetText())
+        -- The note sits above the summary, which moves down under it.
+        assert.is_true(-tab.notice.points[1].y + tab.notice:GetHeight() <= -tab.summary.points[1].y)
+        ns.UI.RefreshAwards()
+        assert.is_true(tab.notice:IsShown())
+        -- Until the next picker opens.
+        undone({ char = "Dee Fox", at = time() + 60 })
+        ns.UI.RefreshAwards()
+        click(needsRows(tab)[1].pick)
+        assert.is_false(tab.notice:IsShown())
+      end)
+
+      it("a disenchant/bank correction that can't be posted says where the item goes now", function()
+        reserved()
+        undone()
+        local tab, p = opened()
+        click(p.db)
+        _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
+        local printed = #wow.printed
+        click(p.post)
+        assert.are.equal(CHAT .. LINK .. " now goes to disenchant/bank on the record, but its raid chat line"
+          .. " couldn't be posted. Type /bf log for why.", wow.printed[printed + 1])
+        assert.are.equal(LINK .. " now goes to disenchant/bank on the record, but the correction line"
+          .. " couldn't be posted in raid chat. Tell the raid yourself. Type /bf log for why.",
+          tab.notice.text:GetText())
+      end)
     end)
   end)
 end)
