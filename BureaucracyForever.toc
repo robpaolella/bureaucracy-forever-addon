@@ -26,4 +26,5 @@ Modules\UI.lua
 Modules\AwardsTab.lua
 Modules\StartQuestion.lua
 Modules\Notice.lua
+Modules\OutsideHandout.lua
 Inbox.lua

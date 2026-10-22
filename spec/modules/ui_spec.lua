@@ -61,9 +61,9 @@ describe("the officers' window", function()
     assert.is_false(ns.UI.window:IsShown())
   end)
 
-  it("closes with Escape, as do its dialog, the raid question and the notice", function()
+  it("closes with Escape, as do its dialogs, questions and notice", function()
     assert.are.same({ "BureaucracyForeverWindow", "BureaucracyForeverDialog", "BureaucracyForeverQuestion",
-      "BureaucracyForeverNotice" }, _G.UISpecialFrames)
+      "BureaucracyForeverNotice", "BureaucracyForeverOutsideHandout" }, _G.UISpecialFrames)
   end)
 
   it("shows the Awards tab first, then the tab clicked, each with its placeholder", function()

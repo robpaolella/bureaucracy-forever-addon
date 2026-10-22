@@ -40,6 +40,7 @@ local OPEN_WINDOW = "Open the loot window to hand it out."
 -- fight) and Map limit (the whole time in an instance) leave chat alone.
 local CHAT_LIMITS = { "Encounter", "Chat" }
 local UNKNOWN_BOSS_NOTICE = "These items drop from more than one boss. Pick the boss before awarding."
+local BOSS_MENU_TITLE = "Which boss dropped this?"
 local NO_RESERVES_NOTICE = "No reserves loaded, so every item is an open roll."
 local DB_TITLE = "Disenchant/bank: give to"
 local DB_CHOOSE_TIP = "Disenchant/bank: choose the character to give to."
@@ -79,6 +80,7 @@ local picks = {} -- per slot, the name the officer clicked in the roll list: { i
 local rollNotes = {} -- per slot, why the last hidden-roll click handed nothing out: { item, text }
 local madeUp = {} -- practice mode: per item id in this loot window, its made-up reserves
 local dropCount = 0 -- practice mode: drops given made-up reserves this session, to move through the cases
+local windowItems -- the open loot window's items as it opened, for its boss after some are handed out
 local METHODS = { hr = "HR", sr = "SR", open = "OPEN_ROLL" }
 local ROLL_HEADINGS = { hr = "Rolls (hard reserve holders only)", sr = "Rolls (soft reserve holders only)",
   open = "Rolls (everyone)" }
@@ -88,6 +90,7 @@ local NOT_RECEIVE = " can't be given it: the game won't let them receive it (usu
 
 ns.On("LOOT_CLOSED", function()
   chosenBoss, dbNotes, refusals, picks, rollNotes, madeUp = nil, {}, {}, {}, {}, {}
+  windowItems = nil
 end)
 
 -- Whether the game locks chat for add-ons now (a boss fight). A call that fails counts as no lock.
@@ -162,6 +165,19 @@ local function killTime(raidId, bossId)
   return at and date("%H:%M", at)
 end
 
+-- The boss list to pick from: the raid's bosses, Trash included, id's row selected. markTrash marks
+-- "Trash" while id is nil, as the pop-up's design draws it.
+local function bossMenu(raidId, snapshot, id, markTrash)
+  local menu, trashMarked = {}, false
+  for _, row in ipairs(snapshot.bosses) do
+    local selected = id == row.id or (markTrash and id == nil and row.trash and not trashMarked)
+    trashMarked = trashMarked or (id == nil and row.trash)
+    menu[#menu + 1] = { id = row.id, name = row.name, selected = selected,
+      killed = not row.trash and killTime(raidId, row.id) or nil }
+  end
+  return menu
+end
+
 -- The boss control: the one boss every item points to, or "Trash" and the list to pick from.
 local function bossControl(raidId, snapshot, items)
   if not snapshot then return { resolved = true } end
@@ -171,14 +187,9 @@ local function bossControl(raidId, snapshot, items)
     if i == 1 then suggested = id elseif id ~= suggested then agreed = false end
   end
   local id = chosenBoss or (agreed and suggested or nil)
-  local boss = { resolved = id ~= nil, id = id, menuTitle = "Which boss dropped this?", menu = {} }
-  local trashMarked = false
+  local boss = { resolved = id ~= nil, id = id, menuTitle = BOSS_MENU_TITLE,
+    menu = bossMenu(raidId, snapshot, id, true) }
   for _, row in ipairs(snapshot.bosses) do
-    -- Until a boss is picked the list marks "Trash", as the design draws it.
-    local selected = id == row.id or (id == nil and row.trash and not trashMarked)
-    trashMarked = trashMarked or (id == nil and row.trash)
-    boss.menu[#boss.menu + 1] = { id = row.id, name = row.name, selected = selected,
-      killed = not row.trash and killTime(raidId, row.id) or nil }
     if row.id == id then boss.name = row.name end
   end
   if not boss.resolved then
@@ -588,6 +599,8 @@ local function post(operation, data, why, what, told)
   ns.Log(what .. " not posted: " .. problem)
   ns.Print(told .. " Type /bf log for why.")
 end
+-- The outside hand-out question (OutsideHandout) posts its award lines the same way.
+Popup.Post = post
 
 -- Hands the item to chosen (by name among the corpse's candidates), records the award and posts its
 -- line. Returns the hand-out, or nil and why: "not a candidate" or Tracking.Give's reasons.
@@ -1345,4 +1358,26 @@ function Popup.PickBoss(bossId)
     end
   end
   return nil, "not a boss of this raid"
+end
+
+-- The loot window's items as it opened: handing them out takes them off the window, not its boss.
+ns.On("LOOT_OPENED", function() windowItems = lootItems() end)
+
+-- The boss row id the open loot window's items came from, as the pop-up resolves it (the officer's
+-- pick, else the one boss they all point to), or nil: no window open, no raid loaded or no single boss.
+function Popup.WindowBoss()
+  if not windowItems or ns.Selection.IsQuiet() then return nil end
+  local raidId = ns.Selection.Status().activeRaid
+  local snapshot = ns.Raids.Get(raidId)
+  if not snapshot then return nil end
+  return bossControl(raidId, snapshot, windowItems).id
+end
+
+-- The pop-up's boss list for the selected raid, bossId's row selected and nothing else, or nil with
+-- no raid loaded: { title, menu = { { id, name, selected, killed } } }.
+function Popup.BossMenu(bossId)
+  local raidId = ns.Selection.Status().activeRaid
+  local snapshot = ns.Raids.Get(raidId)
+  if not snapshot then return nil end
+  return { title = BOSS_MENU_TITLE, menu = bossMenu(raidId, snapshot, bossId, false) }
 end

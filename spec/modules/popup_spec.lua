@@ -298,6 +298,32 @@ describe("Popup", function()
       drop({ { id = 3, sourceGuid = "x" } })
       assert.is_false(ns.Popup.Build().boss.resolved)
     end)
+
+    it("gives the window's boss for an outside hand-out, after its items are handed out (#21)", function()
+      setup({})
+      drop({ { id = 1 }, { id = 2 } })
+      assert.are.equal("luc", ns.Popup.WindowBoss())
+      -- The game takes a handed-out item off the window: its slot has no link.
+      wow.state.loot[1].link, wow.state.loot[2].link = nil, nil
+      assert.are.equal("luc", ns.Popup.WindowBoss())
+      assert.is_true(ns.Popup.PickBoss("tra"))
+      assert.are.equal("tra", ns.Popup.WindowBoss())
+      wow.closeLoot()
+      assert.is_nil(ns.Popup.WindowBoss())
+      drop({ { id = 6 } })
+      assert.is_nil(ns.Popup.WindowBoss())
+    end)
+
+    it("gives its boss list with only the asked boss selected, none for no boss (#21)", function()
+      setup({})
+      local menu = ns.Popup.BossMenu()
+      assert.are.equal("Which boss dropped this?", menu.title)
+      assert.are.same({ false, false, false },
+        { menu.menu[1].selected, menu.menu[2].selected, menu.menu[3].selected })
+      assert.is_true(ns.Popup.BossMenu("mag").menu[2].selected)
+      setup()
+      assert.is_nil(ns.Popup.BossMenu())
+    end)
   end)
 
   describe("the foot line and no reserves", function()
