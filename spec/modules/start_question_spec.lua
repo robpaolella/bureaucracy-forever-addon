@@ -529,7 +529,7 @@ describe("the raid question", function()
       assert.is_nil(view())
     end)
 
-    it("never in a dungeon or a party that isn't a raid group", function()
+    it("never in a dungeon with no event, or a party in a raid instance", function()
       start()
       enter({ name = "The Stockade", id = 34, type = "party" })
       assert.is_nil(view())
@@ -550,6 +550,215 @@ describe("the raid question", function()
       enter(MC)
       assert.is_nil(view())
       assert.are.same({ "chosen", "raid00001", ZOE }, selection())
+    end)
+  end)
+
+  describe("in a dungeon", function()
+    local DM = { name = "The Deadmines", id = 36, type = "party" }
+    local SFK = { name = "Shadowfang Keep", id = 33, type = "party" }
+    local STOCK = { name = "The Stockade", id = 34, type = "party" }
+    local DM_RAID = raidTree("raid00010", { name = "The Deadmines", instance = 36 })
+    local SFK_RAID = raidTree("raid00011", { name = "Shadowfang Keep", instance = 33 })
+
+    -- A party (not a raid group) with the dungeon events loaded; options override start's.
+    local function party(options)
+      local o = { groupIsRaid = false, raids = { DM_RAID, SFK_RAID }, users = { ZOE } }
+      for k, v in pairs(options or {}) do o[k] = v end
+      start(o)
+    end
+
+    local function asks() return view() ~= nil end
+
+    it("asks the party chooser after 5 seconds, with the event pre-selected and its own wording", function()
+      party()
+      wow.state.instance = DM
+      wow.fire("PLAYER_ENTERING_WORLD", false, false)
+      wow.advance(4.9)
+      assert.is_nil(view())
+      wow.advance(0.1)
+      local v = view()
+      assert.are.equal("You've entered " .. white("The Deadmines") .. " with your group. If it's a guild run, "
+        .. "pick its raid event. If not, choose the last option.", v.lead)
+      assert.is_true(v.rows[1][1])
+      assert.is_false(v.rows[2][1])
+      assert.are.same({}, wow.sent)
+      assert.are.same({}, wow.blocked)
+      press("Start")
+      assert.are.same({ "chosen", "raid00010", "Konvett" }, selection())
+    end)
+
+    it("asks the same in a raid group inside the dungeon", function()
+      party({ groupIsRaid = true })
+      enter(DM)
+      assert.is_true(view().rows[1][1])
+      assert.is_truthy(view().lead:find("with your group", 1, true))
+    end)
+
+    it("says the leader leads the group when master loot is off", function()
+      party({ lootMethod = { "group", 0, 0 } })
+      enter(DM)
+      assert.are.equal("You're asked because master loot is off and you lead the group. Turn master loot on "
+        .. "to hand out items with the pop-up.", view().note)
+    end)
+
+    it("asks nothing with no candidate, alone, or without a group", function()
+      party()
+      enter(STOCK)
+      assert.is_false(asks())
+      party({ group = { "Konvett" }, users = {} })
+      enter(DM)
+      assert.is_false(asks())
+      party({ group = {} })
+      wow.state.group = nil
+      enter(DM)
+      assert.is_false(asks())
+    end)
+
+    it("asks nothing for an ended candidate or one over 12 hours ahead, and asks at exactly 12", function()
+      local function with(fields)
+        party({ raids = { raidTree("raid00010", fields) } })
+        enter(DM)
+        return asks()
+      end
+      assert.is_false(with({ instance = 36, startsAt = NOW - 5 * 3600 }))
+      assert.is_false(with({ instance = 36, startsAt = NOW + 12 * 3600 + 1 }))
+      assert.is_true(with({ instance = 36, startsAt = NOW + 12 * 3600 }))
+    end)
+
+    it("lists the events with none picked for two under way, or two tied at the soonest start", function()
+      party({ raids = { DM_RAID, raidTree("raid00012", { instance = 36, startsAt = NOW - 900 }) } })
+      enter(DM)
+      for _, r in ipairs(view().rows) do assert.is_false(r[1]) end
+      party({ raids = { raidTree("raid00010", { instance = 36, startsAt = NOW + 3600 }),
+        raidTree("raid00012", { instance = 36, startsAt = NOW + 3600 }) } })
+      enter(DM)
+      for _, r in ipairs(view().rows) do assert.is_false(r[1]) end
+      assert.is_true(asks())
+    end)
+
+    it("asks in any instance type but party, and not for a missing type or number", function()
+      party()
+      enter({ name = "The Deadmines", id = 36, type = "scenario" })
+      assert.is_true(asks())
+      for _, i in ipairs({ { name = "X", id = 36, type = "" }, { name = "X", id = 36 },
+        { name = "X", type = "party" }, { name = "X", id = 0, type = "party" } }) do
+        party()
+        enter(i)
+        assert.is_false(asks())
+      end
+    end)
+
+    describe("who is asked in a party", function()
+      local function asked(users, options)
+        local list = {}
+        for _, player in ipairs(users) do
+          local others = {}
+          for _, other in ipairs(users) do
+            if other ~= player then others[#others + 1] = other end
+          end
+          party({ player = player, group = { "Konvett", ZOE, BO }, users = others, leader = options.leader,
+            lootMethod = options.lootMethod })
+          enter(DM)
+          if view() then list[#list + 1] = player end
+        end
+        return list
+      end
+      local USERS = { "Konvett", ZOE, BO }
+
+      it("is the loot master, else the party leader, else the first add-on user by name", function()
+        assert.are.same({ BO }, asked(USERS, { lootMethod = { "master", 2, 3 }, leader = ZOE }))
+        assert.are.same({ ZOE }, asked(USERS, { lootMethod = { "group", 0, 0 }, leader = ZOE }))
+        assert.are.same({ BO }, asked(USERS, { lootMethod = { "master", 3, 4 }, leader = "Cy Stone" }))
+      end)
+
+      it("asks the next chooser when the one asked leaves, and closes on another officer's choice", function()
+        party({ leader = ZOE, lootMethod = { "group", 0, 0 } })
+        enter(DM)
+        assert.is_nil(view())
+        wow.state.group = { "Konvett", BO }
+        wow.fire("GROUP_ROSTER_UPDATE")
+        wow.advance(5)
+        assert.is_true(asks())
+        receive("S;S00010;" .. (NOW + 1) .. ";" .. BO, BO)
+        assert.is_nil(view())
+        assert.are.same({ "chosen", "raid00010", BO }, selection())
+      end)
+    end)
+
+    it("doesn't ask again when the party becomes a raid group inside, but does in a raid instance", function()
+      party()
+      enter(DM)
+      press("Decide later")
+      wow.state.groupIsRaid = true
+      wow.fire("GROUP_ROSTER_UPDATE")
+      wow.advance(5)
+      assert.is_nil(view())
+      party({ raids = { MC_RAID } })
+      enter(MC)
+      wow.advance(5)
+      assert.is_nil(view())
+      wow.state.groupIsRaid = true
+      wow.fire("GROUP_ROSTER_UPDATE")
+      wow.advance(5)
+      assert.is_true(asks())
+    end)
+
+    it("asks nothing when leaving during the wait, and once about B moving from A to B", function()
+      party()
+      enter(DM, 2)
+      enter(OUTSIDE, 10)
+      assert.is_nil(view())
+      enter(DM, 2)
+      enter(SFK, 5)
+      assert.is_truthy(view().lead:find("Shadowfang Keep", 1, true))
+      wow.advance(10)
+      assert.is_true(asks())
+    end)
+
+    it("asks again after Decide later, but not once the event is chosen", function()
+      party()
+      enter(DM)
+      press("Decide later")
+      enter(OUTSIDE)
+      enter(DM)
+      assert.is_true(asks())
+      press("Start")
+      enter(OUTSIDE)
+      enter(DM)
+      assert.is_nil(view())
+    end)
+
+    it("asks again for another dungeon with a candidate, and nothing for one without", function()
+      party()
+      enter(DM)
+      press("Start")
+      enter(SFK)
+      assert.is_truthy(view().lead:find("Switch the raid to", 1, true))
+      press("Keep The Deadmines")
+      enter(STOCK)
+      assert.is_nil(view())
+      assert.are.same({ "chosen", "raid00010", "Konvett" }, selection())
+    end)
+
+    it("asks on joining a party inside the dungeon, and closes when leaving it", function()
+      party({ group = {} })
+      wow.state.group = nil
+      enter(DM)
+      assert.is_nil(view())
+      wow.state.group = { "Konvett", ZOE }
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.is_nil(view())
+      wow.advance(5)
+      assert.is_true(asks())
+      wow.state.group = nil
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.is_nil(view())
+    end)
+
+    it("never asks after /reload", function()
+      party()
+      enter(DM, 5, true)
+      assert.is_nil(view())
     end)
   end)
 
