@@ -1527,3 +1527,176 @@ describe("the Awards tab's Undo", function()
     end)
   end)
 end)
+
+-- A Test drop's practice awards, held with no raid, in the practice group (#150).
+describe("the Awards tab with a Test drop's awards", function()
+  local ns
+  local LINK = "|cffa335ee|Hitem:100::::::::60:::::|h[Choker]|h|r"
+  local GROUP = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein", "Mirel Stone",
+    "Tovin Hale" }
+
+  -- Practice mode on, a raid group, the player a plain member (not the loot master) unless master.
+  local function setup(master)
+    ns = wow.start()
+    wow.state.group, wow.state.groupIsRaid = GROUP, true
+    wow.state.lootMethod = master and { "master", 0, 0 } or { "group", 0, 0 }
+    wow.state.items[100] = { name = "Choker", link = LINK, icon = 1 }
+    wow.slash("/bf practice")
+  end
+
+  -- A Test drop's Give: the award's key.
+  local function testDropAward()
+    assert(ns.TestDrop.Open())
+    local row = ns.Popup.Build().rows[1]
+    local key
+    wow.click(function() key = assert(ns.Popup.Give(row.slot, row.item, row.winner)).awardKey end)
+    wow.advance(ns.TestDrop.confirmAfter)
+    return key
+  end
+
+  local function openTab()
+    ns.UI.Toggle()
+    local tab = ns.UI.awards
+    if tab.practiceToggle:IsShown() and not tab.practiceOpen then
+      wow.click(function() tab.practiceToggle.scripts.OnClick() end)
+    end
+    return tab
+  end
+
+  local function undoOf(tab)
+    for _, line in ipairs(tab.shown) do
+      if line.undo then return line.undo end
+    end
+  end
+
+  local function count(tab)
+    local n = 0
+    for _, line in ipairs(tab.shown) do
+      if line.winner then n = n + 1 end
+    end
+    return n
+  end
+
+  for _, master in ipairs({ false, true }) do
+    local who = master and "the loot master" or "a player who is not the loot master"
+    describe("for " .. who, function()
+      before_each(function() setup(master) end)
+
+      it("lists it in the practice group with no raid selected, with an enabled Undo", function()
+        local key = testDropAward()
+        assert.is_nil(ns.Records.Get(key).raid)
+        local tab = openTab()
+        assert.is_false(tab.title:IsShown())
+        assert.are.equal("", tab.summary:GetText())
+        assert.are.equal("- Practice awards (1) · never sent to the guild site", lines(tab)[1][1])
+        assert.are.equal(1, count(tab))
+        local undo = undoOf(tab)
+        assert.is_true(undo:IsShown())
+        assert.is_true(undo:IsEnabled())
+        assert.is_nil(undo.tip)
+      end)
+
+      it("lists it whichever raid is selected, and when the run is not a guild run", function()
+        local key = testDropAward()
+        chooseRaid(ns)
+        local tab = openTab()
+        assert.are.equal(1, ns.UI.AwardsView().practice and #ns.UI.AwardsView().practice.rows)
+        assert.is_true(undoOf(tab):IsEnabled())
+        assert(ns.Selection.ChooseOff())
+        ns.UI.RefreshAwards()
+        assert.are.equal(1, #ns.UI.AwardsView().practice.rows)
+        assert.are.equal(key, ns.UI.AwardsView().practice.rows[1].key)
+        assert.is_true(undoOf(tab):IsEnabled())
+      end)
+
+      it("undoes it: one [Practice] line, nothing sent, the row shown as undone", function()
+        local key = testDropAward()
+        chooseRaid(ns)
+        local tab = openTab()
+        local sent, queued = #wow.sent, 0
+        local sendOp = ns.Hub.SendOp
+        ns.Hub.SendOp = function(...) queued = queued + 1 return sendOp(...) end
+        wow.click(function() undoOf(tab).scripts.OnClick(undoOf(tab)) end)
+        ns.Hub.SendOp = sendOp
+        local record = ns.Records.Get(key)
+        assert.is_true(record.voided)
+        assert.are.equal(sent + 1, #wow.sent)
+        assert.are.equal("[Practice] ", wow.sent[#wow.sent].text:sub(1, 11))
+        assert.are.equal(0, queued)
+        local line = tab.shown[2]
+        assert.is_true(line.voided)
+        assert.are.equal("Undone " .. clock(record.voidedAt), line.note:GetText())
+        assert.is_nil(line.undo)
+      end)
+    end)
+  end
+
+  describe("otherwise", function()
+    before_each(function() setup(true) end)
+
+    local function noRaidAward(fields)
+      local f = { item = 100, char = "Ana Vale", method = "HR", practice = true, noRaid = true }
+      for k, v in pairs(fields or {}) do f[k] = v end
+      return assert(ns.Records.Award(f)).id
+    end
+
+    it("hides them with Practice mode off", function()
+      testDropAward()
+      wow.slash("/bf practice")
+      ns.UI.Toggle()
+      assert.is_nil(ns.UI.AwardsView().practice)
+      assert.is_true(ns.UI.AwardsView().empty)
+    end)
+
+    it("does not count them in the selected raid's summary", function()
+      chooseRaid(ns)
+      award(ns, {})
+      testDropAward()
+      local tab = openTab()
+      assert.are.equal("1 award", tab.summary:GetText())
+      assert.are.equal("Practice awards (1) · never sent to the guild site",
+        ns.UI.AwardsView().practice.heading)
+    end)
+
+    it("counts them in the group's heading with a loaded raid's practice awards", function()
+      chooseRaid(ns)
+      award(ns, { practice = true })
+      testDropAward()
+      assert.are.equal("Practice awards (2) · never sent to the guild site",
+        ns.UI.AwardsView().practice.heading)
+    end)
+
+    it("never lists a real no-raid award", function()
+      wow.slash("/bf practice")
+      noRaidAward({ practice = false })
+      assert.are.equal(1, #ns.Raids.NoRaidAwards())
+      assert.is_true(ns.UI.AwardsView().empty)
+      wow.slash("/bf practice")
+      assert.is_true(ns.UI.AwardsView().empty)
+    end)
+
+    it("shows a not confirmed one as not confirmed, with its choices for the loot master", function()
+      local key = noRaidAward()
+      assert(ns.Records.NotConfirmed(key))
+      local view = ns.UI.AwardsView()
+      local r = view.practice.rows[1]
+      assert.is_true(r.notConfirmed)
+      assert.is_truthy(r.choices)
+      local tab = openTab()
+      assert.is_truthy(tab.shown[2].winner:GetText():find(AMBER_NC, 1, true))
+      assert.are.equal(3, #tab.shown[2].choices)
+    end)
+  end)
+
+  it("gives a not confirmed one no choices to a player who is not the loot master", function()
+    setup(false)
+    assert(ns.Records.NotConfirmed(assert(ns.Records.Award({ item = 100, char = "Ana Vale", method = "HR",
+      practice = true, noRaid = true })).id))
+    local r = ns.UI.AwardsView().practice.rows[1]
+    assert.is_true(r.notConfirmed)
+    assert.is_nil(r.choices)
+    local tab = openTab()
+    assert.is_nil(tab.shown[2].choices)
+    assert.are.equal(3, #shownButtons(tab))
+  end)
+end)

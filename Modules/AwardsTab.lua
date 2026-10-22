@@ -123,12 +123,20 @@ function UI.AwardsView()
   local snapshot = ns.Raids.Get(raidId)
   local rows, practice, order, byBoss = {}, {}, {}, {}
   local name, me = master()
-  for _, award in ipairs(ns.Raids.Awards(raidId)) do
-    local r = row(snapshot, award)
-    if me and r.notConfirmed then r.choices = ns.Popup.Choices(r.key) end
-    if me and r.undoable then r.undo = ns.Popup.UndoButton(r.key) end
-    if r.notConfirmed or r.undoable then r.refusal = ns.Popup.Refusal(r.key) end
-    if award.practice then practice[#practice + 1] = r else rows[#rows + 1] = r end
+  -- With Practice mode on, the practice awards held with no raid (a Test drop's) join the practice
+  -- group whatever raid is selected; their Undo is the player's own, as Popup.Undo allows.
+  local listed = { { ns.Raids.Awards(raidId) } }
+  if ns.Practice() then listed[2] = { ns.Raids.NoRaidAwards(), true } end
+  for _, list in ipairs(listed) do
+    for _, award in ipairs(list[1]) do
+      if not list[2] or award.practice then
+        local r = row(snapshot, award)
+        if me and r.notConfirmed then r.choices = ns.Popup.Choices(r.key) end
+        if (me or list[2]) and r.undoable then r.undo = ns.Popup.UndoButton(r.key) end
+        if r.notConfirmed or r.undoable then r.refusal = ns.Popup.Refusal(r.key) end
+        if award.practice then practice[#practice + 1] = r else rows[#rows + 1] = r end
+      end
+    end
   end
   for _, h in ipairs(ns.OutsideHandout.Unanswered()) do
     if raidId and h.raid == raidId then
