@@ -1373,10 +1373,10 @@ function Popup.WindowBoss()
   return bossControl(raidId, snapshot, windowItems).id
 end
 
--- The pop-up's boss list for the selected raid, bossId's row selected and nothing else, or nil with
--- no raid loaded: { title, menu = { { id, name, selected, killed } } }.
-function Popup.BossMenu(bossId)
-  local raidId = ns.Selection.Status().activeRaid
+-- The pop-up's boss list for raidId (by default the selected raid), bossId's row selected and nothing
+-- else, or nil with that raid not loaded: { title, menu = { { id, name, selected, killed } } }.
+function Popup.BossMenu(bossId, raidId)
+  raidId = raidId or ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
   if not snapshot then return nil end
   return { title = BOSS_MENU_TITLE, menu = bossMenu(raidId, snapshot, bossId, false) }

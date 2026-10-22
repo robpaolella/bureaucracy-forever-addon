@@ -32,9 +32,9 @@ local closing = false -- the add-on itself is hiding the question
 
 local function plain(text) return (tostring(text):gsub("|", "||")) end
 
--- The winner's reserve of the item in the selected raid: its kind ("HR" or "SR") and user, or nil.
+-- The winner's reserve of the item in the hand-out's raid: its kind ("HR" or "SR") and user, or nil.
 local function reserveOf(handout)
-  local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
+  local snapshot = ns.Raids.Get(handout.raid)
   local holders = snapshot and (snapshot.reserves[handout.item] or snapshot.reserves[tostring(handout.item)])
   local found
   for _, h in ipairs(holders or {}) do
@@ -78,14 +78,14 @@ local function place(piece, y, x)
 end
 
 local function bossName(id)
-  for _, row in ipairs((ns.Raids.Get(ns.Selection.Status().activeRaid) or { bosses = {} }).bosses) do
+  for _, row in ipairs((ns.Raids.Get(shown.handout.raid) or { bosses = {} }).bosses) do
     if row.id == id then return row.name end
   end
 end
 
 -- The boss list under the boss button: the pop-up's, with the picked boss marked.
 local function drawMenu()
-  local list = ns.Popup.BossMenu(shown.boss)
+  local list = ns.Popup.BossMenu(shown.boss, shown.handout.raid)
   local menu = frame.menu
   menu.title:SetText(list.title)
   local y = 26
@@ -178,13 +178,14 @@ showNext = function()
   if not h then return end
   local held, user = reserveOf(h)
   shown = { handout = h, held = held, user = user, method = held or "OPEN_ROLL", roll = "",
-    boss = h.boss or h.picked, askBoss = h.boss == nil and ns.Popup.BossMenu() ~= nil }
+    boss = h.boss or h.picked, askBoss = h.boss == nil and ns.Popup.BossMenu(nil, h.raid) ~= nil }
   frame.roll:SetText("")
   draw()
 end
 
--- Opens the question for a hand-out ({ winner, link, item, quantity, at, boss (the loot window's boss
--- row id, or nil to ask), picked (the boss the officer picked when asked before) }), or queues it
+-- Opens the question for a hand-out ({ winner, link, item, quantity, at, raid (the raid awards went to
+-- when it was handed out, nil for none: its award goes there), boss (the loot window's boss row id, or
+-- nil to ask), picked (the boss the officer picked when asked before) }), or queues it
 -- behind the one on screen; in a boss fight it waits until the fight ends.
 -- One from the unanswered list leaves it while it is asked. Used for each outside hand-out, and for
 -- answering one put off with Later (#137).
@@ -197,8 +198,8 @@ function OutsideHandout.Ask(handout)
   showNext()
 end
 
--- This session's hand-outs put off with Later, oldest first: { winner, link, item, quantity, at, boss,
--- picked }, as Ask takes them.
+-- This session's hand-outs put off with Later, oldest first: { winner, link, item, quantity, at, raid,
+-- boss, picked }, as Ask takes them.
 -- Kept in memory only; nothing in it is saved, posted or sent.
 function OutsideHandout.Unanswered() return unanswered end
 
@@ -231,10 +232,11 @@ function OutsideHandout.Later()
   showNext()
 end
 
--- Record and announce (a click: it posts a chat line): records the award with the answer, confirmed,
--- sends both operations to the other officers and posts the award line, then asks the next.
--- Returns the award operation, or nil and why: "not ready" (Record is disabled), "fight" (chat is
--- locked) or Records.Award's reasons.
+-- Record and announce (a click: it posts a chat line): records the award with the answer in the
+-- hand-out's raid, confirmed, sends both operations to the other officers and posts the award line,
+-- then asks the next. Returns the award operation, or nil and why: "not ready" (Record is disabled),
+-- "fight" (chat is locked) or Records.Award's reasons ("not loaded": the hand-out's raid was taken
+-- off the list), when the question stays open and the officer is told nothing was recorded.
 function OutsideHandout.Record()
   if not (shown and ready()) then return nil, "not ready" end
   if ns.Popup.ChatLocked() then return nil, "fight" end
@@ -248,17 +250,20 @@ function OutsideHandout.Record()
   local roll = method == "OPEN_ROLL" and rollOf(shown.roll) or nil
   local winner = not db and h.winner or nil
   local user = not db and shown.user or nil
-  hide()
-  local op, why = ns.Records.Award({ boss = boss, item = h.item, char = winner, user = user,
+  local op, why = ns.Records.Award({ raid = h.raid, boss = boss, item = h.item, char = winner, user = user,
     method = method, roll = roll, practice = ns.Practice() })
-  ns.Hub.SendOwn(op, why)
-  local data
-  if op then
-    ns.Hub.SendOwn(ns.Records.Confirm(op.id))
-    local snapshot = ns.Raids.Get(op.raid)
-    data = { raid = snapshot and snapshot.code, key = op.id, item = h.item, link = h.link, boss = boss,
-      method = method, roll = roll, winner = winner, practice = op.practice }
+  if not op then
+    ns.Log("Award for " .. h.link .. " not recorded: " .. tostring(why))
+    ns.Print("The award of " .. h.link .. " to " .. plain(h.winner) .. " couldn't be recorded. Type /bf log"
+      .. " for why.")
+    return nil, why
   end
+  hide()
+  ns.Hub.SendOwn(op, why)
+  ns.Hub.SendOwn(ns.Records.Confirm(op.id))
+  local snapshot = ns.Raids.Get(op.raid)
+  local data = { raid = snapshot and snapshot.code, key = op.id, item = h.item, link = h.link, boss = boss,
+    method = method, roll = roll, winner = winner, practice = op.practice }
   ns.Popup.Post("award", data, why, "Award line for " .. h.link, "The award of " .. h.link .. " to "
     .. plain(h.winner) .. " is recorded, but its raid chat line couldn't be posted.")
   ns.UI.RefreshAwards()
@@ -357,8 +362,9 @@ end)
 ns.Tracking.On("outside", function(info)
   local item = info.link and tonumber(info.link:match("item:(%d+)"))
   if not item or ns.Selection.IsQuiet() then return end
+  local raidId = ns.Selection.Status().activeRaid
   OutsideHandout.Ask({ winner = info.winner, link = info.link, item = item, quantity = info.quantity,
-    at = time(), boss = ns.Popup.WindowBoss() })
+    at = time(), raid = ns.Raids.Get(raidId) and raidId or nil, boss = ns.Popup.WindowBoss() })
 end)
 
 -- Chat is locked in a boss fight: the question on screen goes back to the front of the line, with
