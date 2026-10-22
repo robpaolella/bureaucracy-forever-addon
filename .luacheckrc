@@ -13,7 +13,7 @@ read_globals = {
   "GetMasterLootCandidate", "GetNumLootItems", "GiveMasterLoot", "LoggingChat",
   "SendChatMessage", "UnitName", "strtrim", "date", "time", "GetTime",
   "UIParent", "Minimap", "GameTooltip", "UISpecialFrames", "GetCursorPosition", "GetInstanceInfo",
-  "GetItemInfo", "IsInRaid", "GetNumGroupMembers", "GetRaidRosterInfo", "UnitIsConnected", "ItemRefTooltip",
+  "GetItemInfo", "IsInRaid", "IsInGroup", "GetNumGroupMembers", "GetRaidRosterInfo", "UnitIsConnected", "ItemRefTooltip",
   "TooltipDataProcessor", "UnitIsGroupLeader", "UnitIsGroupAssistant", "issecretvalue", "Enum", "C_PartyInfo", "C_RestrictedActions",
   "IsShiftKeyDown",
   -- The desktop helper's inbox (Inbox.lua), read at load.

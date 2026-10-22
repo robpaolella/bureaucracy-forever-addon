@@ -1,10 +1,12 @@
 -- StartQuestion: the raid question at the start of a run (ADDON-SPEC.md 2.1; design/44-sync-raids, the
--- ask-* states; #53). When the player enters a raid instance in a raid group, the chooser (Hub.Chooser)
--- is asked after 5 seconds, so the other add-ons' P messages have arrived: "Is this a guild run?", the
--- loaded raids with the suggestion pre-selected and "No, not a guild run" last. A raid already selected
--- is asked about again only in a different instance (ask-again). The question only draws: the answer
--- goes through Selection, which shares it with the group (an S message). Saved beside the selection:
--- questionKept, the instance where the officer answered Keep to ask-again.
+-- ask-* states; #53). When the player enters a raid instance in a raid group, or a dungeon (any other
+-- instance type but "none", with an instance number) in any group when a loaded raid is a candidate
+-- for it, the chooser (Hub.Chooser) is asked after 5 seconds, so the other add-ons' P messages have
+-- arrived: "Is this a guild run?", the loaded raids with the suggestion pre-selected and "No, not a
+-- guild run" last. A raid already selected is asked about again only in a different instance
+-- (ask-again). The question only draws: the answer goes through Selection, which shares it with the
+-- group (an S message). Saved beside the selection: questionKept, the instance where the officer
+-- answered Keep to ask-again.
 local _, ns = ...
 
 local Q = {}
@@ -24,10 +26,25 @@ local token = 0             -- the latest wait, so an older one does nothing
 
 local function me() return ns.Rules.Bare(UnitName("player")) end
 
--- The raid instance the player is in, as its number and name, or nil outside one.
-local function raidInstance()
+-- The instance that can ask, as its number, name and whether it is a raid instance: a raid, or a
+-- dungeon (spec 2.1: any other type that is set and not "none", with an instance number). Else nil.
+local function instance()
   local name, kind, _, _, _, _, _, id = GetInstanceInfo()
-  if kind == "raid" then return id, name end
+  if kind == "raid" then return id, name, true end
+  if kind and kind ~= "" and kind ~= "none" and id and id ~= 0 then return id, name, false end
+end
+
+-- Whether the player is in the group that asks: a raid group in a raid instance, any group in a dungeon.
+local function grouped(raid)
+  if raid then return IsInRaid() end
+  return IsInGroup()
+end
+
+-- Whether the player is in that group for the instance they are in (any group outside one).
+local function inGroup()
+  local id, _, raid = instance()
+  if id then return grouped(raid) end
+  return IsInGroup()
 end
 
 -- The raid instance where the officer kept the selected raid (ask-again's Keep), saved so a /reload
@@ -228,18 +245,22 @@ local function staying(raidId)
 end
 
 -- The fallback note when master loot is off (ask-fallback).
-local function fallback()
+local function fallback(raid)
   if p.lootMaster() then return nil end
-  local lead = UnitIsGroupLeader("player") and " and you lead the raid" or ""
+  local lead = ""
+  if UnitIsGroupLeader("player") then
+    lead = raid and " and you lead the raid" or " and you lead the group"
+  end
   return "You're asked because master loot is off" .. lead
     .. ". Turn master loot on to hand out items with the pop-up."
 end
 
 -- ask-guild, ask-raid, ask-overlap, ask-nomatch and ask-fallback; with no raid loaded, only No or later.
-local function entryView(id, name)
+local function entryView(id, name, raid)
   local raids = ns.Raids.Status()
-  local where = "You've entered " .. p.WHITE:format(p.plain(name)) .. " with a raid group."
-  local view = { title = "Is this a guild run?", note = fallback(),
+  local where = "You've entered " .. p.WHITE:format(p.plain(name))
+    .. (raid and " with a raid group." or " with your group.")
+  local view = { title = "Is this a guild run?", note = fallback(raid),
     buttons = { { label = "Start", needsPick = true, onClick = function() answer(false) end },
       { label = "Decide later", onClick = decideLater } } }
   if #raids == 0 then
@@ -256,7 +277,7 @@ end
 
 -- ask-again: a different raid instance from the selected raid's, with its suggestion to switch to.
 -- Without one (an overlap, a tie or no match) the loaded raids are listed, nothing picked.
-local function againView(id, name)
+local function againView(id, name, raid)
   local current = ns.Selection.Status().activeRaid
   local keepName = p.plain(ns.Raids.Get(current).name)
   local keep = { label = "Keep " .. keepName, onClick = function()
@@ -266,7 +287,7 @@ local function againView(id, name)
   local suggested = ns.Selection.Suggest(id)
   local where = "You've entered " .. p.WHITE:format(p.plain(name)) .. "."
   if suggested then
-    return { title = "Bureaucracy Forever", note = fallback(),
+    return { title = "Bureaucracy Forever", note = fallback(raid),
       lead = where .. " Switch the raid to " .. p.WHITE:format(p.raidName(ns.Raids.Get(suggested))) .. "?",
       hint = staying(current),
       buttons = { { label = "Switch", onClick = function()
@@ -283,34 +304,38 @@ local function againView(id, name)
   for _, line in ipairs({ hint or false, staying(current) or false }) do
     if line then hints[#hints + 1] = line end
   end
-  return { title = "Bureaucracy Forever", note = fallback(),
+  return { title = "Bureaucracy Forever", note = fallback(raid),
     lead = where .. " " .. (lead or "Which raid event is this?"),
     hint = #hints > 0 and table.concat(hints, " ") or nil, rows = rows(raids, id),
     buttons = { { label = "Start", needsPick = true, onClick = function() answer(true) end }, keep } }
 end
 
-local function show(kind, view, suggested)
+local function show(kind, view, suggested, raid)
   local status = ns.Selection.Status()
-  shown = { kind = kind, view = view, pick = suggested,
+  shown = { kind = kind, view = view, pick = suggested, raid = raid,
     held = { activeBy = status.activeBy, activeRaid = status.activeRaid, at = status.at } }
   draw()
 end
 
--- After the wait: asks if the player is still in instance id, in a raid group, and is the chooser.
+-- After the wait: asks if the player is still in instance id, in its group (a dungeon needs a
+-- candidate too), and is the chooser.
 local function check(id)
-  local now, name = raidInstance()
-  if now ~= id or not IsInRaid() then return end
+  local now, name, raid = instance()
+  if now ~= id or not grouped(raid) then return end
+  if not raid and not next((candidates(ns.Raids.Status(), id))) then return end
   asker = ns.Hub.Chooser()
   if asker ~= me() then return end
   local kind = due(id)
-  if kind == "entry" then show(kind, entryView(id, name))
-  elseif kind == "again" then show(kind, againView(id, name)) end
+  if kind == "entry" then
+    local view, suggested = entryView(id, name, raid)
+    show(kind, view, suggested, raid)
+  elseif kind == "again" then show(kind, againView(id, name, raid), nil, raid) end
 end
 
 -- Waits 5 seconds (a timer: no click is behind it, and it sends nothing), then checks.
 local function wait()
-  local id = raidInstance()
-  if not id or not IsInRaid() then return end
+  local id, _, raid = instance()
+  if not id or not grouped(raid) then return end
   token = token + 1
   local mine = token
   C_Timer.After(WAIT, function()
@@ -335,7 +360,7 @@ end
 function Q.Recheck()
   if not shown then return end
   local held, status = shown.held, ns.Selection.Status()
-  local outOfGroup = shown.kind ~= "gone" and not IsInRaid()
+  local outOfGroup = shown.kind ~= "gone" and not grouped(shown.raid)
   if outOfGroup or held.activeBy ~= status.activeBy or held.activeRaid ~= status.activeRaid
     or held.at ~= status.at then
     hide()
@@ -380,28 +405,29 @@ ns.On("ADDON_LOADED", function(name)
   if name == ns.name then build() end
 end)
 
--- Whether the player was in a raid group at the last look.
-local raidGroup = false
+-- Whether the player was in the asking group at the last look.
+local wasGrouped = false
 
 -- Entering the world: a loading screen, such as into or out of an instance. Never after /reload.
--- Entering another raid instance forgets a Keep given in the one before.
+-- Entering another instance forgets a Keep given in the one before.
 ns.On("PLAYER_ENTERING_WORLD", function(_, isReloadingUi)
-  raidGroup = IsInRaid()
+  wasGrouped = inGroup()
   if isReloadingUi then return end
-  local id = raidInstance()
+  local id = instance()
   if id and id ~= kept() then ns.db.questionKept = nil end
   wait()
 end)
 
--- Joining a raid group (or the party becoming one) in a raid instance asks after the wait, and so
+-- Joining a raid group (or the party becoming one) in a raid instance, or any group in a dungeon, asks
+-- after the wait; a party becoming a raid group inside a dungeon does not. So
 -- does the chooser who takes over when the one asked leaves the group or goes offline (the roster
 -- has no one offline). Leaving the group closes the question.
 local function update()
-  local now = IsInRaid()
+  local now = inGroup()
   if not now then
     if shown and shown.kind ~= "gone" then hide() end
     asker = nil
-  elseif not raidGroup then
+  elseif not wasGrouped then
     wait()
   elseif asker and asker ~= me() then
     local left = true
@@ -413,7 +439,7 @@ local function update()
       wait()
     end
   end
-  raidGroup = now
+  wasGrouped = now
 end
 
 ns.On("GROUP_ROSTER_UPDATE", update)
