@@ -9,7 +9,9 @@ local function repo(commits)
   local self = { commits = {}, releases = {}, published = {}, calls = {}, waits = {}, built = {}, nextId = 1 }
   local index = {}
   function self.add(commit)
-    local sha = string.rep(string.format("%x", (#self.commits + 1) % 16), 40)
+    local n = #self.commits + 1
+    -- One repeated digit for the first few (tests name them), a unique number after that.
+    local sha = n < 16 and string.rep(string.format("%x", n), 40) or string.format("%040x", n)
     commit.sha = sha
     commit.toc = commit.toc or (self.commits[#self.commits] or { toc = TOC }).toc
     self.commits[#self.commits + 1] = commit
@@ -289,6 +291,8 @@ describe("Draft.run", function()
       assert.equal("created", r.run().status)
       assert.equal(1, r.count("pulls%?state=closed"))
       assert.equal(0, r.count("commits/"))
+      local _, noted = r.drafts()[1].notes:gsub("Fix %d+%.", "")
+      assert.equal(199, noted)
     end)
 
     it("asks for a commit the list lacks by itself", function()
