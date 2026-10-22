@@ -595,6 +595,8 @@ end
 -- What the Awards tab shares to draw a not confirmed award's choices the pop-up's way (#101).
 PopupFrame.NewList, PopupFrame.DrawList = newList, drawList
 PopupFrame.TipButton, PopupFrame.SetButton = tipButton, setButton
+-- And what its Pick winner picker draws with (#126): the bordered box and the badges' colours.
+PopupFrame.NewBox, PopupFrame.BADGE_COLORS = newBox, BADGE_COLORS
 
 -- The hidden rolls' name buttons, flowing across the box; a click awards to that player with the
 -- roll typed in the box (#102). Returns the new y.

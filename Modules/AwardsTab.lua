@@ -2,7 +2,9 @@
 -- boss, read only. A not confirmed row has three buttons: for the loot master they are the pop-up's
 -- three choices (#101), with its Give to someone else list and refusal text; another officer sees
 -- them greyed. A confirmed award has Undo (#40), and one undone after it left the corpse is followed
--- by its NEEDS A WINNER row. Draws into UI.tabs.Awards and UI.footer.
+-- by its NEEDS A WINNER row, whose Pick winner opens the picker in a box under it (#126,
+-- design/115-pick-winner version A): choose who has it now, see the line, Post correction. Draws
+-- into UI.tabs.Awards and UI.footer.
 local _, ns = ...
 
 local UI = ns.UI
@@ -25,6 +27,16 @@ local EMPTY_HINT = "Items you hand out with the pop-up, or from the game's loot 
   .. "with the time, boss, winner and how they won."
 local BUTTONS = { "Try again", "Someone else", "Not handed out" }
 local NEEDS_WINNER = AMBER:format("NEEDS A WINNER") .. " Undone after it left the corpse"
+-- The picker's box, from the item column to the right edge, and how many names it lists at once.
+local BOX_X = COLUMNS.item[1]
+local BOX_WIDTH = CONTENT_WIDTH - BOX_X
+local HOLDERS_SHOWN, MEMBERS_SHOWN, CHOICE_HEIGHT = 6, 12, 22
+local GOLD_SMALL = "|cffffd100%s|r"
+local NOTE_LABEL = GOLD_SMALL:format("Note for the guild site") .. " "
+  .. GREY:format("(optional, never posted in chat)")
+local BADGE_DB = { 0.5, 0.3, 0.7 }
+local ARROW_DOWN = "|TInterface\\Buttons\\Arrow-Down-Up:12:12|t"
+local ARROW_UP = "|TInterface\\Buttons\\Arrow-Up-Up:12:12|t"
 
 local tab = {} -- the tab's pieces
 UI.awards = tab
@@ -66,6 +78,10 @@ local function row(snapshot, award)
     -- Undone after the game confirmed it, and not yet given to anyone: the item left the corpse.
     needsWinner = award.voided and award.state == "confirmed" and not award.replacedBy or nil,
     voided = award.voided and true or false,
+    -- Given by Pick winner: it replaces an award confirmed before it was undone.
+    corrected = not award.voided and award.replaces
+      and (ns.Records.Get(award.replaces) or {}).state == "confirmed"
+      and ("Corrected " .. date("%H:%M", award.at)) or nil,
     note = award.voided and (award.voidReason and plain(award.voidReason)
       or ("Undone " .. date("%H:%M", award.voidedAt or award.at))) or nil,
     at = award.at, voidedAt = award.voidedAt }
@@ -205,13 +221,29 @@ local function undoButton(index, y, key, undo)
   return b
 end
 
--- The loot master's Pick winner on a NEEDS A WINNER row. It does nothing yet (#126).
-local function pickButton(index, y)
+-- Opens the picker under the award's NEEDS A WINNER row (one at a time), or closes it when open
+-- there. A new picker takes the correction's ids now, so its line is the one posted.
+local function togglePicker(key)
+  if tab.pickOpen == key then
+    tab.pickOpen, tab.pick = nil, nil
+  else
+    tab.pickOpen, tab.unposted = key, nil
+    tab.pick = { id = ns.Records.NewId("replace"), newKey = ns.Records.NewId("award"), offset = 0,
+      menuOffset = 0 }
+    tab.scrollTo = true
+  end
+  UI.RefreshAwards()
+end
+
+-- The loot master's Pick winner on a NEEDS A WINNER row: opens or closes its picker.
+local function pickButton(index, y, key)
   local b = tab.picks[index]
   if not b then
     b = newButton(tab.child, "Pick winner", PICK_WIDTH, BUTTON_HEIGHT)
+    b:SetScript("OnClick", function(self) togglePicker(self.key) end)
     tab.picks[index] = b
   end
+  b.key = key
   b:ClearAllPoints()
   b:SetPoint("TOPLEFT", tab.child, "TOPLEFT", CONTENT_WIDTH - PICK_WIDTH, -y)
   b:Show()
@@ -283,6 +315,380 @@ local function hideAll(pools)
   end
 end
 
+-- Puts a piece of the picker x across and y down its box, and shows it.
+local function at(piece, x, y)
+  piece:ClearAllPoints()
+  piece:SetPoint("TOPLEFT", tab.picker, "TOPLEFT", x, -y)
+  piece:Show()
+end
+
+-- The picker's edit box: onChange(text) follows the officer's typing.
+local function editBox(parent, width, letters, onChange)
+  local e = CreateFrame("EditBox", nil, parent)
+  e:SetSize(width, 20)
+  e:SetAutoFocus(false)
+  e:SetMaxLetters(letters)
+  e:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+  e:SetTextInsets(4, 4, 0, 0)
+  e:SetScript("OnEscapePressed", e.ClearFocus)
+  e:SetScript("OnEnterPressed", e.ClearFocus)
+  e:SetScript("OnTextChanged", function(self, typed)
+    if typed then onChange(self:GetText()) end
+  end)
+  e.background = e:CreateTexture(nil, "BACKGROUND")
+  e.background:SetAllPoints()
+  e.background:SetColorTexture(0, 0, 0, 0.8)
+  return e
+end
+
+-- Sets the edit box's text, unless it holds it already (so typing keeps its place).
+local function setEdit(e, text)
+  if e:GetText() ~= text then e:SetText(text) end
+end
+
+-- What a click on a choice of the picker does: it becomes the pick.
+local function choosePick(kind, char)
+  local pick = tab.pick
+  if not pick then return end
+  pick.kind, pick.char = kind, char
+  if kind ~= "roll" then pick.menuOpen = false end
+  UI.RefreshAwards()
+end
+
+-- One of the picker's radio choices: a row with its radio, name, badge and hint.
+local function newChoice()
+  local b = CreateFrame("Button", nil, tab.picker)
+  b:SetSize(BOX_WIDTH - 12, CHOICE_HEIGHT)
+  b.background = b:CreateTexture(nil, "BACKGROUND")
+  b.background:SetAllPoints()
+  b.radio = newText(b, "GameFontHighlightSmall")
+  b.radio:SetPoint("LEFT", b, "LEFT", 6, 0)
+  b.name = newText(b, "GameFontHighlight")
+  b.name:SetPoint("LEFT", b, "LEFT", 28, 0)
+  b.badgeBack = b:CreateTexture(nil, "ARTWORK")
+  b.badge = newText(b, "GameFontHighlightSmall")
+  b.hint = newText(b, "GameFontDisableSmall")
+  b:SetScript("OnClick", function(self) choosePick(self.kind, self.char) end)
+  return b
+end
+
+-- Draws a choice at y: c = { name, badge, colour (the badge's), hint, selected, enabled }. A greyed
+-- one (enabled false) shows its hint in the badge's place.
+local function drawChoice(b, c, y)
+  at(b, 6, y)
+  b.radio:SetText(parts.RADIO[c.selected and true or false])
+  b.name:SetText(c.name)
+  local shade = c.enabled and 1 or 0.5
+  b.name:SetTextColor(shade, shade, shade)
+  b.badge:ClearAllPoints()
+  b.badgeBack:ClearAllPoints()
+  b.hint:ClearAllPoints()
+  local x = 184
+  if c.badge then
+    b.badge:SetPoint("LEFT", b, "LEFT", x + 4, 0)
+    b.badge:SetText(c.badge:upper())
+    b.badgeBack:SetPoint("LEFT", b, "LEFT", x, 0)
+    b.badgeBack:SetSize(b.badge:GetStringWidth() + 8, 16)
+    b.badgeBack:SetColorTexture(c.colour[1], c.colour[2], c.colour[3], 1)
+    b.badge:Show()
+    b.badgeBack:Show()
+    x = x + b.badge:GetStringWidth() + 18
+  else
+    b.badge:SetText("")
+    b.badge:Hide()
+    b.badgeBack:Hide()
+  end
+  b.hint:SetPoint("LEFT", b, "LEFT", x, 0)
+  b.hint:SetText(c.hint or "")
+  if c.selected then b.background:SetColorTexture(0.25, 0.2, 0.05, 1)
+  else b.background:SetColorTexture(0, 0, 0, 0) end
+  if c.enabled then b:Enable() else b:Disable() end
+  return y + CHOICE_HEIGHT + 2
+end
+
+local function badgeColour(kind)
+  return kind == "db" and BADGE_DB or PopupFrame.BADGE_COLORS[kind]
+end
+
+-- The raid members' list, dropped from the member button: up to MEMBERS_SHOWN names from the
+-- pick's menuOffset on, the chosen one ticked; the wheel scrolls the rest.
+local function drawMenu(members)
+  local menu, pick = tab.menu, tab.pick
+  pick.menuOffset = math.max(0, math.min(pick.menuOffset, #members - MEMBERS_SHOWN))
+  menu:ClearAllPoints()
+  menu:SetPoint("TOPLEFT", tab.picker.member, "BOTTOMLEFT", 0, -2)
+  local y, shown = 26, math.min(MEMBERS_SHOWN, #members)
+  for i = 1, shown do
+    local member = members[pick.menuOffset + i]
+    local entry = menu.entries[i]
+    if not entry then
+      entry = newButton(menu, "", 178, 18)
+      entry.background:SetColorTexture(0.08, 0.08, 0.08, 1)
+      entry.label:ClearAllPoints()
+      entry.label:SetPoint("LEFT", entry, "LEFT", 20, 0)
+      entry.tick = entry:CreateTexture(nil, "ARTWORK")
+      entry.tick:SetSize(14, 14)
+      entry.tick:SetPoint("LEFT", entry, "LEFT", 2, 0)
+      entry.tick:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+      entry:SetScript("OnClick", function(self)
+        tab.pick.member, tab.pick.menuOpen = self.name, false
+        UI.RefreshAwards()
+      end)
+      menu.entries[i] = entry
+    end
+    entry.name = member.name
+    entry.label:SetText(plain(member.name))
+    if member.selected then entry.tick:Show() else entry.tick:Hide() end
+    entry:ClearAllPoints()
+    entry:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -y)
+    entry:Show()
+    y = y + 20
+  end
+  for i = shown + 1, #menu.entries do menu.entries[i]:Hide() end
+  local below, above = #members - pick.menuOffset - shown, pick.menuOffset
+  menu.more:ClearAllPoints()
+  if below > 0 or above > 0 then
+    menu.more:SetPoint("TOPLEFT", menu, "TOPLEFT", 8, -(y + 2))
+    menu.more:SetText(below > 0 and (ARROW_DOWN .. " " .. below .. " more · scroll")
+      or (ARROW_UP .. " " .. above .. " more · scroll"))
+    menu.more:Show()
+    y = y + 16
+  else
+    menu.more:Hide()
+  end
+  menu:SetHeight(y + 6)
+  menu:Show()
+end
+
+-- Draws the picker (Popup.Picker's model) in its box at y under its row; returns the new y.
+local function drawPicker(model, y)
+  local p, pick = tab.picker, tab.pick
+  tab.pickShown = true
+  local top = 8
+  p.intro:SetWidth(BOX_WIDTH - 16)
+  at(p.intro, 8, top)
+  p.intro:SetText(model.intro)
+  top = top + p.intro:GetStringHeight() + 6
+  if model.fight then
+    parts.setNote(p.fight, "warn", model.fight)
+    at(p.fight, 6, top)
+    top = top + p.fight:GetHeight() + 6
+  else
+    p.fight:Hide()
+  end
+  at(p.reserved, 8, top)
+  top = top + 16
+  -- The holders, HOLDERS_SHOWN at a time from the pick's offset; the wheel scrolls the rest.
+  local holders = model.holders
+  pick.offset = math.max(0, math.min(pick.offset, #holders - HOLDERS_SHOWN))
+  local shown = math.min(HOLDERS_SHOWN, #holders)
+  for i = 1, shown do
+    local h = holders[pick.offset + i]
+    local b = p.holders[i]
+    if not b then
+      b = newChoice()
+      b:EnableMouseWheel(true)
+      b:SetScript("OnMouseWheel", function(_, delta)
+        tab.pick.offset = tab.pick.offset - delta
+        UI.RefreshAwards()
+      end)
+      p.holders[i] = b
+    end
+    b.kind, b.char = "holder", h.char
+    top = drawChoice(b, { name = plain(h.char), badge = h.available and h.method or nil,
+      colour = badgeColour(h.kind), hint = not h.available and h.reason or nil, selected = h.selected,
+      enabled = h.available }, top)
+  end
+  for i = shown + 1, #p.holders do p.holders[i]:Hide() end
+  if #holders > HOLDERS_SHOWN then
+    local below = #holders - pick.offset - shown
+    p.more:SetText((below > 0 and ARROW_DOWN or ARROW_UP) .. " " .. #holders
+      .. " reserve holders · scroll for more")
+    at(p.more, 10, top)
+    top = top + 16
+  else
+    p.more:Hide()
+  end
+  if model.empty then
+    p.empty:SetText(model.empty)
+    at(p.empty, 10, top + 2)
+    top = top + 18
+  else
+    p.empty:Hide()
+  end
+  at(p.others, 8, top + 2)
+  top = top + 18
+  p.roll.kind = "roll"
+  top = drawChoice(p.roll, { name = "Someone else in the raid", badge = "Open roll",
+    colour = badgeColour("open"),
+    selected = model.roll.selected, enabled = true }, top)
+  if model.roll.selected then
+    local member = model.roll.member and plain(model.roll.member) or "Choose a raid member"
+    PopupFrame.SetButton(p.member, member, true)
+    at(p.member, 34, top)
+    p.rollLabel:SetText("Roll")
+    at(p.rollLabel, 214, top + 4)
+    setEdit(p.rollEdit, model.roll.roll)
+    if model.roll.bad then p.rollEdit:SetTextColor(1, 0.35, 0.35) else p.rollEdit:SetTextColor(1, 1, 1) end
+    at(p.rollEdit, 244, top)
+    top = top + 26
+    if pick.menuOpen then drawMenu(model.roll.members) else tab.menu:Hide() end
+  else
+    p.member:Hide()
+    p.rollLabel:Hide()
+    p.rollEdit:Hide()
+    tab.menu:Hide()
+  end
+  p.db.kind = "db"
+  top = drawChoice(p.db, { name = "Disenchant/bank", badge = "Disenchant/bank", colour = badgeColour("db"),
+    selected = model.db.selected, enabled = true }, top)
+  if model.again then
+    p.again.kind = "again"
+    top = drawChoice(p.again, { name = plain(model.again.char), badge = model.again.method,
+      colour = badgeColour(model.again.kind), hint = "had it before: cancels the undo",
+      selected = model.again.selected, enabled = true }, top)
+  else
+    p.again:Hide()
+  end
+  at(p.noteLabel, 8, top + 4)
+  top = top + 20
+  setEdit(p.noteEdit, model.note)
+  at(p.noteEdit, 6, top)
+  top = top + 28
+  -- The line Post correction posts, or why it can't yet, in its own dark panel.
+  at(p.previewBack, 6, top)
+  at(p.previewHead, 12, top + 6)
+  p.preview:SetText(model.line or model.text)
+  if model.line then p.preview:SetTextColor(1, 0.5, 0.25) else p.preview:SetTextColor(0.7, 0.7, 0.7) end
+  at(p.preview, 12, top + 22)
+  local panel = 28 + p.preview:GetStringHeight()
+  p.previewBack:SetSize(BOX_WIDTH - 12, panel)
+  top = top + panel + 8
+  PopupFrame.SetButton(p.post, "Post correction", model.post.enabled)
+  p.post.tip = model.post.tooltip
+  at(p.post, 6, top)
+  PopupFrame.SetButton(p.cancel, "Cancel", true)
+  at(p.cancel, 132, top)
+  if model.locked then
+    p.locked:SetText(model.locked)
+    at(p.locked, 222, top + 4)
+  else
+    p.locked:Hide()
+  end
+  top = top + 26
+  if model.refusal then
+    p.refusal:SetText(model.refusal)
+    at(p.refusal, 8, top)
+    top = top + p.refusal:GetStringHeight() + 4
+  else
+    p.refusal:Hide()
+  end
+  p:ClearAllPoints()
+  p:SetPoint("TOPLEFT", tab.child, "TOPLEFT", BOX_X, -y)
+  p:SetSize(BOX_WIDTH, top + 4)
+  p:Show()
+  if tab.scrollTo then tab.scrollTo = y end
+  return y + top + 8 + ROW_GAP
+end
+
+-- Post correction: records and posts (Popup.Correct). Once recorded the picker closes, and a line
+-- that couldn't be posted leaves the window's note; a refusal keeps it open, saying why.
+local function postCorrection()
+  local op, unposted = ns.Popup.Correct(tab.pickOpen, tab.pick)
+  if op then
+    tab.pickOpen, tab.pick, tab.unposted = nil, nil, unposted
+  end
+  UI.RefreshAwards()
+end
+
+-- The picker's pieces, made once.
+local function buildPicker()
+  local p = PopupFrame.NewBox(tab.child)
+  tab.picker = p
+  p.intro = newText(p, "GameFontHighlightSmall")
+  p.intro:SetJustifyH("LEFT")
+  p.fight = parts.newNote(p)
+  p.fight:SetWidth(BOX_WIDTH - 12)
+  p.fight.text:SetWidth(BOX_WIDTH - 24)
+  p.reserved = newText(p, "GameFontNormalSmall")
+  p.reserved:SetText("Reserved it")
+  p.others = newText(p, "GameFontNormalSmall")
+  p.others:SetText("Anyone else")
+  p.more = newText(p, "GameFontDisableSmall")
+  p.empty = newText(p, "GameFontDisableSmall")
+  p.holders = {}
+  p.roll, p.db, p.again = newChoice(), newChoice(), newChoice()
+  p.member = PopupFrame.TipButton(p, 170)
+  p.member:SetScript("OnClick", function()
+    tab.pick.menuOpen = not tab.pick.menuOpen
+    UI.RefreshAwards()
+  end)
+  p.rollLabel = newText(p, "GameFontHighlightSmall")
+  p.rollEdit = editBox(p, 44, 3, function(text)
+    tab.pick.roll = text
+    UI.RefreshAwards()
+  end)
+  p.noteLabel = newText(p, "GameFontHighlightSmall")
+  p.noteLabel:SetText(NOTE_LABEL)
+  p.noteEdit = editBox(p, BOX_WIDTH - 12, 200, function(text)
+    tab.pick.note = text
+    UI.RefreshAwards()
+  end)
+  p.previewBack = p:CreateTexture(nil, "BORDER")
+  p.previewBack:SetColorTexture(0.1, 0.1, 0.1, 1)
+  p.previewHead = newText(p, "GameFontNormalSmall")
+  p.previewHead:SetText("Posts in raid chat")
+  p.preview = newText(p, "GameFontHighlightSmall")
+  p.preview:SetWidth(BOX_WIDTH - 24)
+  p.preview:SetJustifyH("LEFT")
+  p.post = PopupFrame.TipButton(p, 120)
+  p.post:SetScript("OnClick", function(self)
+    if self:IsEnabled() then postCorrection() end
+  end)
+  p.cancel = PopupFrame.TipButton(p, 80)
+  p.cancel:SetScript("OnClick", function() togglePicker(tab.pickOpen) end)
+  p.locked = newText(p, "GameFontDisableSmall")
+  p.refusal = newText(p, "GameFontHighlightSmall")
+  p.refusal:SetTextColor(1, 0.35, 0.35)
+  p.refusal:SetWidth(BOX_WIDTH - 16)
+
+  -- The raid members' list, dropped from the member button.
+  local menu = CreateFrame("Frame", nil, tab.child)
+  tab.menu = menu
+  menu:SetFrameStrata("TOOLTIP")
+  menu:SetSize(190, 100)
+  menu.background = menu:CreateTexture(nil, "BACKGROUND")
+  menu.background:SetAllPoints()
+  menu.background:SetColorTexture(0.08, 0.08, 0.08, 1)
+  menu.title = newText(menu, "GameFontNormal")
+  menu.title:SetPoint("TOPLEFT", menu, "TOPLEFT", 8, -6)
+  menu.title:SetText("Who has it now?")
+  menu.more = newText(menu, "GameFontDisableSmall")
+  menu.entries = {}
+  menu:EnableMouseWheel(true)
+  menu:SetScript("OnMouseWheel", function(_, delta)
+    tab.pick.menuOffset = tab.pick.menuOffset - delta
+    UI.RefreshAwards()
+  end)
+  menu:Hide()
+end
+
+-- The line under a row given by Pick winner: "Corrected HH:MM", at the right under its Undo (the
+-- row has no room beside it). Returns the new y.
+local function correctedLine(index, y, text)
+  local line = tab.correcteds[index]
+  if not line then
+    line = newText(tab.child, "GameFontDisableSmall")
+    line:SetJustifyH("RIGHT")
+    tab.correcteds[index] = line
+  end
+  line:ClearAllPoints()
+  line:SetPoint("TOPRIGHT", tab.child, "TOPLEFT", CONTENT_WIDTH, -y)
+  line:SetText(text)
+  line:Show()
+  return y + line:GetStringHeight() + ROW_GAP
+end
+
 -- Draws one award row at y; returns the new y.
 local function drawRow(r, y, used, practice)
   used.rows = used.rows + 1
@@ -321,7 +727,7 @@ local function drawRow(r, y, used, practice)
     line.undo = greyIn(tab.undoGreys, used.undoGreys, "Undo", UNDO_WIDTH, CONTENT_WIDTH - UNDO_WIDTH, y)
   elseif r.winnerNeeded and not tab.view.readOnly then
     used.picks = used.picks + 1
-    line.pick = pickButton(used.picks, y)
+    line.pick = pickButton(used.picks, y, r.key)
   elseif r.winnerNeeded then
     used.pickGreys = used.pickGreys + 1
     line.pick = greyIn(tab.pickGreys, used.pickGreys, "Pick winner", PICK_WIDTH,
@@ -329,6 +735,17 @@ local function drawRow(r, y, used, practice)
   end
   y = y + math.max(shown.item:GetStringHeight(), shown.winner:GetStringHeight(),
     shown.how:GetStringHeight(), (line.undo or line.pick) and BUTTON_HEIGHT or 0) + ROW_GAP
+  if r.corrected then
+    used.correcteds = used.correcteds + 1
+    y = correctedLine(used.correcteds, y, r.corrected)
+    line.corrected = tab.correcteds[used.correcteds]
+  end
+  local model = line.pick and tab.pickOpen == r.key and not tab.view.readOnly
+    and ns.Popup.Picker(r.key, tab.pick)
+  if model then
+    y = drawPicker(model, y)
+    line.picker = tab.picker
+  end
   local choices = r.notConfirmed and r.choices
   if choices and tab.elseOpen == r.key then
     -- Give to someone else's list, in the buttons' place, as the pop-up draws it.
@@ -400,9 +817,30 @@ function UI.RefreshAwards()
   local view = UI.AwardsView()
   tab.view = view
   hideAll({ tab.headings, tab.times, tab.items, tab.winners, tab.hows, tab.rolls, tab.notes,
-    tab.buttons, tab.choices, tab.refusals, tab.strikes, tab.undos, tab.undoGreys, tab.picks, tab.pickGreys })
+    tab.buttons, tab.choices, tab.refusals, tab.strikes, tab.undos, tab.undoGreys, tab.picks, tab.pickGreys,
+    tab.correcteds })
   tab.list:Hide()
   tab.listShown = false
+  tab.picker:Hide()
+  tab.pickShown = false
+  -- A correction recorded but not posted: a note above the summary, until the next picker opens.
+  local top = 0
+  if tab.unposted then
+    parts.setNote(tab.notice, "warn", tab.unposted)
+    tab.notice:Show()
+    top = tab.notice:GetHeight() + 4
+  else
+    tab.notice:Hide()
+  end
+  local function anchor(piece, x, y)
+    piece:ClearAllPoints()
+    piece:SetPoint("TOPLEFT", tab.content, "TOPLEFT", x, -(y + top))
+  end
+  anchor(tab.banner, 4, 2)
+  anchor(tab.summary, 4, 20)
+  anchor(tab.columns, 0, 36)
+  anchor(tab.scroll, 0, 54)
+  tab.scroll:SetPoint("BOTTOMRIGHT", tab.content, "BOTTOMRIGHT", 0, 0)
   tab.shown = {}
   tab.practiceToggle:Hide()
   local list = not view.empty
@@ -412,7 +850,7 @@ function UI.RefreshAwards()
   if list then
     tab.summary:SetText(view.summary)
     local used = { rows = 0, headings = 0, buttons = 0, choices = 0, refusals = 0, strikes = 0, undos = 0,
-      undoGreys = 0, picks = 0, pickGreys = 0 }
+      undoGreys = 0, picks = 0, pickGreys = 0, correcteds = 0 }
     local y = 0
     for _, group in ipairs(view.groups or {}) do
       y = drawHeading(group.heading, y, used)
@@ -421,8 +859,19 @@ function UI.RefreshAwards()
     if view.practice then y = drawPractice(view, y + 6, used) end
     tab.child:SetHeight(y)
   end
-  -- The list stays open only while its row is drawn and still not confirmed.
+  -- The list stays open only while its row is drawn and still not confirmed; the picker only while
+  -- its row is drawn and still needs a winner. A picker just opened is scrolled into view.
   if not tab.listShown then tab.elseOpen = nil end
+  if not tab.pickShown then
+    tab.pickOpen, tab.pick = nil, nil
+    tab.menu:Hide()
+  end
+  if type(tab.scrollTo) == "number" then
+    if tab.scroll.UpdateScrollChildRect then tab.scroll:UpdateScrollChildRect() end
+    tab.scroll:SetVerticalScroll(math.max(0, math.min(tab.scrollTo - 2 * HEADING_HEIGHT,
+      tab.scroll:GetVerticalScrollRange())))
+  end
+  tab.scrollTo = nil
 end
 
 -- The footer's loot master line, on every tab.
@@ -442,6 +891,12 @@ local function build()
   tab.headings, tab.times, tab.items, tab.winners, tab.hows = {}, {}, {}, {}, {}
   tab.rolls, tab.notes, tab.buttons, tab.strikes, tab.shown = {}, {}, {}, {}, {}
   tab.choices, tab.refusals, tab.undos, tab.undoGreys, tab.picks, tab.pickGreys = {}, {}, {}, {}, {}, {}
+  tab.correcteds = {}
+
+  -- The note of a correction recorded but not posted, above everything.
+  tab.notice = parts.newNote(content)
+  tab.notice:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -2)
+  tab.notice:Hide()
 
   -- Another officer's view: a line above the list.
   tab.banner = newText(content, "GameFontNormal")
@@ -476,6 +931,8 @@ local function build()
     tab.elseOpen = nil
     UI.RefreshAwards()
   end)
+
+  buildPicker()
 
   tab.title = newText(content, "GameFontNormal")
   tab.title:SetPoint("CENTER", content, "CENTER", 0, 30)
