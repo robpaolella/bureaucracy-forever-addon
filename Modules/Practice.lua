@@ -74,7 +74,8 @@ end
 -- TestDrop (#108): the footer's Test drop button. It opens the pop-up on a made-up loot window with
 -- no corpse: one fake item (two copies in the copies case), reserves from PracticeReserves, taking
 -- the next case in the cycle each click. The window stands in for the game's through ns.LootWindow, so
--- nothing is handed out for real: a hand-out "succeeds" after a moment, as the game's own signs would.
+-- nothing is handed out for real: a hand-out "succeeds" after a moment, as the game's own signs would
+-- (but see give for the one case that fails).
 -- Its awards are practice awards with no raid, whatever the raid selection, and are never sent.
 local TestDrop = {}
 ns.TestDrop = TestDrop
@@ -96,8 +97,15 @@ end
 
 -- The made-up hand-out: the game's signs of a confirmed one, a moment later. The chat line comes even
 -- if the pop-up was closed meanwhile, as the game's would.
+-- In the skipped case (#127) the hand-out to the person first given the item never confirms: nothing
+-- clears and no line comes, so after Tracking.confirmWait it is not confirmed, and Try again fails
+-- again. A hand-out to anyone else confirms, so Give to someone else ends the failure.
 local function give(window, slot, index)
   local winner = window.candidates(slot)[index]
+  if window.failCase then
+    window.failFor = window.failFor or winner
+    if winner == window.failFor then return end
+  end
   C_Timer.After(TestDrop.confirmAfter, function()
     if ns.LootWindow.fake == window then
       window.slots[slot] = {} -- the item leaves the window, as it does in the game
@@ -130,6 +138,7 @@ function TestDrop.Open()
     slots[i] = { link = TestDrop.LINK, quality = 4, guid = SOURCE }
   end
   local window = { slots = slots }
+  window.failCase = made.case == "skipped"
   window.candidates = function() return made.candidates end
   window.give = function(slot, index) give(window, slot, index) end
   ns.LootWindow.fake, ns.LootWindow.opening = window, true
