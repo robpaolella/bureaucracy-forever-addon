@@ -6,7 +6,8 @@
 -- with TryAgain, GiveElse (from GiveElseList) or NotHandedOut (#12). Build shows the row of such a
 -- hand-out as not confirmed, with those three choices (#95).
 -- GiveElseDB is the give-else list's Disenchant/bank line (#96): it gives to the raid's D/B pick
--- instead.
+-- instead. CallOpenRoll is its open roll line (#118): the row then shows that roll's list, and a give
+-- from it replaces the not confirmed award.
 -- Once a roll is called the row carries the roll list (#90): who rolled what, the winner pre-selected
 -- (the officer may pick another name), and the Give button that follows the pick.
 -- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
@@ -69,6 +70,7 @@ local REFUSALS = {
   ["already db"] = "It already goes to disenchant/bank. To choose someone else, use Not handed out,"
     .. " then D/B.",
   ["pick changed"] = "The disenchant/bank character changed. Check the list and choose again.",
+  ["another roll"] = "Another item's roll is still going. Hand that item out first.",
 }
 
 local bare = ns.Rules.Bare
@@ -81,6 +83,7 @@ local rollNotes = {} -- per slot, why the last hidden-roll click handed nothing 
 local madeUp = {} -- practice mode: per item id in this loot window, its made-up reserves
 local dropCount = 0 -- practice mode: drops given made-up reserves this session, to move through the cases
 local windowItems -- the open loot window's items as it opened, for its boss after some are handed out
+local calls = {} -- per not confirmed award key, the open roll called from its give-else list: { slot, item }
 local METHODS = { hr = "HR", sr = "SR", open = "OPEN_ROLL" }
 local ROLL_HEADINGS = { hr = "Rolls (hard reserve holders only)", sr = "Rolls (soft reserve holders only)",
   open = "Rolls (everyone)" }
@@ -89,7 +92,7 @@ local NOT_RECEIVE = " can't be given it: the game won't let them receive it (usu
   .. " the boss died)."
 
 ns.On("LOOT_CLOSED", function()
-  chosenBoss, dbNotes, refusals, picks, rollNotes, madeUp = nil, {}, {}, {}, {}, {}
+  chosenBoss, dbNotes, refusals, picks, rollNotes, madeUp, calls = nil, {}, {}, {}, {}, {}, {}
   windowItems = nil
 end)
 
@@ -345,7 +348,7 @@ local function rollList(row, result, boss, locked)
   end
   if result.hidden then
     list.hidden = { warning = HIDDEN_WARNING, label = "Their roll (optional):" }
-    if row.mode == "open" then list.hidden.label = "Their roll (needed for an open roll):" end
+    if result.kind == "open" then list.hidden.label = "Their roll (needed for an open roll):" end
     for _, e in ipairs(list.entries) do
       e.enabled = boss.resolved and listedFor(row.slot, e.name) and not locked
       if locked then e.tooltip = FIGHT_TOOLTIP end
@@ -375,10 +378,22 @@ end
 
 -- The buttons of a row, once the boss is known: Give and D/B need a boss picked. In a boss fight
 -- the Give and roll buttons wait, with a tooltip saying why. A row being handed out, or not
--- confirmed, has none (a not confirmed row's choices are in row.notConfirmed).
+-- confirmed, has none (a not confirmed row's choices are in row.notConfirmed), except the roll list
+-- and its Give once an open roll is called from a not confirmed row's list (#118): the Give carries
+-- the award's key, and the award's own boss counts.
 local function addButtons(row, boss, locked, result)
-  if row.handout or row.notConfirmed then
+  local nc = row.notConfirmed
+  -- A roll called from a not confirmed row shows only on that row, and only it shows there.
+  if result and result.forKey ~= (nc and nc.key) then result = nil end
+  if row.handout or (nc and not result) then
     row.buttons = {}
+    return
+  end
+  if nc then
+    local button
+    row.rolls, button = rollList(row, result, { resolved = true }, locked)
+    button.key = nc.key
+    row.buttons = { button }
     return
   end
   local primary
@@ -429,12 +444,15 @@ local function footLine(raidId, snapshot)
 end
 
 -- The row's not confirmed state: the hand-out the game gave up on (its award still waits as not
--- confirmed), what happened and the officer's three choices (Choices).
-local function notConfirmed(attempt)
+-- confirmed), what happened and the officer's three choices (Choices). The pop-up's list also has
+-- the open roll line (#118), whose roll list shows in the row; the Awards tab's has none.
+local function notConfirmed(attempt, locked)
   local choices = Popup.Choices(attempt.awardKey)
   choices.text = "The game didn't confirm that " .. attempt.winner .. " got it. They may be too far away,"
     .. " or their bags are full."
   choices.hint = NC_HINT
+  choices.list.openRoll = { label = "Open roll", text = "everyone can roll", button = "Call open roll",
+    enabled = not locked, tooltip = locked and NC_FIGHT_TOOLTIP or nil }
   return choices
 end
 
@@ -464,8 +482,9 @@ end
 -- notConfirmed (once the game gave up on its hand-out: { key, text, hint, refusal (why the last
 -- choice was refused), buttons (Try again, Give to someone else, Not handed out: text, action,
 -- enabled, tooltip), list = { title, people = { { char, method, kind, available, reason, enabled,
--- tooltip } }, empty, hint, back } }), buttons (each: text, action, enabled, tooltip; the D/B
--- button's also pick)), dbMenu ({ title,
+-- tooltip } }, db, openRoll ({ label, text, button, enabled, tooltip }), empty, hint, back } }; and its
+-- open roll's list (#118) as rolls, its Give as buttons[1], with key), buttons (each: text, action,
+-- enabled, tooltip; the D/B button's also pick)), dbMenu ({ title,
 -- members = { { name, selected } }, note }), count, foot, recheck, practice (practice mode is on: the
 -- title starts with "[Practice] " and the frame tags the foot).
 function Popup.Build()
@@ -524,7 +543,7 @@ function Popup.Build()
       row.handout = { text = "Handing out to " .. handout.winner .. "…",
         note = handout.announced and ANNOUNCED or NOT_ANNOUNCED }
     end
-    if gaveUp and not handout then row.notConfirmed = notConfirmed(gaveUp) end
+    if gaveUp and not handout then row.notConfirmed = notConfirmed(gaveUp, locked) end
     row.dbNote = dbNotes[it.slot]
     addButtons(row, boss, locked, ns.Rolls.Result(it.slot, it.item))
     model.recheck = model.recheck or row.recheck
@@ -602,8 +621,12 @@ end
 -- The outside hand-out question (OutsideHandout) posts its award lines the same way.
 Popup.Post = post
 
+local handoutCheck, replaceWith
+
 -- Hands the item to chosen (by name among the corpse's candidates), records the award and posts its
--- line. Returns the hand-out, or nil and why: "not a candidate" or Tracking.Give's reasons.
+-- line. On a not confirmed row (its open roll, #118) the award is replaced instead, as GiveElse does,
+-- with an open roll award carrying the roll. Returns the hand-out, or nil and why: "not a candidate",
+-- "changed" (the award isn't waiting as not confirmed now), handoutCheck's or Tracking.Give's reasons.
 local function handOut(model, row, chosen, roll, fromRolls)
   local index
   for i = 1, MAX_CANDIDATES do
@@ -615,6 +638,14 @@ local function handOut(model, row, chosen, roll, fromRolls)
     end
   end
   if not index then return nil, "not a candidate" end
+  local nc = row.notConfirmed
+  if nc then
+    local award, slot = handoutCheck(nc.key)
+    if not award then return nil, slot == "not unconfirmed" and "changed" or slot end
+    if slot ~= row.slot then return nil, "changed" end
+    return replaceWith(nc.key, award, slot, index, { char = chosen, method = "OPEN_ROLL", roll = roll },
+      " is being handed to " .. chosen .. " instead of " .. (award.char or "disenchant/bank"))
+  end
   local attempt, reason = ns.Tracking.Give(row.slot, index)
   if not attempt then return nil, reason end
   local method = fromRolls and METHODS[row.mode] or (row.mode == "hr" and "HR" or "SR")
@@ -642,14 +673,18 @@ end
 -- attempt, with awardKey and announced), or nil and why: "fight" (chat is locked), "not ready"
 -- (no Give enabled for the slot), "changed", "not a candidate" or Tracking.Give's reasons.
 -- A row with a roll list is given to the name picked there, with its roll (the one the button
--- showed): winner and roll are what the clicked button showed.
-function Popup.Give(slot, item, winner, roll)
+-- showed): winner and roll are what the clicked button showed. key is the button's key: a not
+-- confirmed award's, on the roll list of the open roll called from its row (#118); the row must
+-- still be that award's ("changed" if not), and the give replaces the award.
+function Popup.Give(slot, item, winner, roll, key)
   if Popup.ChatLocked() then return nil, "fight" end
   local model = Popup.Build()
   local row
   for _, r in ipairs(model and model.rows or {}) do
     if r.slot == slot then row = r end
   end
+  local ncKey = row and row.notConfirmed and row.notConfirmed.key
+  if key ~= ncKey and (key or row) then return nil, "changed" end
   local button = row and row.buttons[1]
   local fromRolls = row and row.rolls and button.action == "rollgive"
   if not (row and (row.action == "give" or fromRolls) and button and button.enabled) then
@@ -675,13 +710,16 @@ local ROLL_NOTES = {
 -- open roll needs one. A refusal changes nothing and leaves a note for the row. Returns the
 -- hand-out, or nil and why: "fight", "not ready" (no hidden roll list, or the name's button is off),
 -- "not listed", "changed", "roll needed", "bad roll", "not a candidate" or Tracking.Give's reasons.
-function Popup.GiveHidden(slot, item, winner, rollText)
+-- key is as Give's: on a not confirmed row's open roll (#118), the give replaces the award.
+function Popup.GiveHidden(slot, item, winner, rollText, key)
   if Popup.ChatLocked() then return nil, "fight" end
   local model = Popup.Build()
   local row
   for _, r in ipairs(model and model.rows or {}) do
     if r.slot == slot then row = r end
   end
+  local ncKey = row and row.notConfirmed and row.notConfirmed.key
+  if key ~= ncKey and (key or row) then return nil, "changed" end
   if not (row and row.rolls and row.rolls.hidden) then return nil, "not ready" end
   if row.item ~= item then return nil, "changed" end
   local entry
@@ -695,7 +733,7 @@ function Popup.GiveHidden(slot, item, winner, rollText)
   if text ~= "" then
     roll = text:match("^%d+$") and tonumber(text)
     if not (roll and roll >= 1 and roll <= 100) then why = "bad roll" end
-  elseif row.mode == "open" then
+  elseif row.mode == "open" or row.notConfirmed then
     why = "roll needed"
   end
   local attempt, reason
@@ -842,7 +880,7 @@ function Popup.GiveDB(slot, item, pick)
 end
 
 -- The checks every hand-out choice shares. Returns the award and the slot, or nil and why.
-local function handoutCheck(key)
+handoutCheck = function(key)
   local award, why = unconfirmedAward(key)
   if not award then return nil, why end
   if not isLootMaster() then return nil, "not loot master" end
@@ -937,25 +975,25 @@ otherHolders = function(key, award, atCorpse)
 end
 
 -- Hands the not confirmed award's item to the slot's candidate at index, records the replacement
--- (the old award voided, a new one with fields: char, user and method; no char for
+-- (the old award voided, a new one with fields: char, user, method and roll; no char for
 -- Disenchant/bank) and posts the one correction line. A line that can't be built is not posted,
 -- and the officer is told the link then `told`; the hand-out and the records stand. Returns the
 -- new hand-out (with awardKey, the new award's key, and announced), or nil and Tracking.Give's
 -- reasons.
-local function replaceWith(key, award, slot, index, fields, told)
+replaceWith = function(key, award, slot, index, fields, told)
   local attempt, reason = ns.Tracking.Give(slot, index)
   if not attempt then return nil, reason end
   local link = GetLootSlotLink(slot)
   local op, why = ns.Records.Replace(key, { boss = award.boss, item = award.item, char = fields.char,
-    user = fields.user, method = fields.method })
+    user = fields.user, method = fields.method, roll = fields.roll })
   ns.Hub.SendOwn(op, why)
   local data
   if op then
     attempt.awardKey = op.award.id
     local snapshot = ns.Raids.Get(award.raid)
     data = { raid = snapshot and snapshot.code, id = op.id, key = key, newKey = op.award.id,
-      item = award.item, link = link, boss = award.boss, method = fields.method, winner = fields.char,
-      oldWinner = award.char, practice = op.practice }
+      item = award.item, link = link, boss = award.boss, method = fields.method, roll = fields.roll,
+      winner = fields.char, oldWinner = award.char, practice = op.practice }
   end
   attempt.announced = post("correction", data, why, "Correction line for " .. link,
     link .. told .. ", but its raid chat line couldn't be posted.")
@@ -1004,6 +1042,21 @@ function Popup.GiveElseDB(key, pick)
   if not index then return nil, "not a candidate", dbRefusal(pick) end
   return replaceWith(key, award, slot, index, { method = "DISENCHANT_BANK" },
     " is being handed to " .. pick .. " to disenchant or bank instead of " .. tostring(award.char))
+end
+
+-- Call open roll, the pop-up's give-else open roll line (#118): calls an open roll for the not
+-- confirmed award's item (Rolls.Start), and its row shows the roll list. Nothing is recorded: the
+-- award stays not confirmed until a winner is given from that list, which replaces it. key is the
+-- award's key. Returns the roll-off's result, or nil and why: "fight", TryAgain's checks' reasons
+-- or Rolls.Start's ("another roll" while another item's roll-off reads).
+function Popup.CallOpenRoll(key)
+  if Popup.ChatLocked() then return nil, "fight" end
+  local award, slot = handoutCheck(key)
+  if not award then return nil, slot end
+  local result, why = ns.Rolls.Start(slot, award.item, key)
+  if not result then return nil, why end
+  calls[key] = { slot = slot, item = award.item }
+  return result
 end
 
 -- Not handed out: voids the award and posts its undo line. It needs no loot window. A line that
@@ -1286,12 +1339,15 @@ function Popup.Choices(key)
 end
 
 -- The officer's click on a not confirmed award's choice, in the pop-up or the Awards tab: action
--- "tryagain", "nothandedout", "giveelse" (to char) or "givedb" (to the D/B pick char, the
--- Disenchant/bank line); or "undo", Undo on a confirmed one. A refusal is logged and kept for the
--- row (Refused); a choice made clears it. Returns what the choice returns.
+-- "tryagain", "nothandedout", "giveelse" (to char), "givedb" (to the D/B pick char, the
+-- Disenchant/bank line) or "openroll" (Call open roll); or "undo", Undo on a confirmed one. A refusal
+-- is logged and kept for the row (Refused); a choice made clears it, and any other choice made ends
+-- the open roll called from the row, undoing nothing. Returns what the choice returns.
 function Popup.Choose(key, action, char)
   local ok, why, note
-  if action == "giveelse" then
+  if action == "openroll" then
+    ok, why = Popup.CallOpenRoll(key)
+  elseif action == "giveelse" then
     ok, why = Popup.GiveElse(key, char)
   elseif action == "givedb" then
     ok, why, note = Popup.GiveElseDB(key, char)
@@ -1308,8 +1364,13 @@ function Popup.Choose(key, action, char)
     local link = award and linkOf(key, award) or tostring(key)
     local what = ({ giveelse = "Give to " .. tostring(char) .. " instead",
       givedb = "Give to disenchant/bank (" .. tostring(char) .. ") instead",
-      undo = "Undo" })[action]
+      openroll = "Call open roll", undo = "Undo" })[action]
     ns.Log((what or ("Not confirmed choice " .. action)) .. " for " .. link .. " refused: " .. tostring(why))
+  end
+  local call = calls[key]
+  if ok and action ~= "openroll" and call then
+    ns.Rolls.End(call.slot, call.item)
+    calls[key] = nil
   end
   Popup.Refused(key, not ok and why or nil, note)
   return ok, why

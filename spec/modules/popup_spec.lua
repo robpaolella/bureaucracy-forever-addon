@@ -1291,6 +1291,241 @@ describe("Popup", function()
         end)
       end)
 
+      describe("the open roll line (#118)", function()
+        local RESERVES = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } }
+
+        local function roll(name, n) wow.fire("CHAT_MSG_SYSTEM", name .. " rolls " .. n .. " (1-100)") end
+        local function row1() return ns.Popup.Build().rows[1] end
+        local function callRoll(key) return click(ns.Popup.Choose, key, "openroll") end
+
+        -- Clicks the row's Give as it was drawn just now.
+        local function giveRolled()
+          local button = row1().buttons[1]
+          return click(ns.Popup.Give, 1, 1, button.winner, button.roll, button.key)
+        end
+
+        -- The award still waits as not confirmed, with nothing more recorded or handed out.
+        local function waiting(key)
+          assert.are.equal(1, #wow.gives)
+          assert.are.equal(2, #ns.Records.Ops("raid00001"))
+          assert.are.same({ "not-confirmed", nil }, { ns.Records.Get(key).state, ns.Records.Get(key).voided })
+        end
+
+        it("shows after the reserve holders and before Disenchant/bank, in the pop-up only", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          local list = row1().notConfirmed.list
+          assert.are.same({ label = "Open roll", text = "everyone can roll", button = "Call open roll",
+            enabled = true }, list.openRoll)
+          assert.are.equal("Doran Vale", list.people[1].char)
+          assert.is_table(list.db)
+          assert.is_nil(ns.Popup.Choices(key).list.openRoll)
+        end)
+
+        it("shows on a Disenchant/bank award too", function()
+          raid({ reserves = RESERVES })
+          wow.state.group = GROUP
+          drop({ { id = 1 } })
+          assert.is_true(ns.Popup.SetDBPick("Bram Ironvein"))
+          wow.click(function() assert(ns.Popup.GiveDB(1, 1, "Bram Ironvein")) end)
+          wow.advance(ns.Tracking.confirmWait)
+          local list = row1().notConfirmed.list
+          assert.is_nil(list.db)
+          assert.is_true(list.openRoll.enabled)
+        end)
+
+        it("calls the open roll and shows its roll list; the award stays not confirmed", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          assert.is_table((callRoll(key)))
+          assert.are.equal("Open roll for " .. link(1) .. ": everyone /roll", wow.sent[2].text)
+          roll("Doran Vale", 87)
+          roll("Bram Ironvein", 40)
+          local r = row1()
+          assert.are.equal(key, r.notConfirmed.key)
+          assert.are.same({ "Rolls (everyone)", "2 rolled" }, { r.rolls.heading, r.rolls.count })
+          assert.are.same({ "Give to Doran Vale (87)", "rollgive", true, key },
+            { r.buttons[1].text, r.buttons[1].action, r.buttons[1].enabled, r.buttons[1].key })
+          assert.is_nil(r.buttons[2])
+          waiting(key)
+        end)
+
+        it("gives the winner by replacing the award with an open roll award and its roll", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          roll("Doran Vale", 87)
+          local attempt = assert(giveRolled())
+          assert.are.same({ slot = 1, candidate = 3 }, wow.gives[2])
+          local old, new = ns.Records.Get(key), ns.Records.Get(attempt.awardKey)
+          assert.are.same({ true, attempt.awardKey }, { old.voided, old.replacedBy })
+          assert.are.same({ "announced", "Doran Vale", "OPEN_ROLL", 87, "lb_lucifron", key },
+            { new.state, new.char, new.method, new.roll, new.boss, new.replaces })
+          assert.is_nil(new.user)
+          local ops = ns.Records.Ops("raid00001")
+          assert.are.same({ 3, "replace" }, { #ops, ops[3].type })
+          assert.are.equal(3, #wow.sent)
+          assert.are.equal("Correction: " .. link(1) .. " → Doran Vale (open roll, 87), not Ashla Brightwater"
+            .. " <BF1;R;SA0001;" .. ops[3].id .. ";" .. key .. ";" .. attempt.awardKey
+            .. ";1;ifron;OPEN_ROLL;87;Doran Vale>", wow.sent[3].text)
+          assert.is_true(attempt.announced)
+          confirm(1, "Doran Vale")
+          assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+        end)
+
+        it("gives a tie's winner after the re-roll, replacing the award", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          roll("Doran Vale", 50)
+          roll("Bram Ironvein", 50)
+          assert.is_false(row1().buttons[1].enabled)
+          wow.click(function() assert(ns.Rolls.Reroll(1, 1)) end)
+          roll("Bram Ironvein", 70)
+          roll("Doran Vale", 20)
+          local attempt = assert(giveRolled())
+          local new = ns.Records.Get(attempt.awardKey)
+          assert.are.same({ "Bram Ironvein", "OPEN_ROLL", 70, key },
+            { new.char, new.method, new.roll, new.replaces })
+          assert.is_true(ns.Records.Get(key).voided)
+        end)
+
+        it("gives a hidden roll's clicked name with its typed roll, replacing the award", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          wow.fire("CHAT_MSG_SYSTEM", wow.secret)
+          local r = row1()
+          assert.are.equal("Their roll (needed for an open roll):", r.rolls.hidden.label)
+          local function hidden(text) return click(ns.Popup.GiveHidden, 1, 1, "Bram Ironvein", text, key) end
+          assert.are.same({ nil, "roll needed" }, { hidden("") })
+          waiting(key)
+          local attempt = assert(hidden("64"))
+          local new = ns.Records.Get(attempt.awardKey)
+          assert.are.same({ "Bram Ironvein", "OPEN_ROLL", 64, key },
+            { new.char, new.method, new.roll, new.replaces })
+          assert.are.equal(3, #ns.Records.Ops("raid00001"))
+          assert.is_truthy(wow.sent[#wow.sent].text:find("^Correction: "))
+        end)
+
+        it("refuses a Give that doesn't carry the award's key, or carries it to another row", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          roll("Doran Vale", 87)
+          assert.are.same({ nil, "changed" }, { click(ns.Popup.Give, 1, 1, "Doran Vale", 87) })
+          assert.are.same({ nil, "changed" }, { click(ns.Popup.Give, 1, 1, "Doran Vale", 87, "other") })
+          waiting(key)
+        end)
+
+        it("is abandoned by another choice, ending the roll and undoing nothing", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          roll("Doran Vale", 87)
+          assert.is_truthy(click(ns.Popup.Choose, key, "nothandedout"))
+          local r = row1()
+          assert.is_nil(r.notConfirmed)
+          assert.is_nil(r.rolls) -- the row is back to its own Give, not the abandoned roll
+          assert.are.equal("Give to Ashla Brightwater", r.buttons[1].text)
+          roll("Bram Ironvein", 99) -- no longer read
+          assert.are.equal(1, ns.Rolls.Result(1, 1).rolled)
+          assert.are.equal(1, #wow.gives)
+        end)
+
+        it("shows no other roll on the row, and its roll on no other row", function()
+          raid({ reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "HR") } } })
+          wow.state.group = GROUP
+          drop({ { id = 1 } })
+          -- The item's own hard reserve roll-off, given and not confirmed.
+          wow.click(function() assert(ns.Rolls.Start(1, 1)) end)
+          roll("Ashla Brightwater", 90)
+          local button = row1().buttons[1]
+          local key = assert(click(ns.Popup.Give, 1, 1, button.winner, button.roll)).awardKey
+          wow.advance(ns.Tracking.confirmWait)
+          assert.is_nil(row1().rolls)
+          assert.are.same({}, row1().buttons)
+          callRoll(key)
+          assert.are.equal("Rolls (everyone)", row1().rolls.heading)
+          roll("Bram Ironvein", 60)
+          assert.is_truthy(click(ns.Popup.Choose, key, "nothandedout"))
+          assert.is_nil(row1().rolls)
+          assert.are.equal("Call roll (2)", row1().buttons[1].text)
+        end)
+
+        it("keeps the roll when another choice is refused, and ends it with the loot window", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          wow.state.loot[1].candidates = { "Masterlooter", "Bram Ironvein" }
+          assert.are.same({ nil, "not a candidate" }, { click(ns.Popup.Choose, key, "tryagain") })
+          assert.is_table(row1().rolls)
+          wow.closeLoot()
+          assert.is_nil(ns.Rolls.Result(1, 1))
+          waiting(key)
+        end)
+
+        it("waits out a boss fight: the line is greyed with the fight tooltip", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          wow.bossFight(true)
+          assert.are.same({ false, "Posts a line, so it waits until the boss fight ends" },
+            { row1().notConfirmed.list.openRoll.enabled, row1().notConfirmed.list.openRoll.tooltip })
+          assert.are.same({ nil, "fight" }, { callRoll(key) })
+          assert.are.equal(1, #wow.sent)
+          wow.bossFight(false)
+          callRoll(key)
+          roll("Doran Vale", 87)
+          wow.bossFight(true)
+          assert.are.same({ false, "Chat is locked until the fight ends" },
+            { row1().buttons[1].enabled, row1().buttons[1].tooltip })
+          assert.are.same({ nil, "fight" }, { giveRolled() })
+          waiting(key)
+        end)
+
+        it("refuses with the loot window closed or the item gone, calling nothing", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          wow.closeLoot()
+          assert.are.same({ nil, "window" }, { callRoll(key) })
+          assert.are.equal("The loot window is closed. Open it to hand the item out.", ns.Popup.Refusal(key))
+          drop({ { id = 3 } })
+          assert.are.same({ nil, "changed" }, { callRoll(key) })
+          assert.are.equal(1, #wow.sent)
+          waiting(key)
+        end)
+
+        it("refuses while another item's roll-off reads", function()
+          raid({ reserves = RESERVES })
+          wow.state.group = GROUP
+          drop({ { id = 1 }, { id = 3 } })
+          local key = assert(give(1)).awardKey
+          wow.advance(ns.Tracking.confirmWait)
+          wow.click(function() assert(ns.Rolls.Start(2, 3)) end)
+          assert.are.same({ nil, "another roll" }, { callRoll(key) })
+          assert.are.equal("Another item's roll is still going. Hand that item out first.",
+            ns.Popup.Build().rows[1].notConfirmed.refusal)
+          ns.Rolls.End(2, 3)
+          assert.is_table((callRoll(key)))
+        end)
+
+        it("refuses as changed an award confirmed late meanwhile, handing nothing out", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          roll("Doran Vale", 87)
+          local button = row1().buttons[1]
+          confirm(1, "Ashla Brightwater")
+          assert.are.equal("confirmed", ns.Records.Get(key).state)
+          assert.are.same({ nil, "changed" },
+            { click(ns.Popup.Give, 1, 1, button.winner, button.roll, button.key) })
+          assert.are.same({ nil, "changed" }, { click(ns.Popup.GiveHidden, 1, 1, "Doran Vale", "87", key) })
+          assert.are.equal(1, #wow.gives)
+          assert.is_nil(ns.Records.Get(key).voided)
+        end)
+
+        it("records the replacement even when the line can't be built, and says so", function()
+          local key = unconfirmed({ code = "MC0001", reserves = RESERVES }, GROUP)
+          callRoll(key)
+          roll("Doran Vale", 87)
+          local attempt = assert(giveRolled())
+          assert.are.equal(2, #wow.gives)
+          assert.is_nil(attempt.announced)
+          assert.are.same({ true, 87 }, { ns.Records.Get(key).voided, ns.Records.Get(attempt.awardKey).roll })
+          assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale instead of Ashla"
+            .. " Brightwater, but its raid chat line couldn't be posted", 1, true))
+        end)
+      end)
+
       describe("not handed out", function()
         it("voids the award and posts its undo line, with no loot window needed", function()
           local key = unconfirmed()
