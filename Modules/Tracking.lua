@@ -10,6 +10,50 @@ ns.Tracking = Tracking
 -- Seconds to wait for the game's confirmation. One setting, easy to tune after live tests.
 Tracking.confirmWait = 5
 
+-- The loot window as the add-on reads it: the game's, or a Test drop's made-up one (#108) in
+-- LootWindow.fake = { slots = { { link, quality, guid } }, candidates = function(slot) -> names, give }.
+-- Every read of the window and every hand-out goes through here, so a Test drop hands out nothing
+-- for real.
+local LootWindow = {}
+ns.LootWindow = LootWindow
+
+function LootWindow.NumItems()
+  return LootWindow.fake and #LootWindow.fake.slots or GetNumLootItems()
+end
+
+function LootWindow.SlotLink(slot)
+  if LootWindow.fake then return (LootWindow.fake.slots[slot] or {}).link end
+  return GetLootSlotLink(slot)
+end
+
+-- The game's GetLootSlotInfo values this add-on reads: quantity (3rd) and quality (4th here).
+function LootWindow.SlotInfo(slot)
+  if LootWindow.fake then
+    local s = LootWindow.fake.slots[slot] or {}
+    return nil, nil, 1, nil, s.quality
+  end
+  return GetLootSlotInfo(slot)
+end
+
+function LootWindow.SourceInfo(slot)
+  if LootWindow.fake then return (LootWindow.fake.slots[slot] or {}).guid, 1 end
+  return GetLootSourceInfo(slot)
+end
+
+function LootWindow.Threshold()
+  return LootWindow.fake and 0 or GetLootThreshold()
+end
+
+function LootWindow.Candidate(slot, index)
+  if LootWindow.fake then return (LootWindow.fake.candidates(slot) or {})[index] end
+  return GetMasterLootCandidate(slot, index)
+end
+
+function LootWindow.Give(slot, index)
+  if LootWindow.fake then return LootWindow.fake.give(slot, index) end
+  GiveMasterLoot(slot, index)
+end
+
 local listeners = {}
 local attempts = {}   -- every attempt, oldest first
 local snapshot = {}   -- the open loot window's slots: { key, link, quality, quantity, cleared }
@@ -29,6 +73,13 @@ end
 local function report(name, info)
   for _, fn in ipairs(listeners[name] or {}) do fn(info) end
 end
+
+-- The game opening or closing a loot window ends a Test drop's: only the Test drop's own open
+-- (LootWindow.opening) keeps its window. This handler is the first, so Tracking reads the right one.
+ns.On("LOOT_OPENED", function()
+  if not LootWindow.opening then LootWindow.fake = nil end
+end)
+ns.On("LOOT_CLOSED", function() LootWindow.fake = nil end)
 
 -- Items compare by id; plain "[Name]" links (and the stand-in's) compare by their text.
 local function itemKey(link)
@@ -98,8 +149,8 @@ end
 
 -- Hands the slot's item to the candidate at `index` and follows it. Same results as Track.
 function Tracking.Give(slot, index)
-  local attempt, reason = Tracking.Track(slot, GetMasterLootCandidate(slot, index))
-  if attempt then GiveMasterLoot(slot, index) end
+  local attempt, reason = Tracking.Track(slot, LootWindow.Candidate(slot, index))
+  if attempt then LootWindow.Give(slot, index) end
   return attempt, reason
 end
 
@@ -122,7 +173,7 @@ local function takeOrphan(list, matches)
 end
 
 local function reportOutside(clear, winner)
-  if clear.quality >= GetLootThreshold() then
+  if clear.quality >= LootWindow.Threshold() then
     report("outside", {
       winner = winner, link = clear.link, quantity = clear.quantity, quality = clear.quality,
     })
@@ -131,9 +182,9 @@ end
 
 ns.On("LOOT_OPENED", function()
   snapshot = {}
-  for slot = 1, GetNumLootItems() do
-    local _, _, quantity, _, quality = GetLootSlotInfo(slot)
-    local link = GetLootSlotLink(slot)
+  for slot = 1, LootWindow.NumItems() do
+    local _, _, quantity, _, quality = LootWindow.SlotInfo(slot)
+    local link = LootWindow.SlotLink(slot)
     snapshot[slot] = {
       link = link, key = itemKey(link), quality = quality or 0, quantity = quantity or 1,
     }

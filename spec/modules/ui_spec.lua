@@ -39,6 +39,23 @@ describe("the officers' window", function()
     assert.is_false(box.check:IsShown())
   end)
 
+  it("shows the Test drop button only in practice mode, and a click opens a Test drop (#108)", function()
+    local button = ns.UI.testDrop
+    assert.are.equal(ns.UI.footer, button:GetParent())
+    assert.are.equal("Test drop", button.label:GetText())
+    assert.is_false(button:IsShown())
+    wow.slash("/bf practice")
+    assert.is_true(button:IsShown())
+    assert.are.equal(button, ns.UI.practiceBox.points[1].relativeTo) -- the checkbox sits left of it
+    wow.click(function() button:GetScript("OnClick")(button) end)
+    assert.is_true(ns.TestDrop.IsOpen())
+    assert.is_true(ns.PopupFrame.frame:IsShown())
+    wow.slash("/bf practice")
+    assert.is_false(button:IsShown())
+    assert.is_false(ns.TestDrop.IsOpen())
+    assert.are.equal(ns.UI.footer, ns.UI.practiceBox.points[1].relativeTo)
+  end)
+
   it("opens and closes with /bf", function()
     wow.slash("/bf")
     assert.is_true(ns.UI.window:IsShown())

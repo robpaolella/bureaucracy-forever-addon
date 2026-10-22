@@ -13,6 +13,8 @@
 -- GiveDB is the D/B button (#39): it gives to the raid's remembered disenchanter or bank character.
 -- In practice mode (#107) each item in the window gets made-up reserves from the group (PracticeReserves),
 -- the same on every redraw of the window.
+-- A Test drop (#108, TestDrop) is a made-up loot window (ns.LootWindow.fake): Build then ignores the
+-- loot master and raid selection, its awards have no raid, and its chat lines carry a made-up raid code.
 -- In practice mode (#17) every award made here is marked practice; the operations that follow an
 -- award (confirm, correction, undo) take the award's own mark, so switching changes only the next.
 -- Every operation recorded here is sent to the other officers right after it is saved
@@ -42,6 +44,10 @@ local OPEN_WINDOW = "Open the loot window to hand it out."
 local CHAT_LIMITS = { "Encounter", "Chat" }
 local UNKNOWN_BOSS_NOTICE = "These items drop from more than one boss. Pick the boss before awarding."
 local BOSS_MENU_TITLE = "Which boss dropped this?"
+local TEST_DROP = "Test drop"
+local TEST_BOSS = "testdrop" -- the boss id its awards carry, so their chat lines can be built
+local TEST_DROP_NOTICE = "Test drop: no corpse, reserves are made up, nothing is handed out or sent to the"
+  .. " site."
 local NO_RESERVES_NOTICE = "No reserves loaded, so every item is an open roll."
 local DB_TITLE = "Disenchant/bank: give to"
 local DB_CHOOSE_TIP = "Disenchant/bank: choose the character to give to."
@@ -80,6 +86,8 @@ local dbNotes = {} -- per slot, why the last D/B click handed nothing out
 local refusals = {} -- per award key, why the last not-confirmed choice was refused
 local picks = {} -- per slot, the name the officer clicked in the roll list: { item, name }
 local rollNotes = {} -- per slot, why the last hidden-roll click handed nothing out: { item, text }
+local testPick -- the D/B pick in a Test drop: kept until its window closes, never saved
+local testKeys = {} -- a Test drop: the keys of the awards made in this window, for the copies still to come
 local madeUp = {} -- practice mode: per item id in this loot window, its made-up reserves
 local dropCount = 0 -- practice mode: drops given made-up reserves this session, to move through the cases
 local windowItems -- the open loot window's items as it opened, for its boss after some are handed out
@@ -93,6 +101,7 @@ local NOT_RECEIVE = " can't be given it: the game won't let them receive it (usu
 
 ns.On("LOOT_CLOSED", function()
   chosenBoss, dbNotes, refusals, picks, rollNotes, madeUp, calls = nil, {}, {}, {}, {}, {}, {}
+  testPick, testKeys = nil, {}
   windowItems = nil
 end)
 
@@ -114,8 +123,27 @@ function Popup.ChatLocked()
   return false
 end
 
--- True when the player is the master looter.
+-- The selected raid's id: none in a Test drop (#108), which ignores the raid selection.
+local function testDrop() return ns.LootWindow.fake ~= nil or nil end
+
+-- The raid code a chat line carries: the raid's, or for a practice award with no raid (a Test drop's,
+-- #108) a made-up one that matches no raid, so the line can still be posted. Nil for any other no-raid
+-- award: its line can't be built.
+local TEST_CODE = "PTEST0"
+local function lineRaid(raidId, practice)
+  local snapshot = ns.Raids.Get(raidId)
+  if snapshot then return snapshot.code end
+  return practice and not raidId and TEST_CODE or nil
+end
+
+local function activeRaid()
+  if ns.LootWindow.fake then return nil end
+  return ns.Selection.Status().activeRaid
+end
+
+-- True when the player is the master looter; in a Test drop, always.
 local function isLootMaster()
+  if ns.LootWindow.fake then return true end
   if not (C_PartyInfo and C_PartyInfo.GetLootMethod) then return false end
   local method, partyIndex, raidIndex = C_PartyInfo.GetLootMethod()
   if method ~= "master" and not (Enum and Enum.LootMethod and method == Enum.LootMethod.Masterlooter) then
@@ -126,8 +154,18 @@ local function isLootMaster()
   return name and bare(name) == bare(UnitName("player")) or false
 end
 
+-- Practice: the item's made-up reserves, made the first time they're asked for and the same on every
+-- redraw of the window. A Test drop asks too (TestDrop), before the pop-up draws.
+function Popup.MadeUp(item)
+  if not madeUp[item] then
+    madeUp[item] = ns.PracticeReserves.Generate(Popup.Roster(), dropCount)
+    dropCount = dropCount + 1
+  end
+  return madeUp[item]
+end
+
 -- The names in the group, the player included.
-local function roster()
+function Popup.Roster()
   local names = { UnitName("player") }
   if IsInRaid() then
     names = {}
@@ -141,7 +179,7 @@ end
 local function candidates(slot)
   local list, unknown = {}, false
   for i = 1, MAX_CANDIDATES do
-    local name = GetMasterLootCandidate(slot, i)
+    local name = ns.LootWindow.Candidate(slot, i)
     if not name then break end
     list[#list + 1] = name
     if name == "Unknown" then unknown = true end
@@ -151,13 +189,13 @@ end
 
 -- The loot window's items at or above the threshold: { slot, item, link, guid }.
 local function lootItems()
-  local items, threshold = {}, GetLootThreshold() or 0
-  for slot = 1, GetNumLootItems() do
-    local link = GetLootSlotLink(slot)
+  local items, threshold = {}, ns.LootWindow.Threshold() or 0
+  for slot = 1, ns.LootWindow.NumItems() do
+    local link = ns.LootWindow.SlotLink(slot)
     local item = link and tonumber(link:match("item:(%d+)"))
-    local quality = select(5, GetLootSlotInfo(slot))
+    local quality = select(5, ns.LootWindow.SlotInfo(slot))
     if item and quality and quality >= threshold then
-      items[#items + 1] = { slot = slot, item = item, link = link, guid = (GetLootSourceInfo(slot)) }
+      items[#items + 1] = { slot = slot, item = item, link = link, guid = (ns.LootWindow.SourceInfo(slot)) }
     end
   end
   return items
@@ -425,7 +463,7 @@ end
 
 -- The D/B list: the group's members by name, the pick ticked. members: { { name, selected } }.
 local function dbMenu(raidId)
-  local pick, names, members = Popup.DBPick(), roster(), {}
+  local pick, names, members = Popup.DBPick(), Popup.Roster(), {}
   table.sort(names, function(a, b) return bare(a):lower() < bare(b):lower() end)
   for i, name in ipairs(names) do
     members[i] = { name = name, selected = pick ~= nil and bare(name) == bare(pick) }
@@ -489,23 +527,23 @@ end
 -- members = { { name, selected } }, note }), count, foot, recheck, practice (practice mode is on: the
 -- title starts with "[Practice] " and the frame tags the foot).
 function Popup.Build()
+  local fake = testDrop()
   if not isLootMaster() then return nil, "not loot master" end
-  if ns.Selection.IsQuiet() then return nil, "not a guild run" end
+  if not fake and ns.Selection.IsQuiet() then return nil, "not a guild run" end
   local items = lootItems()
   if #items == 0 then return nil, "no items" end
-  local raidId = ns.Selection.Status().activeRaid
+  local raidId = activeRaid()
   local snapshot = ns.Raids.Get(raidId)
-  local ctx = { snapshot = snapshot, awards = {}, reserves = {}, roster = roster(), unlisted = {} }
+  local ctx = { snapshot = snapshot, awards = {}, reserves = {}, roster = Popup.Roster(), unlisted = {} }
   if ns.Practice() then
     -- Practice: each item of the window gets made-up reserves, the same on every redraw of it.
     ctx.made = {}
-    for _, it in ipairs(items) do
-      if not madeUp[it.item] then
-        madeUp[it.item] = ns.PracticeReserves.Generate(ctx.roster, dropCount)
-        dropCount = dropCount + 1
-      end
-      ctx.made[it.item] = madeUp[it.item]
-    end
+    for _, it in ipairs(items) do ctx.made[it.item] = Popup.MadeUp(it.item) end
+  end
+  for _, key in ipairs(testKeys) do
+    -- A Test drop's own awards count as received, so the next copy goes to another holder.
+    local award = ns.Records.Get(key)
+    if award then ctx.awards[#ctx.awards + 1] = award end
   end
   if snapshot then
     ctx.reserves = snapshot.reserves
@@ -516,7 +554,8 @@ function Popup.Build()
       ctx.unlisted[it.item] = unlisted == "unlisted"
     end
   end
-  local boss = bossControl(raidId, snapshot, items)
+  local boss = fake and { resolved = true, id = TEST_BOSS, name = TEST_DROP }
+    or bossControl(raidId, snapshot, items)
   local locked = Popup.ChatLocked()
   local handouts = {}
   for _, a in ipairs(ns.Tracking.Pending()) do
@@ -525,7 +564,8 @@ function Popup.Build()
   local unconfirmed = unconfirmedBySlot()
   local total, seen, earlier, copyNotes = {}, {}, {}, {}
   for _, it in ipairs(items) do total[it.item] = (total[it.item] or 0) + 1 end
-  local model = { boss = boss, rows = {}, count = #items, foot = footLine(raidId, snapshot) }
+  local model = { boss = boss, rows = {}, count = #items,
+    foot = fake and "Reserves: made up" or footLine(raidId, snapshot) }
   for _, it in ipairs(items) do
     seen[it.item] = (seen[it.item] or 0) + 1
     earlier[it.item] = earlier[it.item] or {}
@@ -553,7 +593,9 @@ function Popup.Build()
   model.practice = ns.Practice()
   model.title = (model.practice and "[Practice] " or "") .. "Loot"
     .. (boss.name and (" · " .. boss.name) or "")
-  if not snapshot and not ctx.made then
+  if fake then
+    model.notice = TEST_DROP_NOTICE
+  elseif not snapshot and not ctx.made then
     model.notice, model.syncLink = NO_RESERVES_NOTICE, "Sync"
   end
   if locked then model.fight = FIGHT_NOTICE end
@@ -565,8 +607,8 @@ end
 -- nil. Saved per raid in
 -- BureaucracyForeverDB.dbPick[raidId]; with no raid loaded it lasts until the game closes.
 function Popup.DBPick(raidId)
-  raidId = raidId or ns.Selection.Status().activeRaid
-  if not raidId then return sessionPick end
+  raidId = raidId or activeRaid()
+  if not raidId then return ns.LootWindow.fake and testPick or sessionPick end
   local saved = ns.db.dbPick
   return type(saved) == "table" and saved[raidId] or nil
 end
@@ -575,14 +617,16 @@ end
 -- out. Returns true, or nil and "not in raid".
 function Popup.SetDBPick(name)
   local found
-  for _, member in ipairs(roster()) do
+  for _, member in ipairs(Popup.Roster()) do
     if name and bare(member) == bare(name) then found = member end
   end
   if not found then return nil, "not in raid" end
-  local raidId = ns.Selection.Status().activeRaid
+  local raidId = activeRaid()
   if raidId then
     if type(ns.db.dbPick) ~= "table" then ns.db.dbPick = {} end
     ns.db.dbPick[raidId] = found
+  elseif ns.LootWindow.fake then
+    testPick = found
   else
     sessionPick = found
   end
@@ -631,7 +675,7 @@ local handoutCheck, replaceWith
 local function handOut(model, row, chosen, roll, fromRolls)
   local index
   for i = 1, MAX_CANDIDATES do
-    local name = GetMasterLootCandidate(row.slot, i)
+    local name = ns.LootWindow.Candidate(row.slot, i)
     if not name then break end
     if bare(name) == bare(chosen) then
       index = i
@@ -652,13 +696,13 @@ local function handOut(model, row, chosen, roll, fromRolls)
   local method = fromRolls and METHODS[row.mode] or (row.mode == "hr" and "HR" or "SR")
   local user = fromRolls and row.users[bare(chosen)] or row.user
   local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, char = chosen,
-    user = user, method = method, roll = roll, practice = ns.Practice() })
+    user = user, method = method, roll = roll, practice = ns.Practice(), noRaid = testDrop() })
   ns.Hub.SendOwn(op, why)
   local data
   if op then
     attempt.awardKey = op.id
-    local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
-    data = { raid = snapshot and snapshot.code, key = op.id, item = row.item, link = row.link,
+    if testDrop() then testKeys[#testKeys + 1] = op.id end
+    data = { raid = lineRaid(activeRaid(), op.practice), key = op.id, item = row.item, link = row.link,
       boss = model.boss.id, method = method, roll = roll, winner = chosen, practice = op.practice }
   end
   attempt.announced = post("award", data, why, "Award line for " .. row.link,
@@ -783,7 +827,8 @@ local function itemOf(link) return link and tonumber(link:match("item:(%d+)")) e
 -- The award's item link: its last hand-out's, else the game's, else its number.
 local function linkOf(key, award)
   local attempt = attemptOf(key)
-  return attempt and attempt.link or select(2, GetItemInfo(award.item)) or ("item " .. award.item)
+  local made = award.item == ns.TestDrop.ITEM and ns.TestDrop.LINK -- a Test drop's made-up item
+  return attempt and attempt.link or made or select(2, GetItemInfo(award.item)) or ("item " .. award.item)
 end
 
 -- The award, if it is not confirmed and not voided: the only kind the three choices act on. Or
@@ -803,9 +848,9 @@ end
 local function findSlot(key, item)
   local attempt = attemptOf(key)
   local slots = attempt and { attempt.slot } or {}
-  for slot = 1, GetNumLootItems() do slots[#slots + 1] = slot end
+  for slot = 1, ns.LootWindow.NumItems() do slots[#slots + 1] = slot end
   for _, slot in ipairs(slots) do
-    if itemOf(GetLootSlotLink(slot)) == item then return slot end
+    if itemOf(ns.LootWindow.SlotLink(slot)) == item then return slot end
   end
 end
 
@@ -815,13 +860,13 @@ local function lootSlot(key, item)
   local slot = findSlot(key, item)
   if slot then return slot end
   ns.Print(OPEN_WINDOW)
-  return nil, GetNumLootItems() == 0 and "window" or "changed"
+  return nil, ns.LootWindow.NumItems() == 0 and "window" or "changed"
 end
 
 -- The index of the candidate with this name for the slot, or nil.
 local function candidateIndex(slot, char)
   for i = 1, MAX_CANDIDATES do
-    local name = GetMasterLootCandidate(slot, i)
+    local name = ns.LootWindow.Candidate(slot, i)
     if not name then return end
     if bare(name) == bare(char) then return i end
   end
@@ -831,7 +876,7 @@ end
 -- receive it. The officer's note, naming the pick.
 local function dbRefusal(pick)
   local inRaid
-  for _, member in ipairs(roster()) do inRaid = inRaid or bare(member) == bare(pick) end
+  for _, member in ipairs(Popup.Roster()) do inRaid = inRaid or bare(member) == bare(pick) end
   return inRaid and ("The game won't let " .. pick .. " receive this item (usually: not"
     .. " nearby when the boss died). Right-click D/B to choose someone else.")
     or (pick .. " isn't in the raid. Right-click D/B to choose someone else.")
@@ -865,13 +910,12 @@ function Popup.GiveDB(slot, item, pick)
   dbNotes[slot] = nil
   ns.Rolls.End(slot, item)
   local op, why = ns.Records.Award({ boss = model.boss.id, item = row.item, method = "DISENCHANT_BANK",
-    practice = ns.Practice() })
+    practice = ns.Practice(), noRaid = testDrop() })
   ns.Hub.SendOwn(op, why)
   local data
   if op then
     attempt.awardKey = op.id
-    local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
-    data = { raid = snapshot and snapshot.code, key = op.id, item = row.item, link = row.link,
+    data = { raid = lineRaid(activeRaid(), op.practice), key = op.id, item = row.item, link = row.link,
       boss = model.boss.id, method = "DISENCHANT_BANK", practice = op.practice }
   end
   attempt.announced = post("award", data, why, "Award line for " .. row.link,
@@ -956,7 +1000,7 @@ otherHolders = function(key, award, atCorpse)
       if h.kind == kind and h.user ~= award.user then same[#same + 1] = h end
     end
     local resolved = ns.Rules.Resolve({ item = award.item, reserves = { [award.item] = same },
-      awards = awards, roster = made and made.roster or roster(), candidates = cands })
+      awards = awards, roster = made and made.roster or Popup.Roster(), candidates = cands })
     local status = {}
     for _, h in ipairs(resolved.contenders) do status[h.user] = { available = true } end
     for _, s in ipairs(resolved.skipped) do
@@ -984,15 +1028,14 @@ end
 replaceWith = function(key, award, slot, index, fields, told)
   local attempt, reason = ns.Tracking.Give(slot, index)
   if not attempt then return nil, reason end
-  local link = GetLootSlotLink(slot)
+  local link = ns.LootWindow.SlotLink(slot)
   local op, why = ns.Records.Replace(key, { boss = award.boss, item = award.item, char = fields.char,
     user = fields.user, method = fields.method, roll = fields.roll })
   ns.Hub.SendOwn(op, why)
   local data
   if op then
     attempt.awardKey = op.award.id
-    local snapshot = ns.Raids.Get(award.raid)
-    data = { raid = snapshot and snapshot.code, id = op.id, key = key, newKey = op.award.id,
+    data = { raid = lineRaid(award.raid, op.practice), id = op.id, key = key, newKey = op.award.id,
       item = award.item, link = link, boss = award.boss, method = fields.method, roll = fields.roll,
       winner = fields.char, oldWinner = award.char, practice = op.practice }
   end
@@ -1072,8 +1115,7 @@ function Popup.NotHandedOut(key)
   if not op then return nil, why end
   ns.Hub.SendOwn(op, why)
   local link = linkOf(key, award)
-  local snapshot = ns.Raids.Get(award.raid)
-  post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
+  post("undo", { raid = lineRaid(award.raid, op.practice), id = op.id, key = key, link = link,
     winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
     link .. (award.char and (" is no longer awarded to " .. award.char) or " is no longer going to"
       .. " disenchant/bank") .. ", but its raid chat line couldn't be posted.")
@@ -1083,12 +1125,15 @@ end
 -- Undo on a confirmed award (or one made by hand on the site) in the Awards tab (#40): voids it and
 -- posts its undo line. As NotHandedOut: no loot window needed, and a line that can't be built is not
 -- posted, the officer told and the void standing. Returns the void operation, or nil and why:
--- "fight", "not loot master", "not undoable" (not confirmed, or already voided), "handing out" or
--- Records.Void's reasons. A refusal changes nothing and posts nothing.
+-- "fight", "not loot master" (not for a Test drop's award), "not undoable" (not confirmed, or already
+-- voided), "handing out" or Records.Void's reasons. A refusal changes nothing and posts nothing.
 function Popup.Undo(key)
   if Popup.ChatLocked() then return nil, "fight" end
-  if not isLootMaster() then return nil, "not loot master" end
   local award = ns.Records.Get(key)
+  -- A Test drop's award (practice, no raid) can be undone by whoever made it, loot master or not.
+  if not (isLootMaster() or (award and award.practice and not award.raid)) then
+    return nil, "not loot master"
+  end
   if not (award and (award.state == "confirmed" or award.state == "manual") and not award.voided) then
     return nil, "not undoable"
   end
@@ -1098,8 +1143,7 @@ function Popup.Undo(key)
   if not op then return nil, why end
   ns.Hub.SendOwn(op, why)
   local link = linkOf(key, award)
-  local snapshot = ns.Raids.Get(award.raid)
-  post("undo", { raid = snapshot and snapshot.code, id = op.id, key = key, link = link,
+  post("undo", { raid = lineRaid(award.raid, op.practice), id = op.id, key = key, link = link,
     winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
     link .. (award.char and (" is no longer awarded to " .. award.char) or " is no longer going to"
       .. " disenchant/bank") .. ", but its raid chat line couldn't be posted.")
@@ -1144,7 +1188,7 @@ end
 -- The raid members who can be picked by open roll: the group but the previous winner, by name.
 local function rollMembers(award)
   local list = {}
-  for _, name in ipairs(roster()) do
+  for _, name in ipairs(Popup.Roster()) do
     if not (award.char and bare(name) == bare(award.char)) then list[#list + 1] = name end
   end
   table.sort(list)
@@ -1196,10 +1240,9 @@ end
 
 -- The correction line's data for OpText.BuildLine.
 local function correctionData(key, award, new, id, newKey, practice)
-  local snapshot = ns.Raids.Get(award.raid)
-  return { raid = snapshot and snapshot.code, id = id, key = key, newKey = newKey, item = award.item,
-    link = linkOf(key, award), boss = award.boss, method = new.method, roll = new.roll, winner = new.char,
-    oldWinner = award.char, practice = practice }
+  return { raid = lineRaid(award.raid, award.practice), id = id, key = key, newKey = newKey,
+    item = award.item, link = linkOf(key, award), boss = award.boss, method = new.method, roll = new.roll,
+    winner = new.char, oldWinner = award.char, practice = practice }
 end
 
 -- The picker of an award that needs a winner, or nil when it doesn't ("not needed"). Fields: key,
@@ -1412,7 +1455,7 @@ end)
 -- The officer picks the boss (a boss row id of the loaded raid, "Trash" included) for this loot
 -- window. Returns true, or nil and why.
 function Popup.PickBoss(bossId)
-  local snapshot = ns.Raids.Get(ns.Selection.Status().activeRaid)
+  local snapshot = ns.Raids.Get(activeRaid())
   for _, row in ipairs(snapshot and snapshot.bosses or {}) do
     if row.id == bossId then
       chosenBoss = bossId
@@ -1428,7 +1471,7 @@ ns.On("LOOT_OPENED", function() windowItems = lootItems() end)
 -- The boss row id the open loot window's items came from, as the pop-up resolves it (the officer's
 -- pick, else the one boss they all point to), or nil: no window open, no raid loaded or no single boss.
 function Popup.WindowBoss()
-  if not windowItems or ns.Selection.IsQuiet() then return nil end
+  if not windowItems or ns.Selection.IsQuiet() or testDrop() then return nil end
   local raidId = ns.Selection.Status().activeRaid
   local snapshot = ns.Raids.Get(raidId)
   if not snapshot then return nil end
