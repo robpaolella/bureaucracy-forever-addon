@@ -383,8 +383,9 @@ end
 -- the award's key, and the award's own boss counts.
 local function addButtons(row, boss, locked, result)
   local nc = row.notConfirmed
-  -- A roll called from a not confirmed row shows only on that row, and only it shows there.
-  if result and result.forKey ~= (nc and nc.key) then result = nil end
+  -- A roll called from a not confirmed row shows only on that row, only it shows there, and only
+  -- until another choice ends it.
+  if result and (result.forKey ~= (nc and nc.key) or (nc and not calls[nc.key])) then result = nil end
   if row.handout or (nc and not result) then
     row.buttons = {}
     return

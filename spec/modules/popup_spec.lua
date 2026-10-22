@@ -1446,6 +1446,26 @@ describe("Popup", function()
           assert.are.equal("Call roll (2)", row1().buttons[1].text)
         end)
 
+        it("doesn't bring an ended roll back when Try again isn't confirmed either", function()
+          local key = unconfirmed({ reserves = RESERVES }, GROUP)
+          callRoll(key)
+          roll("Doran Vale", 87)
+          local button = row1().buttons[1]
+          assert.is_truthy(click(ns.Popup.Choose, key, "tryagain"))
+          wow.advance(ns.Tracking.confirmWait)
+          local r = row1()
+          assert.are.equal(key, r.notConfirmed.key)
+          assert.is_nil(r.rolls)
+          assert.are.same({}, r.buttons)
+          assert.are.same({ nil, "not ready" },
+            { click(ns.Popup.Give, 1, 1, button.winner, button.roll, button.key) })
+          assert.are.equal(2, #wow.gives)
+          assert.is_nil(ns.Records.Get(key).voided)
+          -- Calling again starts a fresh roll.
+          callRoll(key)
+          assert.are.equal("0 rolled", row1().rolls.count)
+        end)
+
         it("keeps the roll when another choice is refused, and ends it with the loot window", function()
           local key = unconfirmed({ reserves = RESERVES }, GROUP)
           callRoll(key)
