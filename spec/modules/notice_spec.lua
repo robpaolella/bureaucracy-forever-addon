@@ -288,3 +288,32 @@ describe("the loot master handover notice", function()
     assert.is_table(ns.Popup.Build())
   end)
 end)
+
+describe("the update notice at login", function()
+  local function inboxWith(version)
+    local snapshot = tree("raid00001", { version = version, url = URL })
+    snapshot.instance = 409
+    return { formatVersion = 1, written = 1791999940, raids = { { snapshot = snapshot } } }
+  end
+
+  it("shows when the inbox's raid names a newer version, though the inbox loads before the window", function()
+    local ns = wow.start({ inbox = inboxWith("9.0.0") })
+    local N = ns.Notice
+    assert.equals("update", N.Shown().key)
+    assert.is_true(N.frame:IsShown())
+    assert.matches("is out: |cff40ff409.0.0|r", N.frame.lead.text, 1, true)
+    assert.equals(URL, N.frame.link.text)
+    assert.is_nil(N.Pending())
+  end)
+
+  it("does not raise a second notice for the same version from a pasted snapshot", function()
+    local ns = wow.start({ inbox = inboxWith("9.0.0") })
+    local N = ns.Notice
+    N.frame:Hide()
+    local snapshot = assert(ns.Snapshot.Validate(
+      tree("raid00002", { version = "9.0.0", url = URL }), ns.version))
+    ns.Raids.Load(snapshot, "pasted")
+    assert.is_false(N.frame:IsShown())
+    assert.is_nil(N.Pending())
+  end)
+end)
