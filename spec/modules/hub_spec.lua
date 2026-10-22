@@ -1278,7 +1278,7 @@ describe("Hub catch-up", function()
     end
   end)
 
-  it("never whispers a practice no-raid award after an Attach, and the raid holds none", function()
+  it("never whispers a practice no-raid award in a catch-up reply after an Attach", function()
     local real = assert(ns.Records.Award({ boss = "lb_lucifron", item = 16805, char = "Ana Vale",
       method = "HR", id = "aw-00000001", noRaid = true }))
     local practice = assert(ns.Records.Award({ boss = "testdrop", item = 16805, char = "Ana Vale",
@@ -1287,18 +1287,21 @@ describe("Hub catch-up", function()
     assert.are.equal(1, (ns.Records.Attach(RAID)))
     assert.are.same({ real.id }, (function()
       local ids = {}
-      for _, op in ipairs(ns.Records.Ops(RAID)) do
-        assert.is_falsy(op.practice)
-        ids[#ids + 1] = op.id
-      end
+      for _, op in ipairs(ns.Records.Ops(RAID)) do ids[#ids + 1] = op.id end
       return ids
     end)())
-    wow.state.group, wow.state.groupIsRaid = { "Rae Quill", ZOE }, true
-    receive("H;SA0001;1;0;" .. ns.Digest.Of({}), ZOE)
+    -- ZOE holds nothing: the reply carries what the raid holds, and no practice operation.
+    for _, body in ipairs(Sync.EncodeRequest({}, "SA0001", "r00001")) do receive(body, ZOE, "WHISPER") end
     local list = sent()
+    assert.are.equal(1, #calls)
+    local whispered = {}
     for _, m in ipairs(list) do
+      if m[1]:sub(1, 2) == "O;" then whispered[#whispered + 1] = m[1] end
       assert.is_nil(m[1]:find(practice.id, 1, true))
     end
+    assert.are.equal(1, #whispered)
+    assert.is_truthy(whispered[1]:find(real.id, 1, true))
+    assert.are.equal("D;r00001;1", list[#list][1]:match("^D;r00001;1") and list[#list][1] or nil)
   end)
 
   describe("H", function()
