@@ -873,16 +873,18 @@ local otherHolders
 function Popup.GiveElseList(key)
   local award, why = unconfirmedAward(key)
   if not award then return nil, why end
-  return otherHolders(key, award)
+  return otherHolders(key, award, true)
 end
 
--- The award's item's reserve holders other than its winner, as GiveElseList lists them.
-otherHolders = function(key, award)
+-- The award's item's reserve holders other than its winner, as GiveElseList lists them. atCorpse:
+-- the item is still on the corpse, so the open loot window (its candidates, practice mode's made-up
+-- reserves) counts; Pick winner's item has left it, so only the raid does.
+otherHolders = function(key, award, atCorpse)
   local snapshot = ns.Raids.Get(award.raid)
   local reserves = snapshot and snapshot.reserves or {}
   local holders = reserves[award.item] or reserves[tostring(award.item)] or {}
   -- Practice: the window's made-up holders, group and candidates stand in for the real ones.
-  local made = ns.Practice() and madeUp[award.item]
+  local made = atCorpse and ns.Practice() and madeUp[award.item]
   if made then holders = made.holders end
   local awards = {}
   for _, a in ipairs(snapshot and snapshot.awards or {}) do awards[#awards + 1] = a end
@@ -890,7 +892,7 @@ otherHolders = function(key, award)
     if a.key ~= key then awards[#awards + 1] = a end
   end
   -- A name not loaded yet ("Unknown") can't be matched, so then nobody counts as unable to receive.
-  local slot = findSlot(key, award.item)
+  local slot = atCorpse and findSlot(key, award.item)
   local cands, unknown
   if slot then cands, unknown = candidates(slot) end
   if unknown then cands = nil end

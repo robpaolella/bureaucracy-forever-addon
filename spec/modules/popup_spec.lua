@@ -2241,6 +2241,18 @@ describe("Pick winner (#126)", function()
       assert.are.equal("", ns.Popup.Picker(key, cleared).note)
     end)
 
+    it("ignores an open loot window: the item left the corpse, so only being in the raid counts", function()
+      local key = undone()
+      wow.openLoot({ { id = 1, link = LINK, quality = 4, sourceGuid = "corpse2",
+        candidates = { "Masterlooter", "Bram Ironvein" } } })
+      local p = pick({ kind = "holder", char = "Doran Vale" })
+      local model = ns.Popup.Picker(key, p)
+      assert.are.same({ true, nil }, { model.holders[1].available, model.holders[1].reason })
+      assert.is_true(model.post.enabled)
+      assert.is_table(correct(key, p)[1])
+      assert.are.same({}, wow.gives)
+    end)
+
     it("is only for an award that needs a winner", function()
       local fields = { boss = "lb_lucifron", item = 1, char = "Doran Vale", method = "SR" }
       local standing = assert(ns.Records.Award(fields)).id
