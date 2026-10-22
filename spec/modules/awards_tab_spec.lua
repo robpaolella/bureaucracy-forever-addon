@@ -1186,6 +1186,9 @@ describe("the Awards tab's Undo", function()
           -- The member's list opens under the button.
           click(p.member)
           assert.is_true(tab.menu:IsShown())
+          assert.are.equal("Who has it now?", tab.menu.title:GetText())
+          assert.are.same({ "TOPLEFT", p.member, "BOTTOMLEFT" }, { tab.menu.points[1].point,
+            tab.menu.points[1].relativeTo, tab.menu.points[1].relativePoint })
           local names = {}
           for _, e in ipairs(tab.menu.entries) do
             if e:IsShown() then names[#names + 1] = e.label:GetText() end
