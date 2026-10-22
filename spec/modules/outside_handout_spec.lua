@@ -227,6 +227,27 @@ describe("the outside hand-out question", function()
     assert.matches("<BF1;A;SMC001;", wow.sent[1].text, 1, true)
   end)
 
+  it("holds the award as no raid when none was loaded at the hand-out, though one is chosen after", function()
+    ns = wow.start()
+    O = ns.OutsideHandout
+    wow.state.group = { "Masterlooter", "Ashla Brightwater" }
+    wow.state.groupIsRaid = true
+    wow.state.lootMethod = { "master", 0, 0 }
+    drop({ 1 })
+    giveFromMenu(1, "Ashla Brightwater")
+    assert.is_nil(view().boss)
+    ns.Raids.Load(assert(ns.Snapshot.Validate(tree(), "0.1.0")), "pasted")
+    assert(ns.Selection.ChooseRaid("raid00001"))
+    -- No reserves were loaded at the hand-out: Open roll, as the pop-up would have said.
+    assert.is_true(view().choices[3][1])
+    typeRoll("40")
+    record()
+    assert.are.same({}, awards())
+    assert.are.equal(1, #ns.db.noRaid)
+    assert.are.same({ "Ashla Brightwater", "OPEN_ROLL", 40 },
+      { ns.db.noRaid[1].char, ns.db.noRaid[1].method, ns.db.noRaid[1].roll })
+  end)
+
   it("keeps the question open and says so when the award can't be recorded", function()
     drop({ 1 })
     giveFromMenu(1, "Ashla Brightwater")

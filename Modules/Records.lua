@@ -258,13 +258,14 @@ end
 
 -- A hand-out was announced. fields: boss, item, char, user, method, roll, note, practice, and
 -- optionally id, at, sender (this officer by default) and raid. It goes to the raid named, else
--- the selected raid, or is held as no raid while none is loaded. Each operation below also takes
+-- the selected raid, or is held as no raid while none is loaded (or with fields.noRaid: a hand-out
+-- made while none was, answered later). Each operation below also takes
 -- fields.via: the bare name of the officer who forwarded it, when it came forwarded; and
 -- fields.author: the bare name of the officer who made it, when it came from another.
 function Records.Award(fields)
   local reason = refusal(fields, "award")
   if reason then return nil, reason end
-  local raidId = fields.raid or current()
+  local raidId = fields.raid or (not fields.noRaid and current() or nil)
   if fields.raid and fields.id then
     -- Held already: found by its key wherever it is, so the target is ignored.
     local held, heldRaid = locate(fields.id)

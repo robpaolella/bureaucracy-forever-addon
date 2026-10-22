@@ -178,15 +178,15 @@ showNext = function()
   if not h then return end
   local held, user = reserveOf(h)
   shown = { handout = h, held = held, user = user, method = held or "OPEN_ROLL", roll = "",
-    boss = h.boss or h.picked, askBoss = h.boss == nil and ns.Popup.BossMenu(nil, h.raid) ~= nil }
+    boss = h.boss or h.picked, askBoss = h.boss == nil and h.raid ~= nil }
   frame.roll:SetText("")
   draw()
 end
 
 -- Opens the question for a hand-out ({ winner, link, item, quantity, at, raid (the raid awards went to
--- when it was handed out, nil for none: its award goes there), boss (the loot window's boss row id, or
--- nil to ask), picked (the boss the officer picked when asked before) }), or queues it
--- behind the one on screen; in a boss fight it waits until the fight ends.
+-- when it was handed out: its award goes there; nil for none, held as no raid), boss (the loot
+-- window's boss row id, or nil to ask), picked (the boss the officer picked when asked before) }), or
+-- queues it behind the one on screen; in a boss fight it waits until the fight ends.
 -- One from the unanswered list leaves it while it is asked. Used for each outside hand-out, and for
 -- answering one put off with Later (#137).
 function OutsideHandout.Ask(handout)
@@ -250,8 +250,8 @@ function OutsideHandout.Record()
   local roll = method == "OPEN_ROLL" and rollOf(shown.roll) or nil
   local winner = not db and h.winner or nil
   local user = not db and shown.user or nil
-  local op, why = ns.Records.Award({ raid = h.raid, boss = boss, item = h.item, char = winner, user = user,
-    method = method, roll = roll, practice = ns.Practice() })
+  local op, why = ns.Records.Award({ raid = h.raid, noRaid = h.raid == nil, boss = boss, item = h.item,
+    char = winner, user = user, method = method, roll = roll, practice = ns.Practice() })
   if not op then
     ns.Log("Award for " .. h.link .. " not recorded: " .. tostring(why))
     ns.Print("The award of " .. h.link .. " to " .. plain(h.winner) .. " couldn't be recorded. Type /bf log"
