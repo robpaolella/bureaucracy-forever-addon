@@ -1048,5 +1048,271 @@ describe("the Awards tab's Undo", function()
       assert.are.equal(sent, #wow.sent)
       assert.is_false(tab.picker.post:IsEnabled())
     end)
+
+    describe("the choices", function()
+      local function holder(char, kind)
+        return { user = char:lower():gsub("%s", ""), char = char, kind = kind, trial = false }
+      end
+
+      -- Item 100's reserves: Dee Fox (hard), Bo Marsh and Cy Dune (soft); Cy is not in the raid.
+      local function reserved()
+        ns.Raids.Get(RAID).reserves[100] = { holder("Dee Fox", "HR"), holder("Bo Marsh", "SR"),
+          holder("Cy Dune", "SR") }
+        wow.state.group = { "Masterlooter", "Ana Vale", "Bo Marsh", "Dee Fox", "Eli Park" }
+      end
+
+      -- Opens the picker under the first NEEDS A WINNER row; returns the tab and the picker.
+      local function opened()
+        local tab = openTab()
+        click(needsRows(tab)[1].pick)
+        return tab, tab.picker
+      end
+
+      -- The drawn choice: name, badge, hint, selected radio, enabled.
+      local function seen(b)
+        return { b.name:GetText(), b.badge:IsShown() and b.badge:GetText() or "", b.hint:GetText(),
+          b.radio:GetText() == "|TInterface\\Buttons\\UI-RadioButton:14:14:0:0:64:16:16:32:0:16|t",
+          b:IsEnabled() }
+      end
+
+      local ON = "|TInterface\\Buttons\\UI-RadioButton:14:14:0:0:64:16:16:32:0:16|t"
+
+      it("groups the holders under Reserved it and the rest under Anyone else, with badges (pick-open)",
+        function()
+          reserved()
+          undone()
+          local _, p = opened()
+          assert.are.equal("Reserved it", p.reserved:GetText())
+          assert.are.equal("Anyone else", p.others:GetText())
+          assert.are.same({ "Dee Fox", "HARD RESERVE", "", false, true }, seen(p.holders[1]))
+          assert.are.same({ "Bo Marsh", "SOFT RESERVE", "", false, true }, seen(p.holders[2]))
+          assert.are.same({ "Cy Dune", "", "not in raid", false, false }, seen(p.holders[3]))
+          assert.is_nil(p.holders[4])
+          assert.is_false(p.empty:IsShown())
+          assert.are.same({ "Someone else in the raid", "OPEN ROLL", "", false, true }, seen(p.roll))
+          assert.are.same({ "Disenchant/bank", "DISENCHANT/BANK", "", false, true }, seen(p.db))
+          assert.are.same({ "Ana Vale", "HARD RESERVE", "had it before: cancels the undo", false, true },
+            seen(p.again))
+          -- Reserved it, then the holders, then Anyone else, then its choices, in that order.
+          assert.is_true(y(p.reserved) < y(p.holders[1]) and y(p.holders[1]) < y(p.holders[2])
+            and y(p.holders[2]) < y(p.holders[3]) and y(p.holders[3]) < y(p.others))
+          assert.is_true(y(p.others) < y(p.roll) and y(p.roll) < y(p.db) and y(p.db) < y(p.again)
+            and y(p.again) < y(p.noteLabel))
+          -- The badge sits after the name and the hint after the badge.
+          assert.is_true(p.holders[1].badge.points[1].x > 28)
+          assert.is_true(p.again.hint.points[1].x > p.again.badge.points[1].x)
+          assert.is_false(p.member:IsShown())
+          assert.is_false(p.rollEdit:IsShown())
+          assert.are.equal("Choose who gets it.", p.preview:GetText())
+          assert.is_false(p.post:IsEnabled())
+        end)
+
+      it("can't pick a holder who isn't in the raid", function()
+        reserved()
+        undone()
+        local _, p = opened()
+        local cy = p.holders[3]
+        assert.is_false(cy:IsEnabled())
+        -- A disabled button gets no click in the game; the stand-in runs the script, so the pick
+        -- is checked through what Post correction would do.
+        click(cy)
+        assert.is_false(p.post:IsEnabled())
+      end)
+
+      it("says so when nobody else reserved it", function()
+        undone()
+        local _, p = opened()
+        assert.is_false(p.holders[1] and p.holders[1]:IsShown() or false)
+        assert.are.equal("Nobody else reserved this item.", p.empty:GetText())
+        assert.is_true(p.empty:IsShown())
+      end)
+
+      it("makes the choices a radio group: one chosen, the others cleared", function()
+        reserved()
+        undone()
+        local _, p = opened()
+        click(p.holders[2])
+        assert.are.same({ true, false, false, false }, { p.holders[2].radio:GetText() == ON,
+          p.holders[1].radio:GetText() == ON, p.roll.radio:GetText() == ON, p.db.radio:GetText() == ON })
+        click(p.holders[1])
+        assert.are.same({ true, false }, { p.holders[1].radio:GetText() == ON,
+          p.holders[2].radio:GetText() == ON })
+        click(p.db)
+        assert.are.same({ true, false, false }, { p.db.radio:GetText() == ON,
+          p.holders[1].radio:GetText() == ON, p.again.radio:GetText() == ON })
+        click(p.again)
+        assert.are.same({ true, false }, { p.again.radio:GetText() == ON, p.db.radio:GetText() == ON })
+      end)
+
+      it("a reserve holder: the preview is the exact line and Post correction is enabled (pick-reserve)",
+        function()
+          reserved()
+          undone()
+          local _, p = opened()
+          click(p.holders[2])
+          assert.is_true(p.holders[2].background.color[1] > 0)
+          assert.are.equal("Correction: " .. LINK .. " → Bo Marsh (soft reserve), not Ana Vale",
+            p.preview:GetText():match("^(.-) <BF1;R;"))
+          assert.is_true(p.preview:GetText():find("<BF1;R;", 1, true) ~= nil)
+          assert.is_true(p.post:IsEnabled())
+          assert.are.equal("Traded by Ana Vale", p.noteEdit:GetText())
+          assert.is_false(p.member:IsShown())
+        end)
+
+      it("a hard reserve holder reads as a hard reserve in the line", function()
+        reserved()
+        undone()
+        local _, p = opened()
+        click(p.holders[1])
+        assert.are.equal("Correction: " .. LINK .. " → Dee Fox (hard reserve), not Ana Vale",
+          p.preview:GetText():match("^(.-) <BF1;R;"))
+      end)
+
+      it("open roll: the member button and Roll box; the line needs a member and a roll (pick-roll)",
+        function()
+          reserved()
+          undone()
+          local tab, p = opened()
+          click(p.roll)
+          assert.is_true(p.member:IsShown())
+          assert.are.equal("Choose a raid member", p.member.label:GetText())
+          assert.are.equal("Roll", p.rollLabel:GetText())
+          assert.is_true(p.rollEdit:IsShown())
+          assert.is_true(y(p.roll) < y(p.member) and y(p.member) < y(p.db))
+          assert.is_true(p.member.points[1].x < p.rollLabel.points[1].x
+            and p.rollLabel.points[1].x < p.rollEdit.points[1].x)
+          assert.is_false(p.post:IsEnabled())
+          assert.is_false(tab.menu:IsShown())
+          -- The member's list opens under the button.
+          click(p.member)
+          assert.is_true(tab.menu:IsShown())
+          local names = {}
+          for _, e in ipairs(tab.menu.entries) do
+            if e:IsShown() then names[#names + 1] = e.label:GetText() end
+          end
+          assert.are.same({ "Bo Marsh", "Dee Fox", "Eli Park", "Masterlooter" }, names)
+          assert.is_false(tab.menu.more:IsShown())
+          click(tab.menu.entries[3])
+          assert.is_false(tab.menu:IsShown())
+          assert.are.equal("Eli Park", p.member.label:GetText())
+          assert.is_false(p.post:IsEnabled())
+          typeInto(p.rollEdit, "92")
+          assert.are.equal("Correction: " .. LINK .. " → Eli Park (open roll, 92), not Ana Vale",
+            p.preview:GetText():match("^(.-) <BF1;R;"))
+          assert.is_true(p.post:IsEnabled())
+        end)
+
+      it("the member list ticks the chosen one, leaves out the previous winner and scrolls with the wheel",
+        function()
+          reserved()
+          local group = { "Masterlooter", "Ana Vale" }
+          for i = 1, 16 do group[#group + 1] = string.format("Raider %02d", i) end
+          wow.state.group = group
+          undone()
+          local tab, p = opened()
+          click(p.roll)
+          click(p.member)
+          local menu = tab.menu
+          local function names()
+            local out = {}
+            for _, e in ipairs(menu.entries) do
+              if e:IsShown() then out[#out + 1] = e.label:GetText() end
+            end
+            return out
+          end
+          assert.are.equal(12, #names())
+          assert.are.equal("Masterlooter", names()[1]) -- sorted: "M" before "R"
+          assert.is_truthy(menu.more:GetText():find("5 more · scroll", 1, true))
+          for _, name in ipairs(names()) do assert.is_nil(name:find("Ana Vale", 1, true)) end
+          -- The wheel moves it down to the end, then no further.
+          menu.scripts.OnMouseWheel(menu, -1)
+          assert.are.equal("Raider 01", names()[1])
+          menu.scripts.OnMouseWheel(menu, -5)
+          assert.are.equal(5, ns.UI.awards.pick.menuOffset)
+          assert.are.equal("Raider 16", names()[12])
+          menu.scripts.OnMouseWheel(menu, 20)
+          assert.are.equal(0, ns.UI.awards.pick.menuOffset)
+          -- The chosen one is ticked.
+          click(menu.entries[2])
+          click(p.member)
+          assert.is_true(menu.entries[2].tick:IsShown())
+          assert.is_false(menu.entries[1].tick:IsShown())
+        end)
+
+      it("another choice closes the member list", function()
+        reserved()
+        undone()
+        local tab, p = opened()
+        click(p.roll)
+        click(p.member)
+        assert.is_true(tab.menu:IsShown())
+        click(p.db)
+        assert.is_false(tab.menu:IsShown())
+        assert.is_false(p.member:IsShown())
+        assert.is_false(p.rollEdit:IsShown())
+      end)
+
+      it("disenchant/bank: the line names no winner and Post correction is enabled (pick-db)", function()
+        reserved()
+        undone()
+        local _, p = opened()
+        click(p.db)
+        assert.are.same({ "Disenchant/bank", "DISENCHANT/BANK", "", true, true }, seen(p.db))
+        assert.are.equal("Correction: " .. LINK .. " → disenchant/bank, not Ana Vale",
+          p.preview:GetText():match("^(.-) <BF1;R;"))
+        assert.is_true(p.post:IsEnabled())
+      end)
+
+      it("the previous winner after all: the note box is empty and the line names them (pick-again)",
+        function()
+          reserved()
+          undone()
+          local _, p = opened()
+          assert.are.equal("Traded by Ana Vale", p.noteEdit:GetText())
+          click(p.again)
+          assert.are.equal("", p.noteEdit:GetText())
+          assert.are.equal("Correction: " .. LINK .. " → Ana Vale (hard reserve), not Ana Vale",
+            p.preview:GetText():match("^(.-) <BF1;R;"))
+          assert.is_true(p.post:IsEnabled())
+        end)
+
+      it("a disenchant/bank award has no previous winner row, nor a trade note", function()
+        reserved()
+        local op = assert(ns.Records.Award({ boss = "boss1", item = 100, method = "DISENCHANT_BANK" }))
+        assert(ns.Records.Confirm(op.id))
+        assert(ns.Records.Void(op.id))
+        local _, p = opened()
+        assert.is_false(p.again:IsShown())
+        assert.are.equal("", p.noteEdit:GetText())
+        click(p.holders[2])
+        assert.are.equal("Correction: " .. LINK .. " → Bo Marsh (soft reserve), not disenchant/bank",
+          p.preview:GetText():match("^(.-) <BF1;R;"))
+      end)
+
+      it("done: a posted holder shows the new row, keeps the struck one and drops the count (pick-done)",
+        function()
+          reserved()
+          given({ char = "Eli Park", method = "OPEN_ROLL", roll = 50, at = time() - 60 })
+          local key = undone()
+          local tab, p = opened()
+          assert.are.equal("1 award · 1 needs a winner", tab.summary:GetText())
+          click(p.holders[2])
+          local line = p.preview:GetText()
+          local sent = #wow.sent
+          click(p.post)
+          assert.are.same({ text = line, channel = "RAID" }, wow.sent[sent + 1])
+          assert.is_truthy(line:find("→ Bo Marsh (soft reserve), not Ana Vale", 1, true))
+          assert.is_false(p:IsShown())
+          assert.are.equal("2 awards", tab.summary:GetText())
+          assert.are.same({}, needsRows(tab))
+          assert.is_true(rowOf(tab, "Ana Vale").voided)
+          local new = ns.Records.Get(ns.Records.Get(key).replacedBy)
+          local row = tab.shown[#tab.shown]
+          assert.are.same({ "Bo Marsh", "Soft reserve", "Traded by Ana Vale" },
+            { row.winner:GetText(), row.how:GetText(), new.note })
+          assert.are.equal("Corrected " .. clock(new.at), row.corrected:GetText())
+          assert.is_true(row.undo:IsShown())
+        end)
+    end)
   end)
 end)
