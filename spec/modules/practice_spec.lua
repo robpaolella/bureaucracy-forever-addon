@@ -172,7 +172,7 @@ describe("Test drop (#108)", function()
     assert.are.same(expected, modes())
   end)
 
-  it("acts out the menu case: the slot clears and the question opens, pre-filled, led by [Practice]", function()
+  it("acts out the menu case: the slot clears and the question opens, pre-filled, [Practice]-led", function()
     setup()
     local made
     repeat
