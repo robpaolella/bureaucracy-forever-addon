@@ -386,6 +386,101 @@ describe("Test drop (#108)", function()
     assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
   end)
 
+  describe("a failed hand-out in the skipped case (#127)", function()
+    local function skipped(group)
+      setup(group)
+      local row
+      for _ = 1, 4 do row = open().rows[1] end
+      return row
+    end
+
+    local function giveAndWait(row)
+      assert(click(ns.Popup.Give, row.slot, row.item, row.winner))
+      wow.advance(ns.Tracking.confirmWait)
+    end
+
+    local function nc() return ns.Popup.Build().rows[1].notConfirmed end
+
+    it("ends not confirmed after Tracking.confirmWait, with the three choices", function()
+      local row = skipped()
+      assert.are.equal("Tovin Hale", row.winner)
+      giveAndWait(row)
+      assert.is_true(ns.TestDrop.IsOpen()) -- the item never left the window
+      local box = nc()
+      assert.are.equal("The game didn't confirm that Tovin Hale got it. They may be too far away,"
+        .. " or their bags are full.", box.text)
+      local list = {}
+      for i, b in ipairs(box.buttons) do list[i] = { b.text, b.enabled } end
+      assert.are.same({ { "Try again", true }, { "Give to someone else", true },
+        { "Not handed out", true } }, list)
+      assert.are.same({}, wow.gives)
+    end)
+
+    it("greys the can't-receive and absent holders in Give to someone else", function()
+      giveAndWait(skipped())
+      local seen = {}
+      for _, p in ipairs(nc().list.people) do seen[p.char] = { p.available, p.reason } end
+      assert.are.same({ false, "not in raid" }, seen["Bram Ironvein"])
+      assert.are.same({ false, "can't receive it" }, seen["Mirel Stone"])
+    end)
+
+    it("fails again on Try again", function()
+      giveAndWait(skipped())
+      local key = nc().key
+      click(ns.Popup.Choose, key, "tryagain")
+      wow.advance(ns.Tracking.confirmWait)
+      assert.is_true(ns.TestDrop.IsOpen())
+      assert.is_truthy(nc())
+    end)
+
+    -- Give to someone else lists only the greyed holders here (the lone soft reserve holder is the
+    -- one who failed), so the made-up window is handed another candidate directly.
+    it("confirms a hand-out to anyone else", function()
+      local row = skipped()
+      giveAndWait(row)
+      local candidates = ns.Popup.MadeUp(ns.TestDrop.ITEM).candidates
+      local index
+      for i, name in ipairs(candidates) do
+        if name ~= row.winner then index = i break end
+      end
+      assert(index)
+      wow.click(function() assert(ns.Tracking.Give(row.slot, index)) end)
+      wow.advance(ns.TestDrop.confirmAfter)
+      assert.are.equal(0, #ns.Tracking.Pending())
+      assert.is_false(ns.TestDrop.IsOpen())
+      for _, line in ipairs(sentLines()) do assert.are.equal("[Practice] ", line:sub(1, 11)) end
+    end)
+
+    it("ends with Not handed out", function()
+      giveAndWait(skipped())
+      click(ns.Popup.Choose, nc().key, "nothandedout")
+      assert.is_nil(nc())
+      for _, line in ipairs(sentLines()) do assert.are.equal("[Practice] ", line:sub(1, 11)) end
+    end)
+
+    it("confirms in every other case", function()
+      setup()
+      for n = 1, 6 do
+        local row = open().rows[1]
+        if row.action == "give" and n ~= 4 then
+          giveAndWait(row)
+          assert.are.equal(0, #ns.Tracking.Pending())
+        end
+      end
+    end)
+
+    it("skips the case in a group of one, and its hand-outs confirm", function()
+      setup({ "Masterlooter" })
+      for _ = 1, 6 do
+        local row = open().rows[1]
+        if row.action == "give" then
+          giveAndWait(row)
+          assert.are.equal(0, #ns.Tracking.Pending())
+        end
+      end
+    end)
+  end)
+
   it("sends every chat line with [Practice] in front", function()
     setup()
     for _ = 1, 6 do
