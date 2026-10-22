@@ -214,8 +214,8 @@ local function choose(row, action)
   PopupFrame.Refresh()
 end
 
--- The Give button of a name, or of the Disenchant/bank line (action "givedb"), in the Give to
--- someone else list.
+-- The Give button of a name, of the Disenchant/bank line (action "givedb") or the open roll line's
+-- Call open roll (action "openroll"), in the Give to someone else list.
 local function giveElse(row, char, action)
   if ns.Popup.Choose(row.data.notConfirmed.key, action or "giveelse", char) then elseOpen = nil end
   PopupFrame.Refresh()
@@ -250,12 +250,20 @@ local function newNotConfirmed(row)
   return box
 end
 
--- The Give to someone else list's box, in parent: onGive(char, action) is a name's Give (action nil)
--- or the Disenchant/bank line's (action "givedb", char the pick); onBack is Back. The Awards tab
--- draws the same list (#101).
+-- The Give to someone else list's box, in parent: onGive(char, action) is a name's Give (action nil),
+-- the Disenchant/bank line's (action "givedb", char the pick) or the open roll line's Call open roll
+-- (action "openroll"); onBack is Back. The Awards tab draws the same list (#101).
 local function newList(parent, onGive, onBack)
   local box = newBox(parent)
   box.onGive = onGive
+  -- The open roll line (#118): its label, what it means and its Call open roll.
+  box.open = { label = newText(box, "GameFontHighlight"), text = newText(box, "GameFontHighlightSmall"),
+    call = tipButton(box, 110), line = box:CreateTexture(nil, "ARTWORK", nil, 0) }
+  box.open.line:SetColorTexture(0.2, 0.2, 0.2, 1)
+  box.open.line:SetSize(BOX_WIDTH - 12, 1)
+  box.open.call:SetScript("OnClick", function()
+    if box.open.enabled then box.onGive(nil, "openroll") end
+  end)
   -- The Disenchant/bank line (#96): its label, the pick's name and its Give.
   box.db = { label = newText(box, "GameFontHighlight"), name = newText(box, "GameFontHighlight"),
     give = tipButton(box, 60), line = box:CreateTexture(nil, "ARTWORK", nil, 0) }
@@ -378,7 +386,7 @@ local function newRow()
       return
     end
     if button.action == "rollgive" then
-      local ok, why = ns.Popup.Give(row.data.slot, row.data.item, button.winner, button.roll)
+      local ok, why = ns.Popup.Give(row.data.slot, row.data.item, button.winner, button.roll, button.key)
       if not ok then ns.Log("Give for " .. row.data.link .. " refused: " .. tostring(why)) end
       PopupFrame.Refresh()
       return
@@ -476,8 +484,8 @@ end
 
 -- The Give to someone else list, in its box at x and below in the box's parent: each other
 -- contender with the method they hold and a Give button; one who can't receive is greyed with the
--- reason and has no button. Then the Disenchant/bank line, when the list has one, and why the last
--- choice was refused. Returns the new below.
+-- reason and has no button. Then the open roll line and the Disenchant/bank line, when the list has
+-- them, and why the last choice was refused. Returns the new below.
 local function drawList(box, list, x, below)
   box.title:ClearAllPoints()
   box.title:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
@@ -552,6 +560,34 @@ local function drawList(box, list, x, below)
     box.empty:SetText("")
     box.empty:Hide()
   end
+  -- The open roll line (#118), when the list has one.
+  local roll, part = list.openRoll, box.open
+  part.label:ClearAllPoints()
+  part.text:ClearAllPoints()
+  part.call:ClearAllPoints()
+  part.line:ClearAllPoints()
+  if roll then
+    part.enabled = roll.enabled
+    part.label:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -(y + 4))
+    part.label:SetText(roll.label)
+    part.text:SetPoint("TOPLEFT", box, "TOPLEFT", 170, -(y + 5))
+    part.text:SetText(roll.text)
+    part.call:SetPoint("TOPRIGHT", box, "TOPRIGHT", -10, -y)
+    setButton(part.call, roll.button, roll.enabled)
+    part.call.tip = roll.tooltip
+    part.line:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -(y + 25))
+    part.label:Show()
+    part.text:Show()
+    part.call:Show()
+    part.line:Show()
+    y = y + 26
+  else
+    part.enabled = false
+    part.label:Hide()
+    part.text:Hide()
+    part.call:Hide()
+    part.line:Hide()
+  end
   -- The Disenchant/bank line: with no pick, greyed with its Give unclickable.
   local db, line = list.db, box.db
   line.label:ClearAllPoints()
@@ -608,7 +644,8 @@ local function drawHiddenNames(row, box, names, y)
       b = tipButton(box, 100)
       b:SetScript("OnClick", function(self)
         local data = row.data
-        local ok, why = ns.Popup.GiveHidden(data.slot, data.item, self.pick, box.rollEdit:GetText())
+        local ok, why = ns.Popup.GiveHidden(data.slot, data.item, self.pick, box.rollEdit:GetText(),
+          data.notConfirmed and data.notConfirmed.key)
         if not ok then
           ns.Log("Give for " .. data.link .. " to " .. self.pick .. " refused: " .. tostring(why))
         end

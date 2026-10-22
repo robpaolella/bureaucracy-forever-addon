@@ -515,6 +515,69 @@ describe("PopupFrame", function()
       assert.is_true(row.box:IsShown())
     end)
 
+    it("the open roll line calls the roll; its Give replaces the award (give-else, #118)", function()
+      local row = unconfirmed()
+      assert.is_true(ns.Popup.SetDBPick("Tovin Hale"))
+      click(row.ncBox.buttons[2])
+      local list = shownRows()[1].list
+      local open = list.open
+      assert.are.same({ "Open roll", "everyone can roll", "Call open roll", true, true },
+        { open.label:GetText(), open.text:GetText(), open.call.label:GetText(), open.call:IsShown(),
+          open.call:IsEnabled() })
+      -- It sits between the last reserve holder and the Disenchant/bank line, as the design draws it.
+      assert.is_true(open.label.points[1].y < list.entries[3].name.points[1].y)
+      assert.is_true(list.db.label.points[1].y < open.label.points[1].y)
+      click(open.call)
+      assert.are.equal("Open roll for " .. link(1) .. ": everyone /roll", wow.sent[2].text)
+      wow.fire("CHAT_MSG_SYSTEM", "Doran Vale rolls 87 (1-100)")
+      row = shownRows()[1]
+      assert.is_false(row.list:IsShown())
+      assert.is_true(row.rollBox:IsShown() and row.ncBox:IsShown())
+      assert.are.equal("Rolls (everyone)", row.rollBox.heading:GetText())
+      assert.are.same({ "Give to Doran Vale (87)", true },
+        { row.primary.label:GetText(), row.primary:IsEnabled() })
+      assert.is_false(row.db:IsShown())
+      assert.are.equal("not-confirmed", ns.Records.Get(ns.Records.Ops("raid00001")[1].id).state)
+      click(row.primary)
+      assert.are.equal(3, #wow.sent)
+      assert.is_truthy(wow.sent[3].text:find("^Correction: .* → Doran Vale %(open roll, 87%), not Ashla"))
+      local replace = ns.Records.Ops("raid00001")[3]
+      assert.are.same({ "replace", "OPEN_ROLL", 87 },
+        { replace.type, replace.award.method, replace.award.roll })
+      row = shownRows()[1]
+      assert.is_true(row.box:IsShown())
+      assert.is_false(row.rollBox:IsShown() or row.ncBox:IsShown())
+    end)
+
+    it("a hidden roll's name button replaces the award with the typed roll (#118)", function()
+      local row = unconfirmed()
+      click(row.ncBox.buttons[2])
+      click(shownRows()[1].list.open.call)
+      wow.fire("CHAT_MSG_SYSTEM", wow.secret)
+      row = shownRows()[1]
+      row.rollBox.rollEdit:SetText("64")
+      local doran
+      for _, b in ipairs(row.rollBox.hiddenNames) do
+        if b.pick == "Doran Vale" then doran = b end
+      end
+      click(doran)
+      local replace = ns.Records.Ops("raid00001")[3]
+      assert.are.same({ "replace", "Doran Vale", 64 },
+        { replace.type, replace.award.char, replace.award.roll })
+    end)
+
+    it("greys Call open roll in a boss fight, with the fight tooltip", function()
+      local row = unconfirmed()
+      click(row.ncBox.buttons[2])
+      wow.bossFight(true)
+      local open = shownRows()[1].list.open
+      assert.is_false(open.call:IsEnabled())
+      assert.are.equal("Posts a line, so it waits until the boss fight ends", open.call.tip)
+      click(open.call)
+      assert.are.equal(1, #wow.sent)
+      wow.bossFight(false)
+    end)
+
     it("with no D/B pick, the line is greyed, \"choose first\", and its Give does nothing", function()
       local row = unconfirmed()
       click(row.ncBox.buttons[2])
