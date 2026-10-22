@@ -1,3 +1,4 @@
 - Optional ElvUI/LUI look for the pop-up and window, if those add-ons support WoW Forever (Robert, #9, 2026-10-13).
 - Roll-off countdown (timer-sent chat lines): propose as a design revision of #9's approved design, since timer lines arrived in the open world (#41); check in a boss fight and an instance first.
 - Loosen the stand-in's block on timer-sent chat lines (`spec/support/wow.lua`) if a roll-off countdown is built.
+- Sync tab: a way to clear old practice no-raid awards (Test drop ones) from saved data; Discard leaves them since #155 (new control, needs Robert).
