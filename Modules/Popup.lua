@@ -136,6 +136,10 @@ local function lineRaid(raidId, practice)
   return practice and not raidId and TEST_CODE or nil
 end
 
+-- The Test drop's boss id and line raid code, for the question about its menu hand-outs (OutsideHandout).
+Popup.TEST_BOSS = TEST_BOSS
+Popup.LineRaid = lineRaid
+
 local function activeRaid()
   if ns.LootWindow.fake then return nil end
   return ns.Selection.Status().activeRaid

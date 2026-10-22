@@ -139,10 +139,12 @@ function UI.AwardsView()
     end
   end
   for _, h in ipairs(ns.OutsideHandout.Unanswered()) do
-    if raidId and h.raid == raidId then
-      rows[#rows + 1] = { answerNeeded = true, handout = h, boss = bossName(snapshot, h.boss or h.picked),
+    -- A practice one (a Test drop's) goes in the practice group whatever raid is selected.
+    if h.practice or raidId and h.raid == raidId then
+      local r = { answerNeeded = true, handout = h, boss = bossName(snapshot, h.boss or h.picked),
         item = parts.itemText(h.item), winner = plain(h.winner), at = h.at, time = date("%H:%M", h.at),
         practiceTime = date("%a %H:%M", h.at) }
+      if h.practice then practice[#practice + 1] = r else rows[#rows + 1] = r end
     end
   end
   local view = { readOnly = not me, banner = name and not me and BANNER:format(plain(name)) or nil }

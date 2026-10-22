@@ -11,6 +11,9 @@
 -- A raid's saved hand-outs go when the raid is no longer loaded (Raids.DropHandouts, #143).
 -- Several hand-outs are asked one at a time, in order; in a boss fight the question waits until the
 -- fight ends, as notices do. On a run that is not a guild run nothing is asked or kept.
+-- Practice mode (#135): a Test drop's made-up menu hand-out is asked too ({ practice = true, kind, user,
+-- boss = the Test drop's }): "[Practice] " leads the question, it has no raid, is kept in memory only,
+-- is not stopped by "not a guild run", and goes when Practice mode goes off (DropPractice).
 local _, ns = ...
 
 local OutsideHandout = {}
@@ -74,10 +77,14 @@ local function isActive(h)
   return false
 end
 
+-- Whether the run's "not a guild run" stops this hand-out: not a practice one.
+local function quiet(h) return not h.practice and ns.Selection.IsQuiet() end
+
 local function plain(text) return (tostring(text):gsub("|", "||")) end
 
 -- The winner's reserve of the item in the hand-out's raid: its kind ("HR" or "SR") and user, or nil.
 local function reserveOf(handout)
+  if handout.practice then return handout.kind, handout.user end
   local snapshot = ns.Raids.Get(handout.raid)
   local holders = snapshot and (snapshot.reserves[handout.item] or snapshot.reserves[tostring(handout.item)])
   local found
@@ -160,8 +167,8 @@ end
 local function draw()
   local h = shown.handout
   local y = 18
-  frame.lead:SetText("You gave " .. h.link .. " to " .. p.WHITE:format(plain(h.winner))
-    .. " from the game's loot menu. How was it won?")
+  frame.lead:SetText((h.practice and "[Practice] " or "") .. "You gave " .. h.link .. " to "
+    .. p.WHITE:format(plain(h.winner)) .. " from the game's loot menu. How was it won?")
   place(frame.lead, y)
   y = y + frame.lead:GetStringHeight() + 12
   for i, c in ipairs(CHOICES) do
@@ -215,8 +222,11 @@ local showNext
 showNext = function()
   if shown or fighting then return end
   if ns.Selection.IsQuiet() then
-    queue = {}
-    return
+    local kept = {}
+    for _, w in ipairs(queue) do
+      if w.practice then kept[#kept + 1] = w end
+    end
+    queue = kept
   end
   local h = table.remove(queue, 1)
   if not h then return end
@@ -235,7 +245,7 @@ end
 -- list leaves it while it is asked. Used for each outside hand-out, and for answering one put off
 -- with Later or left from an earlier session (#137).
 function OutsideHandout.Ask(handout)
-  if ns.Selection.IsQuiet() then return end
+  if quiet(handout) or handout.practice and not ns.Practice() then return end
   save(handout)
   for i, h in ipairs(memory) do
     if h == handout then table.remove(memory, i) break end
@@ -248,15 +258,19 @@ end
 -- The hand-outs not being asked, oldest first: { winner, link, item, quantity, at, raid, boss, picked },
 -- as Ask takes them. The saved ones (set aside with Later, or left from an earlier session) and this
 -- session's no-raid ones set aside with Later. One whose question is open or waiting is left out.
--- Empty when the run is not a guild run (the saved ones stay saved).
+-- Empty when the run is not a guild run (the saved ones stay saved), but for practice ones.
 -- A new list each call; nothing in it is posted or sent.
 function OutsideHandout.Unanswered()
-  if ns.Selection.IsQuiet() then return {} end
+  local isQuiet = ns.Selection.IsQuiet()
   local all = {}
-  for _, list in pairs(type(ns.db.outside) == "table" and ns.db.outside or {}) do
-    for _, h in ipairs(list) do all[#all + 1] = h end
+  if not isQuiet then
+    for _, list in pairs(type(ns.db.outside) == "table" and ns.db.outside or {}) do
+      for _, h in ipairs(list) do all[#all + 1] = h end
+    end
   end
-  for _, h in ipairs(memory) do all[#all + 1] = h end
+  for _, h in ipairs(memory) do
+    if h.practice or not isQuiet then all[#all + 1] = h end
+  end
   local order = {}
   for i, h in ipairs(all) do order[h] = i end
   table.sort(all, function(x, y)
@@ -296,7 +310,7 @@ function OutsideHandout.Later()
   local h = shown.handout
   h.picked = shown.askBoss and shown.boss or nil
   hide()
-  if not h.raid and not ns.Selection.IsQuiet() then memory[#memory + 1] = h end
+  if not h.raid and not quiet(h) then memory[#memory + 1] = h end
   showNext()
   ns.UI.RefreshAwards()
 end
@@ -309,7 +323,7 @@ end
 function OutsideHandout.Record()
   if not (shown and ready()) then return nil, "not ready" end
   if ns.Popup.ChatLocked() then return nil, "fight" end
-  if ns.Selection.IsQuiet() then
+  if quiet(shown.handout) then
     hide()
     queue = {}
     return nil, "quiet"
@@ -331,14 +345,29 @@ function OutsideHandout.Record()
   forget(h)
   ns.Hub.SendOwn(op, why)
   ns.Hub.SendOwn(ns.Records.Confirm(op.id))
-  local snapshot = ns.Raids.Get(op.raid)
-  local data = { raid = snapshot and snapshot.code, key = op.id, item = h.item, link = h.link, boss = boss,
-    method = method, roll = roll, winner = winner, practice = op.practice }
+  local data = { raid = ns.Popup.LineRaid(op.raid, op.practice), key = op.id, item = h.item, link = h.link,
+    boss = boss, method = method, roll = roll, winner = winner, practice = op.practice }
   ns.Popup.Post("award", data, why, "Award line for " .. h.link, "The award of " .. h.link .. " to "
     .. plain(h.winner) .. " is recorded, but its raid chat line couldn't be posted.")
   ns.UI.RefreshAwards()
   showNext()
   return op, why
+end
+
+-- Practice mode went off: the open, waiting and kept practice questions go.
+function OutsideHandout.DropPractice()
+  local function other(h) return not h.practice end
+  local function keep(list)
+    local kept = {}
+    for _, h in ipairs(list) do
+      if other(h) then kept[#kept + 1] = h end
+    end
+    return kept
+  end
+  queue, memory = keep(queue), keep(memory)
+  if shown and shown.handout.practice then hide() end
+  showNext()
+  ns.UI.RefreshAwards()
 end
 
 local function build()
@@ -431,7 +460,20 @@ end)
 -- A hand-out from the game's menu: asked about, under the boss of the loot window it came from.
 ns.Tracking.On("outside", function(info)
   local item = info.link and tonumber(info.link:match("item:(%d+)"))
-  if not item or ns.Selection.IsQuiet() then return end
+  if not item then return end
+  -- A Test drop's made-up menu hand-out: it carries the holder's made-up reserve itself, as the
+  -- made-up reserves go when the Test drop closes.
+  if ns.Practice() and ns.LootWindow.fake then
+    local made = ns.Popup.MadeUp(item)
+    for _, holder in ipairs(made.holders) do
+      if ns.Rules.Bare(holder.char) == ns.Rules.Bare(info.winner) then
+        OutsideHandout.Ask({ winner = info.winner, link = info.link, item = item, quantity = info.quantity,
+          at = time(), boss = ns.Popup.TEST_BOSS, practice = true, kind = holder.kind, user = holder.user })
+        return
+      end
+    end
+  end
+  if ns.Selection.IsQuiet() then return end
   local raidId = ns.Selection.Status().activeRaid
   OutsideHandout.Ask({ winner = info.winner, link = info.link, item = item, quantity = info.quantity,
     at = time(), raid = ns.Raids.Get(raidId) and raidId or nil, boss = ns.Popup.WindowBoss() })

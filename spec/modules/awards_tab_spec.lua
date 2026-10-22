@@ -189,6 +189,41 @@ describe("the Awards tab", function()
     end)
   end)
 
+  describe("a practice hand-out put off with Later (#135)", function()
+    local function putOff()
+      local O = ns.OutsideHandout
+      O.Ask({ winner = "Ana Vale", link = "|Hitem:100|h[Sword]|h", item = 100, quantity = 1, at = T0 + 5,
+        boss = "testdrop", practice = true, kind = "SR", user = "practice-ana vale" })
+      wow.click(function() O.frame.later.scripts.OnClick(O.frame.later) end)
+    end
+
+    it("is a NEEDS AN ANSWER row with an Answer button in the practice group, with no raid selected",
+      function()
+        wow.slash("/bf practice")
+        putOff()
+        local view = ns.UI.AwardsView()
+        assert.is_true(view.empty ~= true)
+        assert.are.equal(1, #view.practice.rows)
+        assert.is_true(view.practice.rows[1].answerNeeded)
+        local tab = open(ns)
+        wow.click(function() tab.practiceToggle.scripts.OnClick() end)
+        local answers = 0
+        for _, line in ipairs(tab.shown) do
+          if line.answer then answers = answers + 1 end
+        end
+        assert.are.equal(1, answers)
+      end)
+
+    it("stays in the practice group when another raid is selected, leaving its rows alone", function()
+      wow.slash("/bf practice")
+      putOff()
+      chooseRaid(ns)
+      local view = ns.UI.AwardsView()
+      assert.are.equal(1, #view.practice.rows)
+      assert.is_nil(view.groups[1])
+    end)
+  end)
+
   describe("the practice awards", function()
     it("sit apart in a group at the foot, closed until opened", function()
       chooseRaid(ns)

@@ -23,7 +23,7 @@ describe("PracticeReserves (#107)", function()
   it("goes through every case over a run of drops, and starts the cycle again", function()
     local seen = {}
     for drop = 0, #P.CASES - 1 do seen[#seen + 1] = P.Generate(GROUP, drop).case end
-    assert.are.same({ "hr-single", "hr-multi", "sr", "skipped", "copies", "open" }, seen)
+    assert.are.same({ "hr-single", "hr-multi", "sr", "skipped", "copies", "open", "menu" }, seen)
     assert.are.equal("hr-single", P.Generate(GROUP, #P.CASES).case)
   end)
 
@@ -83,7 +83,8 @@ describe("PracticeReserves (#107)", function()
     assert.are.equal("hr-single", P.Generate({ "Solo" }, 0).case)
     for drop = 0, 11 do
       local made = P.Generate({ "Solo" }, drop)
-      assert.is_truthy(made.case == "hr-single" or made.case == "sr" or made.case == "open")
+      assert.is_truthy(made.case == "hr-single" or made.case == "sr" or made.case == "open"
+        or made.case == "menu")
     end
     assert.are.equal("open", P.Generate({ "Solo" }, 3).case)
     assert.are.equal("open", P.Generate({ "Solo" }, 4).case)
@@ -126,7 +127,7 @@ describe("Test drop (#108)", function()
 
   local function modes()
     local seen = {}
-    for _ = 1, 6 do
+    for _ = 1, 7 do
       local m = open()
       seen[#seen + 1] = #m.rows .. ":" .. m.rows[1].mode .. ":" .. m.rows[1].action
     end
@@ -165,9 +166,24 @@ describe("Test drop (#108)", function()
 
   it("walks #107's cases click by click, two copies in the copies case, then starts again", function()
     setup()
-    local expected = { "1:hr:give", "1:hr:roll", "1:sr:roll", "1:sr:give", "2:hr:roll", "1:open:openroll" }
+    local expected = { "1:hr:give", "1:hr:roll", "1:sr:roll", "1:sr:give", "2:hr:roll", "1:open:openroll",
+      "1:sr:give" }
     assert.are.same(expected, modes())
     assert.are.same(expected, modes())
+  end)
+
+  it("acts out the menu case: the slot clears and the question opens, pre-filled, led by [Practice]", function()
+    setup()
+    local made
+    repeat
+      assert(ns.TestDrop.Open())
+      made = ns.Popup.MadeUp(ns.TestDrop.ITEM)
+    until made.menu
+    wow.advance(ns.TestDrop.confirmAfter)
+    local shown = ns.OutsideHandout.Shown()
+    assert.are.same({ "SR", made.holders[1].char }, { shown.method, shown.handout.winner })
+    assert.are.equal("[Practice] You gave", ns.OutsideHandout.frame.lead:GetText():sub(1, 19))
+    assert.is_false(ns.TestDrop.IsOpen())
   end)
 
   it("opens as a non-loot-master, with the raid selection ignored or not a guild run", function()
