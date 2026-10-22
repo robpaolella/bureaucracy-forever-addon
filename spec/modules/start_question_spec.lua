@@ -671,6 +671,19 @@ describe("the raid question", function()
         assert.are.same({ BO }, asked(USERS, { lootMethod = { "master", 3, 4 }, leader = "Cy Stone" }))
       end)
 
+      it("asks the next chooser when the one asked goes offline, on either event", function()
+        for _, event in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_MEMBER_DISABLE" }) do
+          party({ leader = ZOE, lootMethod = { "group", 0, 0 } })
+          enter(DM)
+          assert.is_nil(view())
+          wow.state.offline = { [ZOE] = true }
+          wow.fire(event, "party1")
+          assert.is_nil(view())
+          wow.advance(5)
+          assert.is_true(asks())
+        end
+      end)
+
       it("asks the next chooser when the one asked leaves, and closes on another officer's choice", function()
         party({ leader = ZOE, lootMethod = { "group", 0, 0 } })
         enter(DM)
