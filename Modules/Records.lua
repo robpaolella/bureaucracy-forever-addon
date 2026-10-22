@@ -331,7 +331,25 @@ function Records.Replace(key, award, fields)
   end)
 end
 
--- Attaches every no-raid award and operation to a loaded raid (the selected one by default):
+-- Removes the real (not practice) no-raid awards and operations from their lists and returns them;
+-- practice ones stay where they are, with their operations (#155).
+local function takeReal()
+  local awards, ops = lists(nil)
+  local realAwards, realOps, keptAwards, keptOps = {}, {}, {}, {}
+  for _, award in ipairs(awards) do
+    local into = award.practice and keptAwards or realAwards
+    into[#into + 1] = award
+  end
+  for _, op in ipairs(ops) do
+    local into = op.practice and keptOps or realOps
+    into[#into + 1] = op
+  end
+  ns.db.noRaid = #keptAwards > 0 and keptAwards or nil
+  ns.db.noRaidOps = #keptOps > 0 and keptOps or nil
+  return realAwards, realOps
+end
+
+-- Attaches every real no-raid award and operation to a loaded raid (the selected one by default):
 -- each takes the raid's id and environment and keeps its key. Returns how many awards were
 -- attached and the operations moved, now carrying the raid's id (to send: they never were), or
 -- nil and why ("quiet", "not loaded").
@@ -340,8 +358,7 @@ function Records.Attach(raidId)
   raidId = raidId or current()
   local env = envOf(raidId)
   if not env then return nil, "not loaded" end
-  local movedAwards, movedOps = lists(nil)
-  ns.db.noRaid, ns.db.noRaidOps = nil, nil
+  local movedAwards, movedOps = takeReal()
   local awards, ops = lists(raidId, true)
   for _, award in ipairs(movedAwards) do
     award.raid, award.env = raidId, env
@@ -359,11 +376,11 @@ function Records.Attach(raidId)
   return #movedAwards, movedOps
 end
 
--- Throws away every no-raid award and operation, and the site voids waiting for those awards'
--- keys (spec 4.4). They were never sent, so nothing reaches the site; it works while not a guild
--- run too. Returns how many awards were discarded.
+-- Throws away every real no-raid award and operation (practice ones stay), and the site voids
+-- waiting for those awards' keys (spec 4.4). They were never sent, so nothing reaches the site;
+-- it works while not a guild run too. Returns how many awards were discarded.
 function Records.Discard()
-  local awards, ops = lists(nil)
+  local awards, ops = takeReal()
   for _, award in ipairs(awards) do
     if ns.db.siteVoids then ns.db.siteVoids[award.key] = nil end
   end
@@ -371,7 +388,6 @@ function Records.Discard()
     if ns.db.via then ns.db.via[op.id] = nil end
     if ns.db.authors then ns.db.authors[op.id] = nil end
   end
-  ns.db.noRaid, ns.db.noRaidOps = nil, nil
   return #awards
 end
 
