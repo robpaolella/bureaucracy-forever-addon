@@ -2118,3 +2118,365 @@ describe("Popup.Undo", function()
       wow.sent[#wow.sent].text:match("^(.-) <BF1;"))
   end)
 end)
+
+describe("Pick winner (#126)", function()
+  local ns, sends
+  local LINK = "|cffa335ee|Hitem:1::::::::60:::::|h[Item 1]|h|r"
+  local GROUP = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
+  local RESERVES = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR"),
+    holder("Ardan Vey", "SR") } }
+
+  -- A session as the loot master, with the raid loaded and selected; saved is the saved data of an
+  -- earlier session (a /reload). Hub.SendOwn is watched: sends lists { type, outcome }.
+  local function session(saved)
+    ns = wow.start(saved and { saved = { BureaucracyForeverDB = saved } } or nil)
+    wow.state.group, wow.state.groupIsRaid = GROUP, true
+    wow.state.lootMethod = { "master", 0, 0 }
+    wow.state.items[1] = { name = "Item 1", link = LINK, icon = 1 }
+    if not saved then
+      ns.Raids.Load(assert(ns.Snapshot.Validate(tree({ code = "SA0001", reserves = RESERVES,
+        bosses = { { id = "lb_lucifron", name = "Lucifron", trash = false, items = { 1, 2 } } } }), "0.1.0")),
+        "pasted")
+      assert(ns.Selection.ChooseRaid("raid00001"))
+    end
+    sends = {}
+    local sendOwn = ns.Hub.SendOwn
+    ns.Hub.SendOwn = function(op, outcome)
+      sends[#sends + 1] = { op and op.type, outcome }
+      return sendOwn(op, outcome)
+    end
+  end
+
+  before_each(function() session() end)
+
+  -- A confirmed award, undone after it left the corpse (voided with reason, if given): it needs a
+  -- winner. Returns its key.
+  local function undone(fields, reason)
+    local f = { boss = "lb_lucifron", item = 1, char = "Ashla Brightwater", user = "ashlabrightwater",
+      method = "HR" }
+    for k, v in pairs(fields or {}) do f[k] = v end
+    -- A disenchant/bank award names no winner.
+    if f.method == "DISENCHANT_BANK" then f.char, f.user = nil, nil end
+    local key = assert(ns.Records.Award(f)).id
+    assert(ns.Records.Confirm(key))
+    assert(ns.Records.Void(key, { reason = reason }))
+    sends = {}
+    return key
+  end
+
+  -- A fresh picker's pick, with its correction's ids, then the given fields.
+  local function pick(fields)
+    local p = { id = ns.Records.NewId("replace"), newKey = ns.Records.NewId("award") }
+    for k, v in pairs(fields or {}) do p[k] = v end
+    return p
+  end
+
+  local function correct(key, p)
+    local result
+    wow.click(function() result = { ns.Popup.Correct(key, p) } end)
+    return result
+  end
+
+  -- What a refusal must leave alone: the records, the hand-outs, raid chat and what was sent.
+  local function unchanged(key, fn)
+    local before = { #ns.Records.Ops("raid00001"), #wow.gives, #wow.sent, #sends }
+    fn()
+    assert.are.same(before, { #ns.Records.Ops("raid00001"), #wow.gives, #wow.sent, #sends })
+    assert.is_nil(ns.Records.Get(key).replacedBy)
+  end
+
+  describe("the picker", function()
+    it("offers the other holders, the raid, disenchant/bank and the previous winner, nothing chosen",
+      function()
+      local key = undone()
+      local model = assert(ns.Popup.Picker(key, pick()))
+      assert.are.equal(LINK .. " was undone after Ashla Brightwater already had it. Choose who has it now."
+        .. " Nothing is handed out: this records the winner and posts one correction line.", model.intro)
+      assert.are.same({
+        { char = "Doran Vale", method = "Soft reserve", kind = "sr", available = true, selected = false },
+        { char = "Ardan Vey", method = "Soft reserve", kind = "sr", available = false, reason = "not in raid",
+          selected = false },
+      }, model.holders)
+      assert.is_nil(model.empty)
+      assert.are.same({ "Bram Ironvein", "Doran Vale", "Masterlooter" },
+        { model.roll.members[1].name, model.roll.members[2].name, model.roll.members[3].name })
+      assert.are.equal(3, #model.roll.members)
+      assert.are.same({ char = "Ashla Brightwater", kind = "hr", method = "Hard reserve", selected = false },
+        model.again)
+      assert.are.equal("Traded by Ashla Brightwater", model.note)
+      assert.are.equal("Choose who gets it.", model.text)
+      assert.is_nil(model.line)
+      assert.are.same({ enabled = false, tooltip = "Choose who gets it." }, model.post)
+      assert.is_nil(model.fight)
+    end)
+
+    it("shows the exact line Post correction posts, and the line is posted", function()
+      local key = undone()
+      local p = pick({ kind = "holder", char = "Doran Vale" })
+      local model = ns.Popup.Picker(key, p)
+      assert.are.same({ enabled = true }, model.post)
+      assert.are.equal("Correction: " .. LINK .. " → Doran Vale (soft reserve), not Ashla Brightwater"
+        .. " <BF1;R;SA0001;" .. p.id .. ";" .. key .. ";" .. p.newKey .. ";1;ifron;SR;;Doran Vale>",
+        model.line)
+      correct(key, p)
+      assert.are.same({ text = model.line, channel = "RAID" }, wow.sent[#wow.sent])
+    end)
+
+    it("says nobody else reserved it, and gives a disenchant/bank award no previous-winner choice", function()
+      local key = undone({ item = 2, method = "DISENCHANT_BANK" })
+      local model = ns.Popup.Picker(key, pick())
+      assert.are.equal("Nobody else reserved this item.", model.empty)
+      assert.is_nil(model.again)
+      assert.are.equal("", model.note)
+      assert.is_truthy(model.intro:find("was undone after it went to disenchant/bank. Choose who has it now.",
+        1, true))
+      assert.are.same({ nil, "choose" }, correct(key, pick({ kind = "again" })))
+    end)
+
+    it("empties the note for the previous winner, and keeps the officer's own note", function()
+      local key = undone()
+      assert.are.equal("", ns.Popup.Picker(key, pick({ kind = "again" })).note)
+      assert.are.equal("Lost a bet", ns.Popup.Picker(key, pick({ kind = "again", note = "Lost a bet" })).note)
+      local cleared = pick({ kind = "holder", char = "Doran Vale", note = "" })
+      assert.are.equal("", ns.Popup.Picker(key, cleared).note)
+    end)
+
+    it("is only for an award that needs a winner", function()
+      local fields = { boss = "lb_lucifron", item = 1, char = "Doran Vale", method = "SR" }
+      local standing = assert(ns.Records.Award(fields)).id
+      assert(ns.Records.Confirm(standing))
+      local unconfirmed = assert(ns.Records.Award(fields)).id
+      assert(ns.Records.NotConfirmed(unconfirmed))
+      assert(ns.Records.Void(unconfirmed))
+      for _, key in ipairs({ standing, unconfirmed, "aw-missing1" }) do
+        assert.are.same({ nil, "not needed" }, { ns.Popup.Picker(key, pick()) })
+        assert.are.same({ nil, "not needed" }, correct(key, pick({ kind = "db" })))
+      end
+      assert.are.equal(0, #wow.sent)
+    end)
+  end)
+
+  describe("Post correction", function()
+    -- The new award, the replace and the confirm, after a correction of key.
+    local function after(key)
+      local old = ns.Records.Get(key)
+      local new = ns.Records.Get(old.replacedBy)
+      local replace, confirm
+      for _, op in ipairs(ns.Records.Ops("raid00001")) do
+        if op.type == "replace" and op.key == key then replace = op end
+        if op.type == "confirm" and op.key == old.replacedBy then confirm = op end
+      end
+      return old, new, replace, confirm
+    end
+
+    it("to a reserve holder: replaces the voided award, confirmed with the note, no hand-out, one line",
+      function()
+        local key = undone(nil, "traded")
+        local p = pick({ kind = "holder", char = "Doran Vale" })
+        local result = correct(key, p)
+        local old, new, replace, confirm = after(key)
+        assert.are.equal(replace, result[1])
+        assert.is_nil(result[2])
+        assert.are.same({ true, "traded", p.newKey }, { old.voided, old.voidReason, old.replacedBy })
+        assert.are.same(
+          { p.newKey, key, "confirmed", "Doran Vale", "doranvale", "SR", "Traded by Ashla Brightwater" },
+          { new.key, new.replaces, new.state, new.char, new.user, new.method, new.note })
+        assert.are.equal(p.id, replace.id)
+        assert.is_table(confirm)
+        assert.are.same({}, wow.gives)
+        assert.are.same({}, wow.state.loot)
+        assert.are.same({ { "replace", "recorded" }, { "confirm", "recorded" } }, sends)
+        assert.are.equal(1, #wow.sent)
+        assert.is_nil(ns.Popup.Picker(key, p))
+      end)
+
+    it("by open roll to someone else in the raid, with their roll", function()
+      local key = undone()
+      correct(key, pick({ kind = "roll", member = "Bram Ironvein", roll = " 92 " }))
+      local _, new = after(key)
+      assert.are.same({ "Bram Ironvein", "OPEN_ROLL", 92, "confirmed" },
+        { new.char, new.method, new.roll, new.state })
+      assert.are.equal("Correction: " .. LINK .. " → Bram Ironvein (open roll, 92), not Ashla Brightwater",
+        wow.sent[1].text:match("^(.-) <BF1;"))
+    end)
+
+    it("to disenchant/bank, naming no winner", function()
+      local key = undone()
+      correct(key, pick({ kind = "db" }))
+      local _, new = after(key)
+      assert.are.same({ "DISENCHANT_BANK", "confirmed" }, { new.method, new.state })
+      assert.is_nil(new.char)
+      assert.are.equal("Correction: " .. LINK .. " → disenchant/bank, not Ashla Brightwater",
+        wow.sent[1].text:match("^(.-) <BF1;"))
+    end)
+
+    it("to the previous winner, cancelling the undo, with no note", function()
+      local key = undone()
+      correct(key, pick({ kind = "again" }))
+      local _, new = after(key)
+      assert.are.same({ "Ashla Brightwater", "ashlabrightwater", "HR", "confirmed" },
+        { new.char, new.user, new.method, new.state })
+      assert.is_nil(new.note)
+      assert.are.equal("Correction: " .. LINK .. " → Ashla Brightwater (hard reserve), not Ashla Brightwater",
+        wow.sent[1].text:match("^(.-) <BF1;"))
+    end)
+
+    it("puts [Practice] before a practice award's line, and sends nothing to the officers", function()
+      local key = undone({ practice = true })
+      local p = pick({ kind = "holder", char = "Doran Vale" })
+      local line = ns.Popup.Picker(key, p).line
+      assert.are.equal("[Practice] Correction: ", line:sub(1, 23))
+      assert.is_truthy(line:find("<BF1P;R;", 1, true))
+      correct(key, p)
+      assert.are.equal(line, wow.sent[1].text)
+      assert.is_true(ns.Records.Get(p.newKey).practice)
+      assert.are.same({ { "replace", "recorded" }, { "confirm", "recorded" } }, sends)
+    end)
+
+    it("while not a guild run: the replace stands, its confirm is refused and logged, nothing sent",
+      function()
+      local key = undone()
+      ns.Selection.ChooseOff()
+      local p = pick({ kind = "holder", char = "Doran Vale" })
+      for _ = 1, 30 do wow.advance(1) end
+      local messages = #wow.addonMessages
+      assert.is_table(correct(key, p)[1])
+      for _ = 1, 30 do wow.advance(1) end
+      assert.are.equal("announced", ns.Records.Get(p.newKey).state)
+      assert.are.same({ { "replace", "recorded" }, { nil, "quiet" } }, sends)
+      local logged
+      for _, entry in ipairs(ns.log) do
+        logged = logged or entry.text:find("wasn't confirmed: quiet", 1, true)
+      end
+      assert.is_truthy(logged)
+      assert.are.equal(messages, #wow.addonMessages)
+      assert.are.equal(1, #wow.sent)
+    end)
+
+    it("works after a /reload, from the award's key alone", function()
+      local key = undone()
+      session(BureaucracyForeverDB)
+      assert.are.same({}, ns.Tracking.Pending())
+      local p = pick({ kind = "holder", char = "Doran Vale" })
+      local line = assert(ns.Popup.Picker(key, p).line)
+      assert.is_table(correct(key, p)[1])
+      assert.are.equal(line, wow.sent[1].text)
+      assert.are.equal("confirmed", ns.Records.Get(p.newKey).state)
+      assert.are.same({}, wow.gives)
+    end)
+  end)
+
+  describe("refused", function()
+    it("an empty or invalid roll, or no member, saying why; the roll marked only when invalid", function()
+      local key = undone()
+      for _, case in ipairs({
+        { nil, "Bram Ironvein", "roll needed", "Type their roll, 1 to 100.", nil },
+        { " ", "Bram Ironvein", "roll needed", "Type their roll, 1 to 100.", nil },
+        { "920", "Bram Ironvein", "bad roll", "A roll is 1 to 100.", true },
+        { "0", "Bram Ironvein", "bad roll", "A roll is 1 to 100.", true },
+        { "4.5", "Bram Ironvein", "bad roll", "A roll is 1 to 100.", true },
+        { "92", nil, "member", "Choose who it went to.", nil },
+      }) do
+        local p = pick({ kind = "roll", roll = case[1], member = case[2] })
+        local model = ns.Popup.Picker(key, p)
+        assert.are.same({ case[4], case[5], { enabled = false, tooltip = case[4] } },
+          { model.text, model.roll.bad, model.post })
+        unchanged(key, function() assert.are.same({ nil, case[3] }, correct(key, p)) end)
+        assert.are.equal(case[4], ns.Popup.Picker(key, p).refusal)
+      end
+    end)
+
+    it("a member no longer in the raid", function()
+      local key = undone()
+      local p = pick({ kind = "roll", roll = "50", member = "Bram Ironvein" })
+      wow.state.group = { "Masterlooter", "Ashla Brightwater", "Doran Vale" }
+      unchanged(key, function() assert.are.same({ nil, "not in raid" }, correct(key, p)) end)
+    end)
+
+    it("a holder not in the raid, or not a holder", function()
+      local key = undone()
+      unchanged(key, function()
+        assert.are.same({ nil, "not in raid" }, correct(key, pick({ kind = "holder", char = "Ardan Vey" })))
+        local other = pick({ kind = "holder", char = "Bram Ironvein" })
+        assert.are.same({ nil, "not a contender" }, correct(key, other))
+      end)
+      assert.are.equal("They aren't one of the people who reserved it.", ns.Popup.Refusal(key))
+    end)
+
+    it("a note over 200 characters; 200 is fine", function()
+      local key = undone()
+      local p = pick({ kind = "db", note = string.rep("x", 201) })
+      local model = ns.Popup.Picker(key, p)
+      assert.are.same({ "The note can be up to 200 characters.", false },
+        { model.text, model.post.enabled })
+      unchanged(key, function() assert.are.same({ nil, "too long" }, correct(key, p)) end)
+      p.note = string.rep("x", 200)
+      assert.is_true(ns.Popup.Picker(key, p).post.enabled)
+      assert.is_table(correct(key, p)[1])
+      assert.are.equal(string.rep("x", 200), ns.Records.Get(p.newKey).note)
+    end)
+
+    it("in a boss fight: the choices work, Post correction waits, saying why", function()
+      local key = undone()
+      wow.bossFight(true)
+      local p = pick({ kind = "holder", char = "Doran Vale" })
+      local model = ns.Popup.Picker(key, p)
+      assert.are.equal("Boss fight in progress. The game locks chat for add-ons, so the correction waits"
+        .. " until it ends.", model.fight)
+      assert.is_string(model.line)
+      assert.are.same({ enabled = false, tooltip = "Chat is locked until the fight ends." }, model.post)
+      assert.are.equal("Chat is locked until the fight ends.", model.locked)
+      unchanged(key, function() assert.are.same({ nil, "fight" }, correct(key, p)) end)
+      assert.are.equal("Chat is locked in the boss fight. The correction waits until it ends.",
+        ns.Popup.Refusal(key))
+      assert.is_truthy(ns.log[#ns.log].text:find("^Pick winner for .* refused: fight"))
+      wow.bossFight(false)
+      assert.is_table(correct(key, p)[1])
+      assert.is_nil(ns.Popup.Refusal(key))
+    end)
+
+    it("for a player no longer the loot master", function()
+      local key = undone()
+      wow.state.lootMethod = { "master", nil, 2 }
+      unchanged(key, function()
+        assert.are.same({ nil, "not loot master" }, correct(key, pick({ kind = "db" })))
+      end)
+      assert.are.equal("Only the loot master can change awards.", ns.Popup.Refusal(key))
+    end)
+  end)
+
+  describe("a line that can't be posted", function()
+    it("can't be built: the preview says so, and posting records it all the same, telling the officer",
+      function()
+        local key = undone()
+        wow.state.items[1] = nil -- no item link
+        local p = pick({ kind = "holder", char = "Doran Vale" })
+        local model = ns.Popup.Picker(key, p)
+        assert.are.equal("The raid chat line can't be posted: the item link does not match the item id.",
+          model.text)
+        assert.is_true(model.post.enabled)
+        local printed = #wow.printed
+        local result = correct(key, p)
+        assert.is_table(result[1])
+        assert.are.equal("Doran Vale now has item 1 on the record, but the correction line couldn't be posted"
+          .. " in raid chat. Tell the raid yourself. Type /bf log for why.", result[2])
+        assert.are.equal("confirmed", ns.Records.Get(p.newKey).state)
+        assert.are.equal(0, #wow.sent)
+        assert.are.equal(2, #sends)
+        assert.is_truthy(wow.printed[printed + 1]:find("Doran Vale now has item 1 on the record, but its raid"
+          .. " chat line couldn't be posted. Type /bf log for why.", 1, true))
+        assert.is_truthy(ns.log[#ns.log].text:find("^Correction line for item 1 not posted"))
+      end)
+
+    it("is refused by the game: the record stands, for disenchant/bank in its own words", function()
+      local key = undone()
+      _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
+      local p = pick({ kind = "db" })
+      local result = correct(key, p)
+      assert.are.equal(LINK .. " now goes to disenchant/bank on the record, but the correction line couldn't"
+        .. " be posted in raid chat. Tell the raid yourself. Type /bf log for why.", result[2])
+      assert.are.equal("confirmed", ns.Records.Get(p.newKey).state)
+      assert.is_truthy(ns.log[#ns.log].text:find("not posted: the game refused it", 1, true))
+    end)
+  end)
+end)
