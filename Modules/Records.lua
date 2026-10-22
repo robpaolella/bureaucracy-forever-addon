@@ -29,8 +29,10 @@ local COMPARED = { "boss", "item", "char", "method" }
 -- Voids and replaces of awards already held still are (Robert, #7, 2026-10-15).
 local QUIET_ALLOWED = { void = true, replace = true }
 
-local function quiet(kind, held)
-  return ns.Selection.IsQuiet() and not (held and QUIET_ALLOWED[kind])
+-- A Test drop's practice records (#108) have no raid and are never sent, so a run that is not a
+-- guild run doesn't stop them: `testDrop`.
+local function quiet(kind, held, testDrop)
+  return ns.Selection.IsQuiet() and not testDrop and not (held and QUIET_ALLOWED[kind])
 end
 
 -- The award and operation lists of a raid, or of no raid when raidId is nil. create makes
@@ -227,8 +229,8 @@ local function envOf(raidId)
 end
 
 -- kind is given only for an operation's own fields, which may name the target raid.
-local function refusal(fields, kind, held)
-  if kind and quiet(kind, held) then return "quiet" end
+local function refusal(fields, kind, held, testDrop)
+  if kind and quiet(kind, held, testDrop) then return "quiet" end
   if kind and fields.raid ~= nil and not ns.Raids.Get(fields.raid) then return "not loaded" end
   if fields.id ~= nil and not Records.ValidId(fields.id) then return "bad id" end
   for _, field in ipairs({ "note", "reason" }) do
@@ -263,7 +265,7 @@ end
 -- fields.via: the bare name of the officer who forwarded it, when it came forwarded; and
 -- fields.author: the bare name of the officer who made it, when it came from another.
 function Records.Award(fields)
-  local reason = refusal(fields, "award")
+  local reason = refusal(fields, "award", nil, fields.practice and fields.noRaid)
   if reason then return nil, reason end
   local raidId = fields.raid or (not fields.noRaid and current() or nil)
   if fields.raid and fields.id then
@@ -279,7 +281,7 @@ end
 local function keyOp(kind, key, fields, extra)
   fields = fields or {}
   local award, raidId = locate(key)
-  local reason = refusal(fields, kind, award ~= nil)
+  local reason = refusal(fields, kind, award ~= nil, award and award.practice and not raidId)
   if reason then return nil, reason end
   local env, practice
   if award then
