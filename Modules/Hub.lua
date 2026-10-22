@@ -340,7 +340,9 @@ function Hub.SendOp(op, raidId)
     return false
   end
   local msgid = Sync.NewMsgId()
-  local bodies = Sync.EncodeOp(op, snapshot.code, bare(UnitName("player")), msgid)
+  -- Under the officer who made it, who may be another character of this account (an attached
+  -- no-raid award); the receiver then records this one as having forwarded it.
+  local bodies = Sync.EncodeOp(op, snapshot.code, ns.Records.Author(op), msgid)
   local messages = {}
   for n, body in ipairs(bodies) do messages[n] = { body = body } end
   local queued, why = enqueue(messages)

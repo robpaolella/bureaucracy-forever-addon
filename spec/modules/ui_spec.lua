@@ -1192,6 +1192,23 @@ describe("the Sync tab", function()
       assert.are.same({ { code, award.id }, { code, confirm.id } }, sentIds())
     end)
 
+    it("sends attached operations under the character who made them, not the one attaching", function()
+      local maker = wow.state.player
+      local award = made()
+      local confirm = assert(ns.Records.Confirm(award.id))
+      wow.state.group, wow.state.groupIsRaid = { "Doran Vale", "Ashla Brightwater" }, true
+      wow.state.player = "Doran Vale"
+      paste(pasteText("raid00001"))
+      wow.click(function() sync.attach.scripts.OnClick() end)
+      for _ = 1, 10 do wow.advance(1) end
+      local authors = {}
+      for _, message in ipairs(wow.addonMessages) do
+        local chunk = message.text:find("^O;") and assert(ns.Sync.ParseChunk(message.text))
+        if chunk then authors[assert(ns.OpText.Decode(chunk.piece)).id] = chunk.author end
+      end
+      assert.are.same({ [award.id] = maker, [confirm.id] = maker }, authors)
+    end)
+
     it("attaches to another raid when it is picked from the menu", function()
       local award = made()
       paste(pasteText("raid00001"))
