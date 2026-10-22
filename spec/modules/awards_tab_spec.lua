@@ -932,6 +932,19 @@ describe("the Awards tab's Undo", function()
         assert.is_nil(needsRows(tab)[1].picker)
       end)
 
+    it("stays shown while the officer types a note, so the note box keeps the keyboard", function()
+      undone()
+      local tab = openTab()
+      click(needsRows(tab)[1].pick)
+      local hidden = 0
+      tab.picker.scripts.OnHide = function() hidden = hidden + 1 end
+      for _, text in ipairs({ "T", "Tr", "Tra" }) do typeInto(tab.picker.noteEdit, text) end
+      assert.are.equal(0, hidden)
+      assert.are.equal("Tra", tab.picker.noteEdit:GetText())
+      click(tab.picker.cancel)
+      assert.are.equal(1, hidden)
+    end)
+
     it("is open under one row at a time", function()
       undone()
       undone({ char = "Bo Marsh", at = time() + 60 })

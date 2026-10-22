@@ -822,7 +822,8 @@ function UI.RefreshAwards()
     tab.correcteds })
   tab.list:Hide()
   tab.listShown = false
-  tab.picker:Hide()
+  -- The picker hides only once it's known not to be drawn: hiding it would take the keyboard from
+  -- its note box, which redraws the tab on every letter typed.
   tab.pickShown = false
   -- A correction recorded but not posted: a note above the summary, until the next picker opens.
   local top = 0
@@ -864,6 +865,7 @@ function UI.RefreshAwards()
   -- its row is drawn and still needs a winner. A picker just opened is scrolled into view.
   if not tab.listShown then tab.elseOpen = nil end
   if not tab.pickShown then
+    tab.picker:Hide()
     tab.pickOpen, tab.pick = nil, nil
     tab.menu:Hide()
   end
