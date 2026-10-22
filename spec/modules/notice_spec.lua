@@ -306,6 +306,29 @@ describe("the update notice at login", function()
     assert.is_nil(N.Pending())
   end)
 
+  it("stays held through a fight that begins before the window is built, then shows once", function()
+    -- The fight starts as the inbox is read, which is before the notice window's own handler runs.
+    local real = inboxWith("9.0.0")
+    local fought = false
+    local file = setmetatable({}, { __index = function(_, key)
+      if not fought then
+        fought = true
+        wow.fire("ENCOUNTER_START", 1, "Boss", 0, 5)
+      end
+      return real[key]
+    end })
+    local ns = wow.start({ inbox = file })
+    local N = ns.Notice
+    assert.is_true(fought)
+    assert.is_nil(N.Shown())
+    assert.is_false(N.frame:IsShown())
+    assert.equals("update", N.Pending().key)
+    wow.bossFight(false)
+    assert.equals("update", N.Shown().key)
+    assert.is_true(N.frame:IsShown())
+    assert.is_nil(N.Pending())
+  end)
+
   it("does not raise a second notice for the same version from a pasted snapshot", function()
     local ns = wow.start({ inbox = inboxWith("9.0.0") })
     local N = ns.Notice
