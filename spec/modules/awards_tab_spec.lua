@@ -10,7 +10,7 @@ local AMBER_NC = "|cffffa000NOT CONFIRMED|r"
 -- A loaded, chosen raid with two bosses.
 local function chooseRaid(ns)
   local tree = {
-    formatVersion = 1, raid = RAID, code = "MC0001", env = "staging", name = "Molten Core",
+    formatVersion = 1, raid = RAID, code = "SA0001", env = "staging", name = "Molten Core",
     startsAt = T0, durationMin = 240, generated = T0 - 100,
     addon = { version = "0.1.0", url = "https://example.invalid/addon" },
     bosses = { { id = "b1", name = "Lucifron", trash = false, items = { 100 } },
@@ -136,7 +136,7 @@ describe("the Awards tab", function()
     it("leaves voided and practice awards out of the count", function()
       chooseRaid(ns)
       award(ns, {})
-      award(ns, { voided = true })
+      award(ns, { voided = true, state = "not-confirmed" })
       award(ns, { practice = true })
       assert.are.equal("1 award", open(ns).summary:GetText())
     end)
@@ -193,7 +193,7 @@ describe("the Awards tab", function()
     it("sit apart in a group at the foot, closed until opened", function()
       chooseRaid(ns)
       award(ns, {})
-      award(ns, { practice = true, at = T0 + 10 })
+      award(ns, { practice = true, at = T0 + 10, state = "announced" })
       award(ns, { practice = true, at = T0 + 20, method = "OPEN_ROLL", roll = 77 })
       local tab = open(ns)
       local shown = lines(tab)
@@ -617,5 +617,268 @@ describe("the Awards tab's not confirmed choices", function()
     ns.UI.RefreshAwards()
     assert.is_false(tab.list:IsShown())
     assert.is_nil(tab.elseOpen)
+  end)
+end)
+
+-- Undo on a confirmed award, and the NEEDS A WINNER row an undo after the game confirmed it leaves
+-- (#40).
+describe("the Awards tab's Undo", function()
+  local ns
+  local LINK = "|cffa335ee|Hitem:100::::::::60:::::|h[Choker]|h|r"
+  local NEEDS = "|cffffa000NEEDS A WINNER|r Undone after it left the corpse"
+
+  before_each(function()
+    ns = wow.start()
+    wow.state.group, wow.state.groupIsRaid = { "Masterlooter", "Ana Vale", "Bo Marsh" }, true
+    wow.state.lootMethod = { "master", 0, 0 }
+    wow.state.items[100] = { name = "Choker", link = LINK, icon = 1 }
+    chooseRaid(ns)
+  end)
+
+  -- An award recorded in the selected raid, then given state: "confirmed" (the game said so, the
+  -- default), "manual" (made by hand on the site) or left as "announced" or "not-confirmed".
+  local function given(fields, state)
+    local f = { boss = "b1", item = 100, char = "Ana Vale", method = "HR" }
+    for k, v in pairs(fields or {}) do f[k] = v end
+    local op = assert(ns.Records.Award(f))
+    state = state or "confirmed"
+    if state == "confirmed" then assert(ns.Records.Confirm(op.id))
+    elseif state == "not-confirmed" then assert(ns.Records.NotConfirmed(op.id))
+    elseif state == "manual" then (ns.Records.Get(op.id)).state = "manual" end
+    return op.id
+  end
+
+  local function openTab()
+    ns.UI.Toggle()
+    return ns.UI.awards
+  end
+
+  local function click(button)
+    wow.click(function() button.scripts.OnClick(button) end)
+  end
+
+  -- The drawn award row naming char (not a NEEDS A WINNER row).
+  local function rowOf(tab, char)
+    for _, line in ipairs(tab.shown) do
+      if line.winner and not line.winnerNeeded and line.winner:GetText():find(char, 1, true) then
+        return line
+      end
+    end
+  end
+
+  local function needsRows(tab)
+    local out = {}
+    for _, line in ipairs(tab.shown) do
+      if line.winnerNeeded then out[#out + 1] = line end
+    end
+    return out
+  end
+
+  -- The undo line OpText builds for the award's void operation.
+  local function undoLine(key, practice)
+    local void
+    for _, op in ipairs(ns.Records.Ops(RAID)) do
+      if op.type == "void" and op.key == key then void = op end
+    end
+    return assert(ns.OpText.BuildLine("undo", { raid = "SA0001", id = void.id, key = key, link = LINK,
+      winner = "Ana Vale", practice = practice }))
+  end
+
+  it("is offered to the loot master on a confirmed award, and on one made by hand on the site", function()
+    given()
+    given({ char = "Bo Marsh", item = 100 }, "manual")
+    local tab = openTab()
+    for _, char in ipairs({ "Ana Vale", "Bo Marsh" }) do
+      local undo = rowOf(tab, char).undo
+      assert.is_true(undo:IsShown())
+      assert.are.equal("Undo", undo.label:GetText())
+      assert.is_true(undo:IsEnabled())
+      assert.is_nil(undo.tip)
+    end
+  end)
+
+  it("is not offered on an award announced, not confirmed or already voided", function()
+    given({}, "announced")
+    given({ char = "Bo Marsh" }, "not-confirmed")
+    local voided = given({ char = "Cy Dune" })
+    assert(ns.Records.Void(voided, { reason = "wrong winner" }))
+    local tab = openTab()
+    for _, char in ipairs({ "Ana Vale", "Bo Marsh", "Cy Dune" }) do
+      assert.is_nil(rowOf(tab, char).undo)
+    end
+    assert.is_nil(tab.undos[1])
+    assert.is_nil(tab.undoGreys[1])
+  end)
+
+  it("voids the award and posts one undo line built by OpText; the row is struck, Undone HH:MM", function()
+    local key = given()
+    local tab = openTab()
+    local sent = #wow.sent
+    click(rowOf(tab, "Ana Vale").undo)
+    local record = ns.Records.Get(key)
+    assert.is_true(record.voided)
+    assert.is_nil(record.voidReason)
+    assert.are.equal(sent + 1, #wow.sent)
+    assert.are.same({ text = undoLine(key), channel = "RAID" }, wow.sent[#wow.sent])
+    local row = rowOf(tab, "Ana Vale")
+    assert.is_true(row.voided)
+    assert.are.equal("Undone " .. clock(record.voidedAt), row.note:GetText())
+    assert.are.equal(grey("Ana Vale"), row.winner:GetText())
+    assert.is_true(tab.strikes[1]:IsShown())
+    assert.is_nil(row.undo)
+  end)
+
+  it("keeps the void when the line can't be posted, and tells the officer", function()
+    local key = given()
+    local tab = openTab()
+    wow.state.items[100] = nil -- no item link to post
+    local sent, printed = #wow.sent, #wow.printed
+    click(rowOf(tab, "Ana Vale").undo)
+    assert.is_true(ns.Records.Get(key).voided)
+    assert.are.equal(sent, #wow.sent)
+    assert.is_truthy(wow.printed[printed + 1]:find("is no longer awarded to Ana Vale, but its raid chat line"
+      .. " couldn't be posted. Type /bf log for why.", 1, true))
+    assert.is_truthy(ns.log[#ns.log].text:find("Undo line for item 100 not posted", 1, true))
+  end)
+
+  it("puts [Practice] before a practice award's line, the button in the note's place", function()
+    local key = given({ practice = true })
+    local tab = openTab()
+    wow.click(function() tab.practiceToggle.scripts.OnClick() end)
+    local row = rowOf(tab, "Ana Vale")
+    assert.are.equal("", row.note:GetText())
+    click(row.undo)
+    local text = wow.sent[#wow.sent].text
+    assert.are.equal(undoLine(key, true), text)
+    assert.are.equal("[Practice] ", text:sub(1, 11))
+  end)
+
+  it("is disabled in a boss fight with the pop-up's tooltip, and a click does nothing", function()
+    local key = given()
+    local tab = openTab()
+    wow.bossFight(true)
+    local undo = rowOf(tab, "Ana Vale").undo
+    assert.is_false(undo:IsEnabled())
+    assert.are.equal("Posts a line, so it waits until the boss fight ends", undo.tip)
+    undo.scripts.OnEnter(undo)
+    assert.are.same({ "Posts a line, so it waits until the boss fight ends" }, GameTooltip.lines)
+    local sent = #wow.sent
+    click(undo)
+    assert.is_nil(ns.Records.Get(key).voided)
+    assert.are.equal(sent, #wow.sent)
+    wow.bossFight(false)
+    assert.is_true(rowOf(tab, "Ana Vale").undo:IsEnabled())
+  end)
+
+  it("in a boss fight the tab hasn't redrawn for yet, says chat is locked and changes nothing", function()
+    local key = given()
+    local tab = openTab()
+    wow.state.chatLockdown = true
+    local sent = #wow.sent
+    click(rowOf(tab, "Ana Vale").undo)
+    assert.is_nil(ns.Records.Get(key).voided)
+    assert.are.equal(sent, #wow.sent)
+    local row = rowOf(tab, "Ana Vale")
+    assert.are.equal("Chat is locked in the boss fight. Undo waits until it ends.", row.refusal:GetText())
+    assert.is_false(row.undo:IsEnabled())
+  end)
+
+  it("refuses a player no longer the loot master before the tab redraws, changing nothing", function()
+    local key = given()
+    local tab = openTab()
+    wow.state.lootMethod = { "master", nil, 2 }
+    local sent = #wow.sent
+    click(rowOf(tab, "Ana Vale").undo)
+    assert.is_nil(ns.Records.Get(key).voided)
+    assert.are.equal(sent, #wow.sent)
+    local row = rowOf(tab, "Ana Vale")
+    assert.are.equal("Only the loot master can undo awards.", row.refusal:GetText())
+    assert.is_false(row.undo:IsEnabled())
+  end)
+
+  it("is greyed for another officer, doing nothing", function()
+    wow.state.lootMethod = { "master", nil, 2 }
+    given()
+    local tab = openTab()
+    local undo = rowOf(tab, "Ana Vale").undo
+    assert.are.equal("Undo", undo.label:GetText())
+    assert.is_false(undo:IsEnabled())
+    assert.is_nil(undo.scripts.OnClick)
+    assert.is_nil(tab.undos[1])
+  end)
+
+  describe("needs a winner", function()
+    it("follows a confirmed award undone, with Pick winner, and is counted", function()
+      given({ char = "Bo Marsh", at = T0 })
+      local key = given()
+      local tab = openTab()
+      click(rowOf(tab, "Ana Vale").undo)
+      local voidedAt = ns.Records.Get(key).voidedAt
+      local needs = needsRows(tab)
+      assert.are.equal(1, #needs)
+      assert.are.equal(tab.shown[#tab.shown], needs[1])
+      assert.are.equal(rowOf(tab, "Ana Vale"), tab.shown[#tab.shown - 1])
+      assert.are.same({ grey(clock(voidedAt)), "|T1:14|t " .. LINK, NEEDS, "", "", "" },
+        { needs[1].time:GetText(), needs[1].item:GetText(), needs[1].winner:GetText(), needs[1].how:GetText(),
+          needs[1].roll:GetText(), needs[1].note:GetText() })
+      assert.are.equal("Pick winner", needs[1].pick.label:GetText())
+      assert.is_true(needs[1].pick:IsEnabled())
+      assert.are.equal("Lucifron · 3 items", tab.shown[1].heading:GetText())
+      assert.are.equal("1 award · 1 needs a winner", tab.summary:GetText())
+    end)
+
+    it("Pick winner does nothing yet", function()
+      local key = given()
+      assert(ns.Records.Void(key))
+      local tab = openTab()
+      local sent = #wow.sent
+      local pick = needsRows(tab)[1].pick
+      if pick.scripts.OnClick then click(pick) end
+      assert.are.equal(sent, #wow.sent)
+      assert.are.equal(1, #needsRows(tab))
+    end)
+
+    it("comes too for a confirmed Disenchant/bank award undone", function()
+      local key = given({ char = nil, method = "DISENCHANT_BANK" })
+      assert(ns.Records.Void(key))
+      assert.are.equal(1, #needsRows(openTab()))
+    end)
+
+    it("comes for an award voided by another officer or the site, with its reason", function()
+      local key = given()
+      assert(ns.Records.Void(key, { reason = "traded" }))
+      assert.are.equal(1, #needsRows(openTab()))
+    end)
+
+    it("does not come for an undone award announced, not confirmed, made on the site or replaced",
+      function()
+        assert(ns.Records.Void(given({}, "announced")))
+        assert(ns.Records.Void(given({ char = "Bo Marsh" }, "not-confirmed")))
+        assert(ns.Records.Void(given({ char = "Cy Dune" }, "manual")))
+        assert(ns.Records.Replace(given({ char = "Di Fenn" }),
+          { boss = "b1", item = 100, char = "Ed Gale", method = "SR" }))
+        local tab = openTab()
+        assert.are.same({}, needsRows(tab))
+        assert.is_falsy(tab.summary:GetText():find("needs a winner", 1, true))
+      end)
+
+    it("shows Pick winner greyed for another officer", function()
+      wow.state.lootMethod = { "master", nil, 2 }
+      assert(ns.Records.Void(given()))
+      local pick = needsRows(openTab())[1].pick
+      assert.are.equal("Pick winner", pick.label:GetText())
+      assert.is_false(pick:IsEnabled())
+    end)
+
+    it("follows a practice award undone in the practice group, not counted in the summary", function()
+      given()
+      assert(ns.Records.Void(given({ char = "Bo Marsh", practice = true })))
+      local tab = openTab()
+      assert.are.equal("1 award", tab.summary:GetText())
+      wow.click(function() tab.practiceToggle.scripts.OnClick() end)
+      assert.are.equal("- Practice awards (1) · never sent to the guild site", tab.shown[3].heading:GetText())
+      assert.are.equal(1, #needsRows(tab))
+      assert.are.equal(tab.shown[#tab.shown], needsRows(tab)[1])
+    end)
   end)
 end)
