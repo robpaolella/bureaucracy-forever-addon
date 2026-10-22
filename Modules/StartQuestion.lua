@@ -3,9 +3,10 @@
 -- instance type but "none", with an instance number) in any group when a loaded raid is a candidate
 -- for it, the chooser (Hub.Chooser) is asked after 5 seconds, so the other add-ons' P messages have
 -- arrived: "Is this a guild run?", the loaded raids with the suggestion pre-selected and "No, not a
--- guild run" last. A raid already selected is asked about again only in a different instance (ask-again). The question only draws: the answer
--- goes through Selection, which shares it with the group (an S message). Saved beside the selection:
--- questionKept, the instance where the officer answered Keep to ask-again.
+-- guild run" last. A raid already selected is asked about again only in a different instance
+-- (ask-again). The question only draws: the answer goes through Selection, which shares it with the
+-- group (an S message). Saved beside the selection: questionKept, the instance where the officer
+-- answered Keep to ask-again.
 local _, ns = ...
 
 local Q = {}
