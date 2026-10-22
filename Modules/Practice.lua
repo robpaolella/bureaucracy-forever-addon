@@ -46,6 +46,11 @@ local CASES = {
     return { holders = { holder(m[1], "HR"), holder(m[2], "HR") }, copies = 2 }
   end },
   { name = "open", needs = 0, build = function() return { holders = {} } end },
+  -- One soft reserve holder; the Test drop then acts as if the officer gave it from the game's own
+  -- loot menu (#135).
+  { name = "menu", needs = 1, build = function(m)
+    return { holders = { holder(m[1], "SR") }, menu = true }
+  end },
 }
 Practice.CASES = {}
 for i, c in ipairs(CASES) do Practice.CASES[i] = c.name end
@@ -55,7 +60,7 @@ for i, c in ipairs(CASES) do Practice.CASES[i] = c.name end
 -- roll needs no one). Returns { case, holders (reserve holders in the snapshot's shape), roster
 -- (the names the rules check holders against: leaves the absent holder out), candidates (the names
 -- the game would let receive it: leaves the can't-receive holder out), copies (2 for the several
--- copies case, else nil) }.
+-- copies case, else nil), menu (true in the menu case, else nil) }.
 function Practice.Generate(members, drop)
   local count = #members
   local start = (drop or 0) % #CASES
@@ -65,7 +70,7 @@ function Practice.Generate(members, drop)
       local rotated = {}
       for i = 1, count do rotated[i] = members[(drop + i - 1) % count + 1] end
       local made = case.build(rotated)
-      return { case = case.name, holders = made.holders, copies = made.copies,
+      return { case = case.name, holders = made.holders, copies = made.copies, menu = made.menu,
         roster = without(members, made.absent), candidates = without(members, made.cannotReceive) }
     end
   end
@@ -101,6 +106,7 @@ end
 -- clears and no line comes, so after Tracking.confirmWait it is not confirmed, and Try again fails
 -- again. A hand-out to anyone else confirms, so Give to someone else ends the failure.
 local function give(window, slot, index)
+  window.given = true
   local winner = window.candidates(slot)[index]
   if window.failCase then
     window.failFor = window.failFor or winner
@@ -120,6 +126,20 @@ local function give(window, slot, index)
       end
       TestDrop.Close()
     end
+  end)
+end
+
+-- The menu case (#135): confirmAfter seconds after the Test drop opens, the game's signs of a hand-out
+-- nobody started here (the slot clears, the loot line comes), so Tracking reports an outside one.
+-- Nothing happens if the item already left (or was handed out from the pop-up) or the Test drop closed.
+local function giveFromMenu(window, winner)
+  C_Timer.After(TestDrop.confirmAfter, function()
+    if ns.LootWindow.fake ~= window or window.given or not window.slots[1].link then return end
+    window.slots[1] = {}
+    ns.Fire("LOOT_SLOT_CLEARED", 1)
+    ns.Fire("LOOT_SLOT_CLEARED", 1)
+    ns.Fire("CHAT_MSG_LOOT", winner .. " receives loot: " .. TestDrop.LINK .. ".")
+    TestDrop.Close() -- the last item is gone
   end)
 end
 
@@ -145,5 +165,6 @@ function TestDrop.Open()
   local ok, err = pcall(ns.Fire, "LOOT_OPENED")
   ns.LootWindow.opening = nil
   if not ok then error(err, 0) end
+  if made.menu then giveFromMenu(window, made.holders[1].char) end
   return true
 end

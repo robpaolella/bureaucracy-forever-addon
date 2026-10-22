@@ -843,3 +843,242 @@ describe("the outside hand-out question", function()
     end)
   end)
 end)
+
+
+describe("practice mode's menu hand-out (#135)", function()
+  local ns, O
+  local MEMBERS = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
+  local PRACTICE_LEAD = "[Practice] You gave %s to |cffffffff%s|r from the game's loot menu. How was it won?"
+
+  local function click(b) wow.click(function() b.scripts.OnClick(b) end) end
+  local function record() click(O.frame.record) end
+  local function later() click(O.frame.later) end
+
+  local function start()
+    ns = wow.start()
+    O = ns.OutsideHandout
+    wow.state.group = MEMBERS
+    wow.state.groupIsRaid = true
+    wow.state.lootMethod = { "group", 0, 0 }
+    for _ = 1, 30 do wow.advance(1) end
+    wow.slash("/bf practice")
+    wow.printed, wow.addonMessages, wow.sent = {}, {}, {}
+  end
+  before_each(start)
+
+  -- Opens Test drops until the menu case comes; returns its holder's name.
+  local function openMenu()
+    for _ = 1, #ns.PracticeReserves.CASES do
+      assert(ns.TestDrop.Open())
+      local made = ns.Popup.MadeUp(ns.TestDrop.ITEM)
+      if made.menu then return made.holders[1].char end
+    end
+    error("no menu case")
+  end
+
+  local function askedFor(winner)
+    return PRACTICE_LEAD:format(ns.TestDrop.LINK, winner)
+  end
+
+  it("acts as a hand-out from the game's menu confirmAfter seconds after the Test drop opens", function()
+    local winner = openMenu()
+    wow.advance(ns.TestDrop.confirmAfter - 1)
+    assert.is_nil(O.Shown())
+    assert.is_true(ns.TestDrop.IsOpen())
+    wow.advance(1)
+    assert.is_false(ns.TestDrop.IsOpen())
+    assert.are.same({}, wow.gives)
+    assert.is_true(O.frame:IsShown())
+    assert.are.equal(askedFor(winner), O.frame.lead:GetText())
+    local shown = O.Shown()
+    assert.are.same({ "SR", "testdrop", false }, { shown.method, shown.boss, shown.askBoss })
+    assert.is_true(O.frame.rows[2].label:GetText():find("(they soft-reserved it)", 1, true) ~= nil)
+    assert.is_false(O.frame.boss:IsShown())
+    assert.are.same({ "Record and announce", true },
+      { O.frame.record.label:GetText(), O.frame.record:IsEnabled() })
+    assert.are.same({ "Later", true }, { O.frame.later.label:GetText(), O.frame.later:IsEnabled() })
+  end)
+
+  it("records one practice award with no raid, posts one [Practice] line and sends nothing", function()
+    local winner = openMenu()
+    wow.advance(ns.TestDrop.confirmAfter)
+    record()
+    local list = ns.Raids.NoRaidAwards()
+    assert.are.equal(1, #list)
+    local a = list[1]
+    assert.are.same({ true, nil, "testdrop", "SR", "confirmed", winner, "practice-" .. winner:lower() },
+      { a.practice, a.raid, a.boss, a.method, a.state, a.char, a.user })
+    assert.are.equal(1, #wow.sent)
+    assert.are.equal("[Practice] ", wow.sent[1].text:sub(1, 11))
+    assert.are.equal(ns.OpText.BuildLine("award", { raid = "PTEST0", key = a.key, item = ns.TestDrop.ITEM,
+      link = ns.TestDrop.LINK, boss = "testdrop", method = "SR", winner = winner, practice = true }),
+      wow.sent[1].text)
+    for _ = 1, 60 do wow.advance(1) end
+    assert.are.same({}, wow.addonMessages)
+    assert.are.same({}, wow.gives)
+    assert.is_nil(O.Shown())
+  end)
+
+  it("asks and records though the run is not a guild run", function()
+    assert.is_true(ns.Selection.ChooseOff())
+    local winner = openMenu()
+    wow.advance(ns.TestDrop.confirmAfter)
+    assert.are.equal(askedFor(winner), O.frame.lead:GetText())
+    record()
+    assert.are.equal(1, #ns.Raids.NoRaidAwards())
+    assert.are.equal(1, #wow.sent)
+  end)
+
+  it("leaves its practice award out of the Sync tab's no-raid list", function()
+    openMenu()
+    wow.advance(ns.TestDrop.confirmAfter)
+    record()
+    assert.are.equal(1, #ns.Raids.NoRaidAwards())
+    assert.are.same({}, ns.Raids.RealNoRaidAwards())
+  end)
+
+  describe("put off with Later", function()
+    local function row()
+      local view = ns.UI.AwardsView()
+      assert.is_nil(view.groups and view.groups[1])
+      assert.are.equal(1, #view.practice.rows)
+      return view.practice.rows[1]
+    end
+
+    it("is kept in memory only, listed in the practice group with any raid selected, Answer reopens it",
+      function()
+        local before = ns.db.outside
+        local winner = openMenu()
+        wow.advance(ns.TestDrop.confirmAfter)
+        later()
+        assert.is_false(O.frame:IsShown())
+        assert.are.same(before, ns.db.outside)
+        assert.is_nil(ns.db.outside and next(ns.db.outside))
+        local r = row()
+        assert.is_true(r.answerNeeded)
+        assert.are.equal(winner, r.winner)
+        -- the Test drop's window is long gone, and a raid is selected now
+        assert.is_false(ns.TestDrop.IsOpen())
+        ns.Raids.Load(assert(ns.Snapshot.Validate({
+          formatVersion = 1, raid = "raid00009", code = "SMC009", env = "staging", name = "Other",
+          startsAt = 1792000000, durationMin = 240, generated = 1791990000,
+          addon = { version = "0.1.0", url = "https://example.invalid/addon" },
+          bosses = { { id = "boss-a", name = "A", trash = false, items = { 1 } } }, reserves = {},
+          awards = {},
+        }, "0.1.0")), "pasted")
+        assert.is_true(ns.Selection.ChooseRaid("raid00009"))
+        row()
+        wow.click(function() ns.OutsideHandout.Ask(r.handout) end)
+        assert.are.equal(askedFor(winner), O.frame.lead:GetText())
+        assert.are.equal("SR", O.Shown().method)
+        record()
+        assert.are.equal(1, #ns.Raids.NoRaidAwards())
+        assert.are.same({}, ns.OutsideHandout.Unanswered())
+      end)
+
+    it("is listed, answered and recorded on a run that is not a guild run", function()
+      assert.is_true(ns.Selection.ChooseOff())
+      openMenu()
+      wow.advance(ns.TestDrop.confirmAfter)
+      later()
+      assert.are.equal(1, #O.Unanswered())
+      assert.is_true(row().answerNeeded)
+      O.Ask(O.Unanswered()[1])
+      record()
+      assert.are.equal(1, #ns.Raids.NoRaidAwards())
+    end)
+
+    it("is drawn in the Awards tab with an Answer button", function()
+      openMenu()
+      wow.advance(ns.TestDrop.confirmAfter)
+      later()
+      ns.UI.Toggle()
+      local tab = ns.UI.awards
+      wow.click(function() tab.practiceToggle.scripts.OnClick() end)
+      local answers = {}
+      for _, line in ipairs(tab.shown) do
+        if line.answerNeeded then answers[#answers + 1] = line end
+      end
+      assert.are.equal(1, #answers)
+      assert.are.equal("Answer", answers[1].answer.label:GetText())
+      click(answers[1].answer)
+      assert.is_true(O.frame:IsShown())
+    end)
+  end)
+
+  it("asks nothing when the officer gave the item from the pop-up first", function()
+    openMenu()
+    local m = ns.Popup.Build()
+    local row = m.rows[1]
+    wow.click(function() ns.Popup.Give(row.slot, row.item, row.winner) end)
+    wow.advance(ns.TestDrop.confirmAfter + 1)
+    assert.is_nil(O.Shown())
+    assert.are.equal(1, #ns.Raids.NoRaidAwards())
+  end)
+
+  it("asks nothing when the Test drop was closed first", function()
+    openMenu()
+    ns.TestDrop.Close()
+    wow.advance(ns.TestDrop.confirmAfter + 1)
+    assert.is_nil(O.Shown())
+    assert.is_false(O.frame:IsShown())
+  end)
+
+  it("drops the open, waiting and kept practice questions when practice mode goes off", function()
+    openMenu()
+    wow.advance(ns.TestDrop.confirmAfter)
+    later()
+    O.Ask(O.Unanswered()[1])
+    O.Ask({ winner = "Doran Vale", link = ns.TestDrop.LINK, item = ns.TestDrop.ITEM, quantity = 1,
+      at = time(), boss = "testdrop", practice = true, kind = "SR", user = "practice-doran vale" })
+    assert.is_table(O.Shown())
+    assert.are.equal(1, #O.Waiting())
+    wow.slash("/bf practice")
+    assert.is_nil(O.Shown())
+    assert.is_false(O.frame:IsShown())
+    assert.are.same({}, O.Waiting())
+    assert.are.same({}, O.Unanswered())
+    assert.is_nil(ns.UI.AwardsView().practice)
+  end)
+
+  it("drops a kept one too, and the ask refuses a practice hand-out with practice mode off", function()
+    openMenu()
+    wow.advance(ns.TestDrop.confirmAfter)
+    later()
+    local h = O.Unanswered()[1]
+    wow.slash("/bf practice")
+    assert.are.same({}, O.Unanswered())
+    O.Ask(h)
+    assert.is_nil(O.Shown())
+  end)
+
+  it("makes no hand-out with practice mode off, and asks about a real raid's outside hand-out", function()
+    wow.slash("/bf practice")
+    assert.are.same({ nil, "not practice" }, { ns.TestDrop.Open() })
+    ns.Raids.Load(assert(ns.Snapshot.Validate({
+      formatVersion = 1, raid = "raid00001", code = "SMC001", env = "staging", name = "Molten Core",
+      startsAt = 1792000000, durationMin = 240, generated = 1791990000,
+      addon = { version = "0.1.0", url = "https://example.invalid/addon" },
+      bosses = { { id = "boss-lucif", name = "Lucifron", trash = false, items = { 1 } } },
+      reserves = {}, awards = {},
+    }, "0.1.0")), "pasted")
+    assert.is_true(ns.Selection.ChooseRaid("raid00001"))
+    wow.state.lootMethod = { "master", 0, 0 }
+    local item = "|cffa335ee|Hitem:1::::::::60:::::|h[Item 1]|h|r"
+    wow.openLoot({ { link = item, quality = 4, sourceGuid = "corpse1", candidates = MEMBERS } })
+    wow.fire("LOOT_SLOT_CLEARED", 1)
+    wow.fire("LOOT_SLOT_CLEARED", 1)
+    wow.fire("CHAT_MSG_LOOT", "Ashla Brightwater receives loot: " .. item .. ".")
+    assert.is_table(O.Shown())
+    assert.is_nil(O.Shown().handout.practice)
+    assert.are.equal("You gave", O.frame.lead:GetText():sub(1, 8))
+  end)
+
+  it("still drops a real outside hand-out on a quiet run, while practice mode is on", function()
+    assert.is_true(ns.Selection.ChooseOff())
+    O.Ask({ winner = "Doran Vale", link = ns.TestDrop.LINK, item = ns.TestDrop.ITEM, quantity = 1,
+      at = time() })
+    assert.is_nil(O.Shown())
+    assert.are.same({}, O.Unanswered())
+  end)
+end)

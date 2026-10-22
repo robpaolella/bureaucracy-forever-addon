@@ -73,6 +73,7 @@ end
 function ns.SetPractice(on)
   ns.db.practice = on and true or nil
   ns.Print(on and PRACTICE_ON or "Practice mode off.")
+  if not on then ns.OutsideHandout.DropPractice() end
   ns.UI.RefreshPractice()
 end
 

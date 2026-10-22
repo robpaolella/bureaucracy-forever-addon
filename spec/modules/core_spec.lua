@@ -100,6 +100,17 @@ describe("practice mode (#17)", function()
     assert.is_false(ns.UI.practiceBox.check:IsShown())
   end)
 
+  it("drops a practice hand-out question when it goes off", function()
+    wow.slash("/bf practice")
+    ns.OutsideHandout.Ask({ winner = "Doran Vale", link = ns.TestDrop.LINK, item = ns.TestDrop.ITEM,
+      quantity = 1, at = time(), boss = "testdrop", practice = true, kind = "SR",
+      user = "practice-doran vale" })
+    assert.is_table(ns.OutsideHandout.Shown())
+    ns.SetPractice(false)
+    assert.is_nil(ns.OutsideHandout.Shown())
+    assert.is_false(ns.OutsideHandout.frame:IsShown())
+  end)
+
   it("is listed in the help line", function()
     wow.slash("/bf nonsense")
     assert.is_truthy(wow.printed[1]:find("/bf practice", 1, true))
