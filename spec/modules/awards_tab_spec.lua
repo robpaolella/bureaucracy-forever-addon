@@ -776,6 +776,21 @@ describe("the Awards tab's Undo", function()
     assert.is_truthy(ns.log[#ns.log].text:find("Undo line for item 100 not posted", 1, true))
   end)
 
+  it("keeps the void when the line can't be posted, and tells the officer (in a party)", function()
+    wow.inParty(function()
+      local key = given()
+      local tab = openTab()
+      wow.state.items[100] = nil -- no item link to post
+      local sent, printed = #wow.sent, #wow.printed
+      click(rowOf(tab, "Ana Vale").undo)
+      assert.is_true(ns.Records.Get(key).voided)
+      assert.are.equal(sent, #wow.sent)
+      assert.is_truthy(wow.printed[printed + 1]:find("is no longer awarded to Ana Vale, but its party chat"
+        .. " line couldn't be posted. Type /bf log for why.", 1, true))
+      assert.is_truthy(ns.log[#ns.log].text:find("Undo line for item 100 not posted", 1, true))
+    end)
+  end)
+
   it("puts [Practice] before a practice award's line, the button in the note's place", function()
     local key = given({ practice = true })
     local tab = openTab()
@@ -950,6 +965,13 @@ describe("the Awards tab's Undo", function()
           p.noteLabel:GetText())
         assert.are.equal("Traded by Ana Vale", p.noteEdit:GetText())
         assert.is_true(p.noteEdit:IsShown())
+        assert.are.equal("Posts in raid chat", p.previewHead:GetText())
+        -- The heading names the chat the line would go to now, and follows the group.
+        wow.state.groupIsRaid = false
+        wow.fire("GROUP_ROSTER_UPDATE")
+        assert.are.equal("Posts in party chat", p.previewHead:GetText())
+        wow.state.groupIsRaid = true
+        wow.fire("GROUP_ROSTER_UPDATE")
         assert.are.equal("Posts in raid chat", p.previewHead:GetText())
         assert.are.equal("Choose who gets it.", p.preview:GetText())
         assert.are.equal("Post correction", p.post.label:GetText())
@@ -1558,6 +1580,23 @@ describe("the Awards tab's Undo", function()
         assert.are.equal(LINK .. " now goes to disenchant/bank on the record, but the correction line"
           .. " couldn't be posted in raid chat. Tell the raid yourself. Type /bf log for why.",
           tab.notice.text:GetText())
+      end)
+
+      it("a disenchant/bank correction that can't be posted says where the item goes (in a party)", function()
+        wow.inParty(function()
+          reserved()
+          undone()
+          local tab, p = opened()
+          click(p.db)
+          _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
+          local printed = #wow.printed
+          click(p.post)
+          assert.are.equal(CHAT .. LINK .. " now goes to disenchant/bank on the record, but its party chat"
+            .. " line couldn't be posted. Type /bf log for why.", wow.printed[printed + 1])
+          assert.are.equal(LINK .. " now goes to disenchant/bank on the record, but the correction line"
+            .. " couldn't be posted in party chat. Tell the party yourself. Type /bf log for why.",
+            tab.notice.text:GetText())
+        end)
       end)
     end)
   end)
