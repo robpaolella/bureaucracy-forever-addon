@@ -38,6 +38,7 @@ describe("the outside hand-out question", function()
     wow.state.group = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
     wow.state.groupIsRaid = true
     wow.state.lootMethod = { "master", 0, 0 }
+    wow.state.instance = { name = "Molten Core", type = "raid", id = 409 }
     ns.Raids.Load(assert(ns.Snapshot.Validate(tree(), "0.1.0")), "pasted")
     assert(ns.Selection.ChooseRaid("raid00001"))
     for _ = 1, 30 do wow.advance(1) end
@@ -233,6 +234,7 @@ describe("the outside hand-out question", function()
     wow.state.group = { "Masterlooter", "Ashla Brightwater" }
     wow.state.groupIsRaid = true
     wow.state.lootMethod = { "master", 0, 0 }
+    wow.state.instance = { name = "Molten Core", type = "raid", id = 409 }
     drop({ 1 })
     giveFromMenu(1, "Ashla Brightwater")
     assert.is_nil(view().boss)
@@ -457,6 +459,7 @@ describe("the outside hand-out question", function()
       wow.state.group = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
       wow.state.groupIsRaid = true
       wow.state.lootMethod = { "master", 0, 0 }
+      wow.state.instance = { name = "Molten Core", type = "raid", id = 409 }
       for _ = 1, 30 do wow.advance(1) end
       wow.addonMessages = {}
     end
@@ -596,6 +599,7 @@ describe("the outside hand-out question", function()
       wow.state.group = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
       wow.state.groupIsRaid = true
       wow.state.lootMethod = { "master", 0, 0 }
+      wow.state.instance = { name = "Molten Core", type = "raid", id = 409 }
       for _ = 1, 30 do wow.advance(1) end
       drop({ 1 })
       giveFromMenu(1, "Ashla Brightwater")
@@ -627,6 +631,7 @@ describe("the outside hand-out question", function()
       wow.state.group = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
       wow.state.groupIsRaid = true
       wow.state.lootMethod = { "master", 0, 0 }
+      wow.state.instance = { name = "Molten Core", type = "raid", id = 409 }
       for _ = 1, 30 do wow.advance(1) end
       wow.addonMessages = {}
     end
@@ -886,6 +891,70 @@ describe("the outside hand-out question", function()
 end)
 
 
+describe("a menu hand-out in the open world (#167)", function()
+  local ns, O
+  local MEMBERS = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
+
+  local function start(place)
+    ns = wow.start()
+    O = ns.OutsideHandout
+    wow.state.group = MEMBERS
+    wow.state.groupIsRaid = true
+    wow.state.lootMethod = { "master", 0, 0 }
+    wow.state.instance = place
+    ns.Raids.Load(assert(ns.Snapshot.Validate(tree(), "0.1.0")), "pasted")
+    assert(ns.Selection.ChooseRaid("raid00001"))
+    for _ = 1, 30 do wow.advance(1) end
+  end
+
+  local function giveFromMenu(id, winner)
+    local item = link(id)
+    wow.openLoot({ { link = item, quality = 4, sourceGuid = "corpse1", candidates = MEMBERS } })
+    wow.fire("LOOT_SLOT_CLEARED", 1)
+    wow.fire("LOOT_SLOT_CLEARED", 1)
+    wow.fire("CHAT_MSG_LOOT", winner .. " receives loot: " .. item .. ".")
+  end
+
+  local function logged()
+    local n = 0
+    for _, entry in ipairs(ns.log) do
+      if entry.text:find("Skipped a loot-menu hand-out", 1, true) then n = n + 1 end
+    end
+    return n
+  end
+
+  it("asks nothing, keeps nothing, records nothing and logs one line", function()
+    start({ name = "Eastern Kingdoms", type = "none", id = 0 })
+    giveFromMenu(1, "Ashla Brightwater")
+    assert.is_nil(O.Shown())
+    assert.are.same({}, O.Unanswered())
+    assert.is_nil(ns.db.outside)
+    assert.are.same({}, ns.Raids.Awards("raid00001"))
+    assert.are.equal(0, #(ns.db.noRaid or {}))
+    assert.are.equal(1, logged())
+  end)
+
+  it("asks in a dungeon and in a raid instance", function()
+    for _, place in ipairs({ { name = "The Hall of Thanes", type = "party", id = 70 },
+      { name = "Molten Core", type = "raid", id = 409 } }) do
+      start(place)
+      giveFromMenu(1, "Ashla Brightwater")
+      assert.is_table(O.Shown())
+      assert.are.equal(0, logged())
+    end
+  end)
+
+  it("still asks about one made in an instance and waiting when the player leaves", function()
+    start({ name = "Molten Core", type = "raid", id = 409 })
+    wow.fire("ENCOUNTER_START")
+    giveFromMenu(1, "Ashla Brightwater")
+    assert.is_nil(O.Shown())
+    wow.state.instance = { name = "Eastern Kingdoms", type = "none", id = 0 }
+    wow.fire("ENCOUNTER_END")
+    assert.is_table(O.Shown())
+  end)
+end)
+
 describe("practice mode's menu hand-out (#135)", function()
   local ns, O
   local MEMBERS = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
@@ -920,6 +989,13 @@ describe("practice mode's menu hand-out (#135)", function()
   local function askedFor(winner)
     return PRACTICE_LEAD:format(ns.TestDrop.LINK, winner)
   end
+
+  it("is asked in the open world too, since practice works alone there (#167)", function()
+    assert.are.equal("none", select(2, GetInstanceInfo()))
+    local winner = openMenu()
+    wow.advance(ns.TestDrop.confirmAfter)
+    assert.are.equal(askedFor(winner), O.frame.lead:GetText())
+  end)
 
   it("acts as a hand-out from the game's menu confirmAfter seconds after the Test drop opens", function()
     local winner = openMenu()
@@ -1105,6 +1181,7 @@ describe("practice mode's menu hand-out (#135)", function()
     }, "0.1.0")), "pasted")
     assert.is_true(ns.Selection.ChooseRaid("raid00001"))
     wow.state.lootMethod = { "master", 0, 0 }
+    wow.state.instance = { name = "Molten Core", type = "raid", id = 409 }
     local item = "|cffa335ee|Hitem:1::::::::60:::::|h[Item 1]|h|r"
     wow.openLoot({ { link = item, quality = 4, sourceGuid = "corpse1", candidates = MEMBERS } })
     wow.fire("LOOT_SLOT_CLEARED", 1)
