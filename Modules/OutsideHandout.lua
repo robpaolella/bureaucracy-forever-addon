@@ -2,8 +2,8 @@
 -- the outside-handout state). Tracking reports such a hand-out ("outside", at or above the loot
 -- threshold); the officer is asked how it was won, pre-filled from the reserves, and the answer is
 -- recorded as an award (confirmed: the game already handed it out), sent to the other officers
--- (Hub.SendOwn) and posted in raid chat. Nothing is recorded until the officer answers. Later puts it
--- off: it joins the list of unanswered hand-outs (Unanswered).
+-- (Hub.SendOwn) and posted in raid or party chat. Nothing is recorded until the officer answers.
+-- Later puts it off: it joins the list of unanswered hand-outs (Unanswered).
 -- A hand-out with a raid is saved in BureaucracyForeverDB.outside[raidId] from the moment it is
 -- reported until it is recorded (#137), so /reload and logging out lose none; it is never sent or
 -- exported. After a reload it is not asked again by itself: it is in Unanswered. One made with no raid
@@ -21,7 +21,7 @@ ns.OutsideHandout = OutsideHandout
 
 local WIDTH = 460
 local GREY = "|cff808080%s|r"
-local HINT = "Recording it posts the award line in raid chat."
+local HINT = "Recording it posts the award line in %s."
 local CHOICES = {
   { method = "HR", label = "Hard reserve", held = "(they hard-reserved it)" },
   { method = "SR", label = "Soft reserve", held = "(they soft-reserved it)" },
@@ -196,7 +196,7 @@ local function draw()
     y = y + 30
   end
   y = y + 6
-  frame.hint:SetText(HINT)
+  frame.hint:SetText(HINT:format(ns.Popup.ChatName()))
   place(frame.hint, y)
   y = y + frame.hint:GetStringHeight() + 12
   setButton(frame.record, "Record and announce", ready())
@@ -348,7 +348,7 @@ function OutsideHandout.Record()
   local data = { raid = ns.Popup.LineRaid(op.raid, op.practice), key = op.id, item = h.item, link = h.link,
     boss = boss, method = method, roll = roll, winner = winner, practice = op.practice }
   ns.Popup.Post("award", data, why, "Award line for " .. h.link, "The award of " .. h.link .. " to "
-    .. plain(h.winner) .. " is recorded, but its raid chat line couldn't be posted.")
+    .. plain(h.winner) .. " is recorded, but its {chat} line couldn't be posted.")
   ns.UI.RefreshAwards()
   showNext()
   return op, why
@@ -489,6 +489,11 @@ ns.On("ENCOUNTER_START", function()
     table.insert(queue, 1, h)
     hide()
   end
+end)
+
+-- The hint names the chat the line would go to now: it follows a change between party and raid.
+ns.On("GROUP_ROSTER_UPDATE", function()
+  if shown then draw() end
 end)
 
 ns.On("ENCOUNTER_END", function()

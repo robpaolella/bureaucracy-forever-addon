@@ -269,7 +269,8 @@ local function installGlobals(metadata)
     return (wow.state.group or {})[tonumber(unit:match("^party(%d)$")) + 1]
   end
   -- The group: wow.state.group lists its names, the player first; groupIsRaid says if it is a raid.
-  _G.IsInRaid = function() return wow.state.groupIsRaid or false end
+  -- wow.inParty(fn) runs fn with every raid group in the tests a party instead.
+  _G.IsInRaid = function() return not wow.party and wow.state.groupIsRaid or false end
   _G.IsInGroup = function() return wow.state.groupIsRaid or #(wow.state.group or {}) > 1 end
   -- wow.state.shift: the Shift key is held.
   _G.IsShiftKeyDown = function() return wow.state.shift or false end
@@ -320,6 +321,13 @@ end
 -- ADDON_LOADED. options.saved holds SavedVariables from an earlier session; options.screen
 -- ({ width, height }) sets the screen's size; options.inbox is what the helper's Inbox.lua
 -- defines (BureaucracyLootInbox), or the shipped placeholder when absent.
+function wow.inParty(fn)
+  wow.party = true
+  local ok, err = pcall(fn)
+  wow.party = false
+  if not ok then error(err, 0) end
+end
+
 function wow.start(options)
   options = options or {}
   frames, timers, now, hardwareEvent = {}, {}, 0, false

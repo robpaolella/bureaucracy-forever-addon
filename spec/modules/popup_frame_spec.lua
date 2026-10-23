@@ -321,6 +321,41 @@ describe("PopupFrame", function()
       assert.is_false(shownRows()[1].box:IsShown())
     end)
 
+    it("hands out on a click and shows the row waiting for the game (handout-waiting) (party)", function()
+      wow.inParty(function()
+        raid()
+        drop({ { id = 1 }, { id = 2 }, { id = 3 } })
+        click(shownRows()[1].primary)
+        assert.are.same({ { slot = 1, candidate = 2 } }, wow.gives)
+        assert.are.equal(1, #wow.sent)
+        local row = shownRows()[1]
+        assert.are.equal("Handing out to Ashla Brightwater…", row.handout:GetText())
+        assert.are.equal("Announced in party chat. Waiting for the game to confirm (a few seconds).",
+          row.handoutNote:GetText())
+        -- In the design's bordered box, below the badge, holding the spinner and both lines.
+        local box = row.box
+        assert.is_true(box:IsShown())
+        assert.are.same({ row, 40, -40 }, { box.points[1].relativeTo, box.points[1].x, box.points[1].y })
+        for _, part in ipairs({ row.spinner, row.handout, row.handoutNote }) do
+          assert.are.equal(box, part.points[1].relativeTo)
+        end
+        assert.are.equal(500, box:GetWidth())
+        assert.is_true(box:GetHeight() > -row.handoutNote.points[1].y + 12)
+        assert.is_true(row:GetHeight() >= 40 + box:GetHeight())
+        assert.is_false(row.primary:IsShown() or row.db:IsShown())
+        assert.are.equal("Ashla Brightwater", row.beside:GetText())
+        local other = shownRows()[2] -- the other rows keep their buttons
+        assert.is_true(other.primary:IsShown() and other.primary:IsEnabled())
+        -- The game confirms: the slot empties and the row goes.
+        wow.fire("LOOT_SLOT_CLEARED", 1)
+        table.remove(wow.state.loot, 1)
+        wow.fire("CHAT_MSG_LOOT", "Ashla Brightwater receives loot: " .. link(1) .. ".")
+        assert.are.equal(2, #shownRows())
+        assert.are.equal("Give to Doran Vale", shownRows()[1].primary.label:GetText())
+        assert.is_false(shownRows()[1].box:IsShown())
+      end)
+    end)
+
     it("redraws instead of giving when the winner changed since the draw", function()
       setup({ code = "SA0001",
         reserves = { [1] = { holder("Ashla Brightwater", "HR"), holder("Doran Vale", "SR") } },

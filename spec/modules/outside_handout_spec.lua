@@ -248,6 +248,47 @@ describe("the outside hand-out question", function()
       { ns.db.noRaid[1].char, ns.db.noRaid[1].method, ns.db.noRaid[1].roll })
   end)
 
+  describe("the chat it names", function()
+    local function hint() return view().hint end
+
+    local function ask()
+      drop({ 1 })
+      giveFromMenu(1, "Ashla Brightwater")
+    end
+
+    it("says raid chat in a raid group and party chat in a party or alone (hint)", function()
+      ask()
+      assert.are.equal("Recording it posts the award line in raid chat.", hint())
+      wow.state.groupIsRaid = false
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.equal("Recording it posts the award line in party chat.", hint())
+      wow.state.group = nil
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.equal("Recording it posts the award line in party chat.", hint())
+      wow.state.group, wow.state.groupIsRaid = { "Masterlooter", "Ashla Brightwater", "Doran Vale" }, true
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.are.equal("Recording it posts the award line in raid chat.", hint())
+    end)
+
+    it("ignores a group change while no question is shown", function()
+      wow.fire("GROUP_ROSTER_UPDATE")
+      assert.is_nil(view())
+    end)
+
+    it("names the chat the line went to when it can't be posted, in a raid group and a party", function()
+      for _, case in ipairs({ { true, "raid chat" }, { false, "party chat" } }) do
+        setup()
+        wow.state.groupIsRaid = case[1]
+        ask()
+        _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
+        record()
+        assert.are.equal("|cff33ff99Bureaucracy:|r The award of " .. link(1) .. " to Ashla Brightwater is"
+          .. " recorded, but its " .. case[2] .. " line couldn't be posted. Type /bf log for why.",
+          wow.printed[#wow.printed])
+      end
+    end)
+  end)
+
   it("keeps the question open and says so when the award can't be recorded", function()
     drop({ 1 })
     giveFromMenu(1, "Ashla Brightwater")

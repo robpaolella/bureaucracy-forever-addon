@@ -35,8 +35,8 @@ local LABELS = {
 }
 local FIGHT_NOTICE = "Boss fight in progress. The game locks chat for add-ons, so awards wait until it ends."
 local FIGHT_TOOLTIP = "Chat is locked until the fight ends"
-local ANNOUNCED = "Announced in raid chat. Waiting for the game to confirm (a few seconds)."
-local NOT_ANNOUNCED = "Not announced in raid chat: the line couldn't be posted. Waiting for the game to"
+local ANNOUNCED = "Announced in %s. Waiting for the game to confirm (a few seconds)."
+local NOT_ANNOUNCED = "Not announced in %s: the line couldn't be posted. Waiting for the game to"
   .. " confirm (a few seconds)."
 local OPEN_WINDOW = "Open the loot window to hand it out."
 -- The game's limits that lock chat: on during a boss fight only (beta, #3). Its Combat limit (every
@@ -586,7 +586,8 @@ function Popup.Build()
     end
     if handout then
       row.handout = { text = "Handing out to " .. handout.winner .. "…",
-        note = handout.announced and ANNOUNCED or NOT_ANNOUNCED }
+        note = (handout.announced and ANNOUNCED or NOT_ANNOUNCED):format(handout.postedIn
+          or Popup.ChatName()) }
     end
     if gaveUp and not handout then row.notConfirmed = notConfirmed(gaveUp, locked) end
     row.dbNote = dbNotes[it.slot]
@@ -648,12 +649,17 @@ end
 -- Why the last choice on the award was refused, in the row's words, or nil.
 function Popup.Refusal(key) return refusals[key] end
 
+-- The chat the add-on posts its lines in now, by the words officers see: raid chat in a raid
+-- group, party chat in a party or alone.
+function Popup.ChatName() return IsInRaid() and "raid chat" or "party chat" end
+
 -- Posts the operation's chat line, built from data, in raid (or party) chat. With no data (the
 -- record wasn't saved; why says why), a line that can't be built or a send the game refuses with an
--- error, nothing is posted: the log says why under `what`, and the officer is told `told`.
--- Returns true once posted.
+-- error, nothing is posted: the log says why under `what`, and the officer is told `told`, where
+-- "{chat}" is the chat tried. Returns true if it was posted (else nil), then the name of the chat tried.
 local function post(operation, data, why, what, told)
   local line, problem
+  local chat = Popup.ChatName()
   if data then
     line, problem = ns.OpText.BuildLine(operation, data)
   else
@@ -661,11 +667,12 @@ local function post(operation, data, why, what, told)
   end
   if line then
     local sent, err = pcall(C_ChatInfo.SendChatMessage, line, IsInRaid() and "RAID" or "PARTY")
-    if sent then return true end
+    if sent then return true, chat end
     problem = "the game refused it (" .. tostring(err) .. ")"
   end
   ns.Log(what .. " not posted: " .. problem)
-  ns.Print(told .. " Type /bf log for why.")
+  ns.Print(told:gsub("{chat}", chat) .. " Type /bf log for why.")
+  return nil, chat
 end
 -- The outside hand-out question (OutsideHandout) posts its award lines the same way.
 Popup.Post = post
@@ -709,14 +716,14 @@ local function handOut(model, row, chosen, roll, fromRolls)
     data = { raid = lineRaid(activeRaid(), op.practice), key = op.id, item = row.item, link = row.link,
       boss = model.boss.id, method = method, roll = roll, winner = chosen, practice = op.practice }
   end
-  attempt.announced = post("award", data, why, "Award line for " .. row.link,
-    row.link .. " is being handed to " .. chosen .. ", but its raid chat line couldn't be posted.")
+  attempt.announced, attempt.postedIn = post("award", data, why, "Award line for " .. row.link,
+    row.link .. " is being handed to " .. chosen .. ", but its {chat} line couldn't be posted.")
   return attempt
 end
 
 -- The officer clicked a row's Give button: hands the item to the winner, found by name among
 -- this corpse's candidates (their order changes per corpse), records the award as announced and
--- posts its line in raid chat. A line that can't be built is not posted, and the officer is
+-- posts its line in raid or party chat. A line that can't be built is not posted, and the officer is
 -- told; the hand-out and the award stand. item and winner are what the clicked button showed: if
 -- the row now names another item or winner, nothing happens. Returns the hand-out (Tracking's
 -- attempt, with awardKey and announced), or nil and why: "fight" (chat is locked), "not ready"
@@ -922,8 +929,8 @@ function Popup.GiveDB(slot, item, pick)
     data = { raid = lineRaid(activeRaid(), op.practice), key = op.id, item = row.item, link = row.link,
       boss = model.boss.id, method = "DISENCHANT_BANK", practice = op.practice }
   end
-  attempt.announced = post("award", data, why, "Award line for " .. row.link,
-    row.link .. " is being handed to " .. pick .. " to disenchant or bank, but its raid chat line"
+  attempt.announced, attempt.postedIn = post("award", data, why, "Award line for " .. row.link,
+    row.link .. " is being handed to " .. pick .. " to disenchant or bank, but its {chat} line"
       .. " couldn't be posted.")
   return attempt
 end
@@ -959,6 +966,7 @@ function Popup.TryAgain(key)
   local attempt, reason = ns.Tracking.Give(slot, index)
   if not attempt then return nil, reason end
   attempt.awardKey, attempt.announced = key, before and before.announced
+  attempt.postedIn = before and before.postedIn
   return attempt
 end
 
@@ -1043,8 +1051,8 @@ replaceWith = function(key, award, slot, index, fields, told)
       item = award.item, link = link, boss = award.boss, method = fields.method, roll = fields.roll,
       winner = fields.char, oldWinner = award.char, practice = op.practice }
   end
-  attempt.announced = post("correction", data, why, "Correction line for " .. link,
-    link .. told .. ", but its raid chat line couldn't be posted.")
+  attempt.announced, attempt.postedIn = post("correction", data, why, "Correction line for " .. link,
+    link .. told .. ", but its {chat} line couldn't be posted.")
   return attempt
 end
 
@@ -1122,7 +1130,7 @@ function Popup.NotHandedOut(key)
   post("undo", { raid = lineRaid(award.raid, op.practice), id = op.id, key = key, link = link,
     winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
     link .. (award.char and (" is no longer awarded to " .. award.char) or " is no longer going to"
-      .. " disenchant/bank") .. ", but its raid chat line couldn't be posted.")
+      .. " disenchant/bank") .. ", but its {chat} line couldn't be posted.")
   return op
 end
 
@@ -1150,7 +1158,7 @@ function Popup.Undo(key)
   post("undo", { raid = lineRaid(award.raid, op.practice), id = op.id, key = key, link = link,
     winner = award.char, practice = op.practice }, nil, "Undo line for " .. link,
     link .. (award.char and (" is no longer awarded to " .. award.char) or " is no longer going to"
-      .. " disenchant/bank") .. ", but its raid chat line couldn't be posted.")
+      .. " disenchant/bank") .. ", but its {chat} line couldn't be posted.")
   return op
 end
 
@@ -1292,7 +1300,9 @@ function Popup.Picker(key, pick)
     local line, problem = ns.OpText.BuildLine("correction",
       correctionData(key, award, new, pick.id, pick.newKey, award.practice))
     model.line = line
-    if not line then model.text = "The raid chat line can't be posted: " .. problem .. "." end
+    if not line then
+      model.text = "The " .. Popup.ChatName() .. " line can't be posted: " .. problem .. "."
+    end
   else
     model.text = PICK_WHY[why]
   end
@@ -1337,12 +1347,11 @@ function Popup.Correct(key, pick)
   local data = correctionData(key, award, new, op.id, op.award.id, op.practice)
   local who = new.char and (new.char .. " now has " .. data.link)
     or (data.link .. " now goes to disenchant/bank")
-  if post("correction", data, nil, "Correction line for " .. data.link,
-    who .. " on the record, but its raid chat line couldn't be posted.") then
-    return op
-  end
-  return op, who .. " on the record, but the correction line couldn't be posted in raid chat. Tell the raid"
-    .. " yourself. Type /bf log for why."
+  local posted, chat = post("correction", data, nil, "Correction line for " .. data.link,
+    who .. " on the record, but its {chat} line couldn't be posted.")
+  if posted then return op end
+  return op, who .. " on the record, but the correction line couldn't be posted in " .. chat .. ". Tell the "
+    .. (chat == "raid chat" and "raid" or "party") .. " yourself. Type /bf log for why."
 end
 
 -- The three choices of a not confirmed award, built from its key alone, so the Awards tab has them

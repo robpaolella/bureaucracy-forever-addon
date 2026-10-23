@@ -409,6 +409,16 @@ describe("Popup", function()
       assert.are.equal("SR", ns.Records.Get(attempt.awardKey).method)
     end)
 
+    it("keeps naming the chat the line went to when the group changes before the game confirms", function()
+      raid()
+      wow.state.groupIsRaid = false
+      drop({ { id = 1 } })
+      assert(give(1))
+      assert.are.equal("PARTY", wow.sent[1].channel)
+      wow.state.groupIsRaid = true
+      assert.are.equal(ANNOUNCED:gsub("raid", "party"), ns.Popup.Build().rows[1].handout.note)
+    end)
+
     it("shows the row as handing out until the game confirms, and refuses a second click", function()
       raid()
       drop({ { id = 1 }, { id = 2 } })
@@ -469,6 +479,24 @@ describe("Popup", function()
         .. " confirm (a few seconds).", ns.Popup.Build().rows[1].handout.note)
       confirm(1, "Ashla Brightwater")
       assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+    end)
+
+    it("hands out and saves even when the line can't be built, and says so (in a party)", function()
+      wow.inParty(function()
+        raid({ code = "MC0001" }) -- not a valid raid code for a chat line
+        drop({ { id = 1 } })
+        local attempt = assert(give(1))
+        assert.are.equal(1, #wow.gives)
+        assert.are.same({}, wow.sent)
+        assert.is_nil(attempt.announced)
+        assert.are.equal("announced", ns.Records.Get(attempt.awardKey).state)
+        assert.is_truthy(wow.printed[#wow.printed]:find("its party chat line couldn't be posted", 1, true))
+        assert.is_truthy(ns.log[#ns.log].text:find("raid code", 1, true))
+        assert.are.equal("Not announced in party chat: the line couldn't be posted. Waiting for the game to"
+          .. " confirm (a few seconds).", ns.Popup.Build().rows[1].handout.note)
+        confirm(1, "Ashla Brightwater")
+        assert.are.equal("confirmed", ns.Records.Get(attempt.awardKey).state)
+      end)
     end)
 
     it("waits out a boss fight: no hand-out or chat, buttons greyed with why (popup-fight)", function()
@@ -709,6 +737,21 @@ describe("Popup", function()
         assert.are.equal("DISENCHANT_BANK", ns.Records.Get(attempt.awardKey).method)
         assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale to disenchant or"
           .. " bank, but its raid chat line couldn't be posted.", 1, true))
+      end)
+
+      it("hands out and saves even when the line can't be built, and says so (in a party)", function()
+        wow.inParty(function()
+          raid({ code = "MC0001" }) -- not a valid raid code for a chat line
+          drop({ { id = 1 } })
+          ns.Popup.SetDBPick("Doran Vale")
+          local attempt = assert(giveDB(1))
+          assert.are.equal(1, #wow.gives)
+          assert.are.same({}, wow.sent)
+          assert.is_nil(attempt.announced)
+          assert.are.equal("DISENCHANT_BANK", ns.Records.Get(attempt.awardKey).method)
+          assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale to disenchant or"
+            .. " bank, but its party chat line couldn't be posted.", 1, true))
+        end)
       end)
 
       it("with no raid loaded, keeps the pick only until the game closes", function()
@@ -953,6 +996,20 @@ describe("Popup", function()
           assert.is_truthy(wow.printed[#wow.printed]:find("is no longer going to disenchant/bank, but", 1,
             true))
         end)
+
+        it("tells the officer when the undo or correction line can't be built (in a party)", function()
+          wow.inParty(function()
+            local key = unconfirmedDB({ code = "MC0001" })
+            assert(click(ns.Popup.GiveElse, key, "Ashla Brightwater"))
+            assert.is_truthy(wow.printed[#wow.printed]:find("instead of disenchant/bank, but its party"
+              .. " chat", 1,
+              true))
+            key = unconfirmedDB({ code = "MC0001" })
+            assert(click(ns.Popup.NotHandedOut, key))
+            assert.is_truthy(wow.printed[#wow.printed]:find("is no longer going to disenchant/bank, but", 1,
+              true))
+          end)
+        end)
       end)
 
       it("stays not confirmed when the loot window closes with no choice made", function()
@@ -1124,6 +1181,21 @@ describe("Popup", function()
           assert.is_truthy(ns.log[#ns.log].text:find("Correction line for .* not posted: the raid code"))
         end)
 
+        it("records the replacement even when the line can't be built, and says so (in a party)", function()
+          wow.inParty(function()
+            local key = unconfirmed({ code = "MC0001", reserves = RESERVES }, GROUP)
+            local attempt = assert(click(ns.Popup.GiveElse, key, "Doran Vale"))
+            assert.are.equal(2, #wow.gives)
+            assert.are.equal(0, #wow.sent)
+            assert.is_nil(attempt.announced)
+            assert.are.same({ true, "Doran Vale" }, { ns.Records.Get(key).voided,
+              ns.Records.Get(attempt.awardKey).char })
+            assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale instead of Ashla"
+              .. " Brightwater, but its party chat line couldn't be posted", 1, true))
+            assert.is_truthy(ns.log[#ns.log].text:find("Correction line for .* not posted: the raid code"))
+          end)
+        end)
+
         it("refuses who isn't in the raid or on the list, and waits out a boss fight", function()
           local key = setupList()
           assert.are.same({ nil, "not in raid" }, { click(ns.Popup.GiveElse, key, "Mirel Stone") })
@@ -1288,6 +1360,22 @@ describe("Popup", function()
             ns.Records.Get(attempt.awardKey).method })
           assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Bram Ironvein to disenchant or"
             .. " bank instead of Ashla Brightwater, but its raid chat line couldn't be posted", 1, true))
+        end)
+
+        it("records the replacement even when the line can't be built, and says so (in a party)", function()
+          wow.inParty(function()
+            local key = unconfirmed({ code = "MC0001", reserves = RESERVES }, GROUP)
+            assert.is_true(ns.Popup.SetDBPick("Bram Ironvein"))
+            local attempt = assert(click(ns.Popup.GiveElseDB, key, "Bram Ironvein"))
+            assert.are.equal(2, #wow.gives)
+            assert.are.equal(0, #wow.sent)
+            assert.is_nil(attempt.announced)
+            assert.are.same({ true, "DISENCHANT_BANK" }, { ns.Records.Get(key).voided,
+              ns.Records.Get(attempt.awardKey).method })
+            assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Bram Ironvein to"
+              .. " disenchant or"
+              .. " bank instead of Ashla Brightwater, but its party chat line couldn't be posted", 1, true))
+          end)
         end)
       end)
 
@@ -1544,6 +1632,21 @@ describe("Popup", function()
           assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale instead of Ashla"
             .. " Brightwater, but its raid chat line couldn't be posted", 1, true))
         end)
+
+        it("records the replacement even when the line can't be built, and says so (in a party)", function()
+          wow.inParty(function()
+            local key = unconfirmed({ code = "MC0001", reserves = RESERVES }, GROUP)
+            callRoll(key)
+            roll("Doran Vale", 87)
+            local attempt = assert(giveRolled())
+            assert.are.equal(2, #wow.gives)
+            assert.is_nil(attempt.announced)
+            assert.are.same({ true, 87 }, { ns.Records.Get(key).voided,
+              ns.Records.Get(attempt.awardKey).roll })
+            assert.is_truthy(wow.printed[#wow.printed]:find("is being handed to Doran Vale instead of Ashla"
+              .. " Brightwater, but its party chat line couldn't be posted", 1, true))
+          end)
+        end)
       end)
 
       describe("not handed out", function()
@@ -1580,6 +1683,19 @@ describe("Popup", function()
           assert.is_truthy(wow.printed[#wow.printed]:find("is no longer awarded to Ashla Brightwater, but its"
             .. " raid chat line couldn't be posted", 1, true))
           assert.is_truthy(ns.log[#ns.log].text:find("Undo line for .* not posted: the raid code"))
+        end)
+
+        it("voids even when the line can't be built, and says so (in a party)", function()
+          wow.inParty(function()
+            local key = unconfirmed({ code = "MC0001" })
+            assert.is_truthy(click(ns.Popup.NotHandedOut, key))
+            assert.is_true(ns.Records.Get(key).voided)
+            assert.are.equal(0, #wow.sent)
+            assert.is_truthy(wow.printed[#wow.printed]:find("is no longer awarded to Ashla Brightwater,"
+              .. " but its"
+              .. " party chat line couldn't be posted", 1, true))
+            assert.is_truthy(ns.log[#ns.log].text:find("Undo line for .* not posted: the raid code"))
+          end)
         end)
 
         it("tells the officer when the game confirms it after all, and keeps the void", function()
@@ -2761,6 +2877,30 @@ describe("Pick winner (#126)", function()
         assert.is_truthy(ns.log[#ns.log].text:find("^Correction line for item 1 not posted"))
       end)
 
+    it("can't be built: the preview says so, posting records it all the same, telling the officer (party)",
+      function()
+        wow.inParty(function()
+          local key = undone()
+          wow.state.items[1] = nil -- no item link
+          local p = pick({ kind = "holder", char = "Doran Vale" })
+          local model = ns.Popup.Picker(key, p)
+          assert.are.equal("The party chat line can't be posted: the item link does not match the item"
+            .. " id.", model.text)
+          assert.is_true(model.post.enabled)
+          local printed = #wow.printed
+          local result = correct(key, p)
+          assert.is_table(result[1])
+          assert.are.equal("Doran Vale now has item 1 on the record, but the correction line couldn't be"
+            .. " posted in party chat. Tell the party yourself. Type /bf log for why.", result[2])
+          assert.are.equal("confirmed", ns.Records.Get(p.newKey).state)
+          assert.are.equal(0, #wow.sent)
+          assert.are.equal(2, #sends)
+          assert.is_truthy(wow.printed[printed + 1]:find("Doran Vale now has item 1 on the record, but its"
+            .. " party chat line couldn't be posted. Type /bf log for why.", 1, true))
+          assert.is_truthy(ns.log[#ns.log].text:find("^Correction line for item 1 not posted"))
+        end)
+      end)
+
     it("is refused by the game: the record stands, for disenchant/bank in its own words", function()
       local key = undone()
       _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
@@ -2770,6 +2910,20 @@ describe("Pick winner (#126)", function()
         .. " be posted in raid chat. Tell the raid yourself. Type /bf log for why.", result[2])
       assert.are.equal("confirmed", ns.Records.Get(p.newKey).state)
       assert.is_truthy(ns.log[#ns.log].text:find("not posted: the game refused it", 1, true))
+    end)
+
+    it("is refused by the game: the record stands, for disenchant/bank in its own words (party)", function()
+      wow.inParty(function()
+        local key = undone()
+        _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
+        local p = pick({ kind = "db" })
+        local result = correct(key, p)
+        assert.are.equal(LINK .. " now goes to disenchant/bank on the record, but the correction line"
+          .. " couldn't"
+          .. " be posted in party chat. Tell the party yourself. Type /bf log for why.", result[2])
+        assert.are.equal("confirmed", ns.Records.Get(p.newKey).state)
+        assert.is_truthy(ns.log[#ns.log].text:find("not posted: the game refused it", 1, true))
+      end)
     end)
   end)
 end)
