@@ -9,6 +9,8 @@
 -- exported. After a reload it is not asked again by itself: it is in Unanswered. One made with no raid
 -- selected is kept in memory only, and only once put off with Later.
 -- A raid's saved hand-outs go when the raid is no longer loaded (Raids.DropHandouts, #143).
+-- In the open world (instance type "none") a menu hand-out is skipped and logged (#167); it is checked when
+-- the hand-out happens, so one made in an instance and still waiting is asked after leaving.
 -- Several hand-outs are asked one at a time, in order; in a boss fight the question waits until the
 -- fight ends, as notices do. On a run that is not a guild run nothing is asked or kept.
 -- Practice mode (#135): a Test drop's made-up menu hand-out is asked too ({ practice = true, kind, user,
@@ -474,6 +476,14 @@ ns.Tracking.On("outside", function(info)
     end
   end
   if ns.Selection.IsQuiet() then return end
+  -- In the open world there is no guild run to record it in; checked now, not when the question shows.
+  -- The raid question's test (StartQuestion): a raid, or another type that is set, not "none", with a number.
+  local _, kind, _, _, _, _, _, id = GetInstanceInfo()
+  if kind ~= "raid" and (kind == nil or kind == "" or kind == "none" or not id or id == 0) then
+    ns.Log("Skipped a loot-menu hand-out of " .. info.link .. " to " .. tostring(info.winner)
+      .. ": not in an instance.")
+    return
+  end
   local raidId = ns.Selection.Status().activeRaid
   OutsideHandout.Ask({ winner = info.winner, link = info.link, item = item, quantity = info.quantity,
     at = time(), raid = ns.Raids.Get(raidId) and raidId or nil, boss = ns.Popup.WindowBoss() })
