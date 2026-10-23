@@ -477,8 +477,9 @@ ns.Tracking.On("outside", function(info)
   end
   if ns.Selection.IsQuiet() then return end
   -- In the open world there is no guild run to record it in; checked now, not when the question shows.
-  local _, kind = GetInstanceInfo()
-  if kind == nil or kind == "" or kind == "none" then
+  -- The raid question's test (StartQuestion): a raid, or another type that is set, not "none", with a number.
+  local _, kind, _, _, _, _, _, id = GetInstanceInfo()
+  if kind ~= "raid" and (kind == nil or kind == "" or kind == "none" or not id or id == 0) then
     ns.Log("Skipped a loot-menu hand-out of " .. info.link .. " to " .. tostring(info.winner)
       .. ": not in an instance.")
     return

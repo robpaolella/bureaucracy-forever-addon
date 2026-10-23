@@ -934,6 +934,13 @@ describe("a menu hand-out in the open world (#167)", function()
     assert.are.equal(1, logged())
   end)
 
+  it("skips a place with a type but no instance number, as the raid question does", function()
+    start({ name = "Somewhere", type = "party", id = 0 })
+    giveFromMenu(1, "Ashla Brightwater")
+    assert.is_nil(O.Shown())
+    assert.are.equal(1, logged())
+  end)
+
   it("asks in a dungeon and in a raid instance", function()
     for _, place in ipairs({ { name = "The Hall of Thanes", type = "party", id = 70 },
       { name = "Molten Core", type = "raid", id = 409 } }) do
