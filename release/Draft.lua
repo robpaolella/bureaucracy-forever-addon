@@ -129,18 +129,43 @@ end
 
 local function isSha(text) return text:match("^%x+$") ~= nil and #text == 40 end
 
+local function logPlan(env, plan)
+  env.log("Next version: " .. plan.version .. "\n\n" .. plan.notes)
+  for _, title in ipairs(plan.reword) do env.log("Needs a release note: " .. title) end
+end
+
+-- The last published release's tag, from GitHub, or nil.
+local function lastPublished(env)
+  local tag = trim(callRead(env, "gh", "release", "list", "--exclude-drafts", "--exclude-pre-releases",
+    "--limit", "1", "--json", "tagName", "--jq", [[.[0].tagName // ""]]))
+  return tag ~= "" and tag or nil
+end
+
+-- Whether `tag` exists on GitHub (the checkout may not have it yet): ok, taken.
+local function tagOnGitHub(env, tag)
+  local ok, found = runRead(env, "gh", { "api", "repos/{owner}/{repo}/git/matching-refs/tags/" .. tag,
+    "--jq", '.[] | select(.ref == "refs/tags/' .. tag .. '") | .ref' })
+  return ok, ok and trim(found or "") ~= "", found
+end
+
+-- Asks GitHub whether `tag` is free right before creating its draft: a lookup that fails stops
+-- the run, so it never creates a draft it couldn't check.
+local function isTaken(env, tag)
+  local ok, taken, out = tagOnGitHub(env, tag)
+  if not ok then
+    error("Couldn't check whether " .. tag .. " was published during this run, so no draft was made. "
+      .. "Re-run this run, or the next merge drafts it. GitHub said: " .. tostring(out), 0)
+  end
+  return taken
+end
+
 -- mode "draft" (after a merge to main) or "dry-run". Returns what happened: { status, version, zip }.
 function Draft.run(env, mode)
   local head = trim(call(env, "git", "rev-parse", "HEAD"))
-  local previous = trim(callRead(env, "gh", "release", "list", "--exclude-drafts", "--exclude-pre-releases",
-    "--limit", "1", "--json", "tagName", "--jq", [[.[0].tagName // ""]]))
-  if previous == "" then previous = nil end
+  local previous = lastPublished(env)
   local cache = {}
   local plan = Release.plan(planInput(env, previous, head, cache))
-  if plan then
-    env.log("Next version: " .. plan.version .. "\n\n" .. plan.notes)
-    for _, title in ipairs(plan.reword) do env.log("Needs a release note: " .. title) end
-  end
+  if plan then logPlan(env, plan) end
 
   if mode == "dry-run" then
     local version = plan and plan.version or ("dev-" .. head:sub(1, 7))
@@ -190,16 +215,37 @@ function Draft.run(env, mode)
     local restore = "To restore it: run the Release workflow by hand on the tag " .. old.tag
       .. " for the zip, then on GitHub, Releases, Draft a new release, choose tag " .. old.tag
       .. ", attach the zip and publish."
-    local ok, found = runRead(env, "gh", { "api", "repos/{owner}/{repo}/git/matching-refs/tags/" .. old.tag,
-      "--jq", '.[] | select(.ref == "refs/tags/' .. old.tag .. '") | .ref' })
+    local ok, taken = tagOnGitHub(env, old.tag)
     if not ok then
       error("Deleted the draft " .. old.tag .. " but couldn't check whether it had just been published. "
         .. "If the Releases page has no " .. old.tag .. " but its tag exists, it was. " .. restore, 0)
     end
-    if trim(found or "") ~= "" then
+    if taken then
       error(old.tag .. " was published just as this run replaced its draft, so the release was deleted. "
         .. "Its tag is kept. " .. restore, 0)
     end
+  end
+  -- Robert may have published the version since the run read GitHub, even with no draft left to
+  -- delete: ask GitHub, not the checkout, and work the plan out once more from what he published.
+  local latest = lastPublished(env)
+  if isTaken(env, tag) or latest ~= previous then
+    previous = latest ~= previous and latest or tag
+    env.log(previous .. " was published during this run: working out the release after it.")
+    -- The checkout was fetched before it was published, so it lacks the tag.
+    local ref = "refs/tags/" .. previous
+    callRead(env, "git", "fetch", "--no-tags", "origin", ref .. ":" .. ref)
+    plan = Release.plan(planInput(env, previous, head, cache))
+    if not plan then
+      env.log("No release due since " .. previous .. ".")
+      return { status = "none" }
+    end
+    logPlan(env, plan)
+    tag = "v" .. plan.version
+    if isTaken(env, tag) then
+      error(tag .. " was also published during this run, so no draft was made. "
+        .. "The next merge drafts the release after it.", 0)
+    end
+    zip = env.build(plan.version)
   end
   call(env, "gh", "release", "create", tag, zip, "--draft", "--target", head,
     "--title", tag, "--notes", plan.notes)

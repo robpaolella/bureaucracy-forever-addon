@@ -5,8 +5,10 @@ local TOC = "## Version: 0.0.0-dev\nCore.lua\nInbox.lua\n"
 -- A stand-in for git and GitHub: a straight line of commits on main, published tags and drafts.
 -- Each commit: { pr = { number, title, body, how } } (how: nil squash-merged, "merge" merge-commit
 -- merged or "open": not in the closed list) or { subject }, plus toc to change the .toc.
+-- published: tags on GitHub and in the checkout; remote: tags on GitHub the checkout has yet to fetch.
 local function repo(commits)
-  local self = { commits = {}, releases = {}, published = {}, calls = {}, waits = {}, built = {}, nextId = 1 }
+  local self = { commits = {}, releases = {}, published = {}, remote = {}, calls = {}, waits = {}, built = {},
+    nextId = 1 }
   local index = {}
   function self.add(commit)
     local n = #self.commits + 1
@@ -23,6 +25,12 @@ local function repo(commits)
 
   local function at(ref) return index[ref] or index[self.published[ref]] end
   function self.publish(tag) self.published[tag] = self.head; self.latest = tag end
+  -- Robert publishes a draft while a run is going: GitHub has the tag, the run's checkout doesn't.
+  function self.publishDraft(release)
+    release.published = true
+    self.remote[release.tag] = release.target
+    self.latest = release.tag
+  end
   function self.drafts()
     local out = {}
     for _, release in ipairs(self.releases) do out[#out + 1] = release end
@@ -42,6 +50,11 @@ local function repo(commits)
     if cmd == "log" then return true, (self.commits[at(args[4])].subject or "") .. "\n" end
     if cmd == "merge-base" then return at(args[3]) <= at(args[4]), "" end
     if cmd == "tag" then return true, self.published[args[3]] and (args[3] .. "\n") or "" end
+    if cmd == "fetch" then
+      local tag = args[4]:match("^refs/tags/(.-):refs/tags/")
+      self.published[tag] = self.published[tag] or self.remote[tag]
+      return self.published[tag] ~= nil, ""
+    end
   end
 
   local function gh(args)
@@ -59,7 +72,7 @@ local function repo(commits)
     local tag = args[2]:match("^repos/{owner}/{repo}/git/matching%-refs/tags/(.+)$")
     if args[1] == "api" and tag then
       if self.tagLookupFails then return false, "HTTP 503" end
-      return true, self.published[tag] and ("refs/tags/" .. tag .. "\n") or ""
+      return true, (self.published[tag] or self.remote[tag]) and ("refs/tags/" .. tag .. "\n") or ""
     end
     if args[1] == "api" and args[2] == "-X" and args[3] == "DELETE" then
       local id = tonumber(args[4]:match("(%d+)$"))
@@ -92,6 +105,7 @@ local function repo(commits)
       return true, table.concat(out)
     end
     if args[1] == "api" and args[2] == "--paginate" then
+      if self.onDrafts then self.onDrafts() end
       local out = {}
       for _, r in ipairs(self.releases) do
         if not r.published then out[#out + 1] = r.id .. " " .. r.tag .. " " .. r.target end
@@ -279,6 +293,81 @@ describe("Draft.run", function()
     assert.matches("couldn't check whether it had just been published", err, 1, true)
     assert.matches("To restore it", err, 1, true)
     assert.is_false(r.called("release create"))
+  end)
+
+  describe("when Robert publishes after the run read the releases", function()
+    -- The incident: the only draft, v1.0.0, is published between the first lookup and the draft list.
+    before_each(function()
+      r = repo({ pr(1, "feat: first", "The add-on.") })
+      r.run()
+      r.add(pr(2, "fix: a crash", "No more crash."))
+      local draft = r.releases[1]
+      r.onDrafts = function() r.onDrafts = nil; r.publishDraft(draft) end
+    end)
+
+    it("drafts the release after the one he published", function()
+      local result = r.run()
+      local zip = "dist/BureaucracyForever-1.0.1.zip"
+      assert.same({ status = "created", version = "1.0.1", zip = zip }, result)
+      local drafts = {}
+      for _, release in ipairs(r.releases) do
+        if not release.published then drafts[#drafts + 1] = release end
+      end
+      assert.equal(1, #drafts)
+      assert.equal("v1.0.1", drafts[1].tag)
+      assert.equal(r.head, drafts[1].target)
+      assert.matches("No more crash.", drafts[1].notes, 1, true)
+      assert.is_nil(drafts[1].notes:find("The add-on.", 1, true))
+      assert.is_false(r.called("release create v1%.0%.0"))
+      assert.is_true(r.called("^git fetch .*refs/tags/v1%.0%.0:refs/tags/v1%.0%.0$"))
+    end)
+
+    it("creates nothing and says so when the next version is taken as well", function()
+      r.remote["v1.0.1"] = r.head
+      local ok, err = pcall(r.run)
+      assert.is_false(ok)
+      assert.equal("v1.0.1 was also published during this run, so no draft was made. "
+        .. "The next merge drafts the release after it.", err)
+      assert.is_false(r.called("release create"))
+    end)
+
+    it("makes no draft when nothing since calls for a release", function()
+      r.commits[#r.commits].pr = { 2, "docs: tidy the readme", "Release note: none" }
+      assert.equal("none", r.run().status)
+      assert.is_false(r.called("release create"))
+    end)
+
+    it("notices from the tag alone, before the release list shows it", function()
+      local draft = r.releases[1]
+      r.onDrafts = function()
+        r.onDrafts = nil
+        draft.published = true
+        r.remote[draft.tag] = draft.target
+      end
+      assert.equal("1.0.1", r.run().version)
+    end)
+
+    it("never creates the draft when GitHub can't say whether the tag is taken", function()
+      r.flaky("matching%-refs")
+      local ok, err = pcall(r.run)
+      assert.is_false(ok)
+      assert.matches("^Couldn't check whether v1%.0%.0 was published during this run, so no draft was made%.",
+        err)
+      assert.equal(4, r.count("matching%-refs"))
+      assert.is_false(r.called("release create"))
+    end)
+  end)
+
+  it("creates the draft as before when nothing was published during the run", function()
+    r.add(pr(2, "fix: a crash", "No more crash."))
+    r.run()
+    local notes = r.releases[1].notes
+    local zip = "dist/BureaucracyForever-1.0.1.zip"
+    assert.same({ "release", "create", "v1.0.1", zip, "--draft", "--target", r.head, "--title", "v1.0.1",
+      "--notes", notes }, r.releases[1].args)
+    assert.same({ "1.0.1" }, r.built)
+    assert.is_false(r.called("git fetch"))
+    assert.equal(1, r.count("matching%-refs/tags/v1%.0%.1"))
   end)
 
   describe("looking up pull requests", function()
