@@ -2877,6 +2877,30 @@ describe("Pick winner (#126)", function()
         assert.is_truthy(ns.log[#ns.log].text:find("^Correction line for item 1 not posted"))
       end)
 
+    it("can't be built: the preview says so, posting records it all the same, telling the officer (party)",
+      function()
+        wow.inParty(function()
+          local key = undone()
+          wow.state.items[1] = nil -- no item link
+          local p = pick({ kind = "holder", char = "Doran Vale" })
+          local model = ns.Popup.Picker(key, p)
+          assert.are.equal("The party chat line can't be posted: the item link does not match the item"
+            .. " id.", model.text)
+          assert.is_true(model.post.enabled)
+          local printed = #wow.printed
+          local result = correct(key, p)
+          assert.is_table(result[1])
+          assert.are.equal("Doran Vale now has item 1 on the record, but the correction line couldn't be"
+            .. " posted in party chat. Tell the party yourself. Type /bf log for why.", result[2])
+          assert.are.equal("confirmed", ns.Records.Get(p.newKey).state)
+          assert.are.equal(0, #wow.sent)
+          assert.are.equal(2, #sends)
+          assert.is_truthy(wow.printed[printed + 1]:find("Doran Vale now has item 1 on the record, but its"
+            .. " party chat line couldn't be posted. Type /bf log for why.", 1, true))
+          assert.is_truthy(ns.log[#ns.log].text:find("^Correction line for item 1 not posted"))
+        end)
+      end)
+
     it("is refused by the game: the record stands, for disenchant/bank in its own words", function()
       local key = undone()
       _G.C_ChatInfo.SendChatMessage = function() error("blocked") end
