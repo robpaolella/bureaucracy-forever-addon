@@ -597,6 +597,7 @@ local function drawPicker(model, y)
   top = top + 28
   -- The line Post correction posts, or why it can't yet, in its own dark panel.
   at(p.previewBack, 6, top)
+  p.previewHead:SetText("Posts in " .. ns.Popup.ChatName())
   at(p.previewHead, 12, top + 6)
   p.preview:SetText(model.line or model.text)
   if model.line then p.preview:SetTextColor(1, 0.5, 0.25) else p.preview:SetTextColor(0.7, 0.7, 0.7) end
@@ -677,7 +678,6 @@ local function buildPicker()
   p.previewBack = p:CreateTexture(nil, "BORDER")
   p.previewBack:SetColorTexture(0.1, 0.1, 0.1, 1)
   p.previewHead = newText(p, "GameFontNormalSmall")
-  p.previewHead:SetText("Posts in raid chat")
   p.preview = newText(p, "GameFontHighlightSmall")
   p.preview:SetWidth(BOX_WIDTH - 24)
   p.preview:SetJustifyH("LEFT")
