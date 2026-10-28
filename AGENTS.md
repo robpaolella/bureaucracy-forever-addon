@@ -45,6 +45,35 @@ Releases are zips on GitHub Releases; see Releases. The game files never change 
 - **Dry run:** the workflow also runs on every PR and by hand (Actions, Release, Run workflow): it builds the zip as a downloadable artifact and creates no release or draft.
 - **Convention:** /git/maestro/docs/git-workflow.md, Releases. This section holds this repo's whole rule set, so it applies even where that file isn't at hand.
 
+## Needs Robert's own merge
+Agents may merge reviewed PRs into a `package/*` branch or a Building branch below,
+except these, which only Robert merges (docs/git-workflow.md, Merging). Robert also merges
+every PR into a Live branch.
+- Any change to `AGENTS.md` or `CLAUDE.md`. A `risk:high` PR is merged by an agent only
+  after the `risky-review` role has passed it; in a package, the walkthrough marks steps
+  Robert follows himself before he merges the package.
+- Changes that reach beyond their branch: real data, live hosting or DNS settings, logins
+  and secrets, outside accounts. On a Building branch, deploying this repo's own code from
+  it is accepted.
+- Publishing a release stays Robert's alone. A merge to main only refreshes the draft
+  release (see Releases).
+
+Each branch's stage, read from this file on `main`. Building: its work reaches no one yet,
+so agents merge into it. Live: people rely on it, so Robert merges into it. A branch not
+listed counts as Live. One line per branch, `<branch>: Building` or `<branch>: Live`, with
+an exact name (no patterns, no `package/` branches); lines starting with `#` are skipped.
+```stages
+main: Building
+```
+
+The guardrail refuses an agent's merge of a PR that changes a file matching a line
+below, read from this file on `main`. Paths start at the repo root; `**` crosses
+folders, `*` and `?` stay within one folder; end a folder with `/**`.
+```paths
+.github/workflows/**
+release/**
+```
+
 ## Watch out for
 - Every game fact or advice must be true for WoW Forever, not assumed from Classic or retail: character names, items, bosses, instances, levels, the add-on API and client limits. Check against the Forever client, its beta results, or a Forever source (wago.tools data for a Forever build, Wowhead's Forever pages, foreverchanges.pro); say when a fact has not been checked for Forever. For example, character names are a first and last name separated by a space (the site's rule: 2–12 letters each), not a single word.
 - WoW add-ons can't make web requests. Reserves get in and awards get out only through files written on logout or `/reload` (SavedVariables), copy-paste export strings, or the desktop helper.
