@@ -41,33 +41,40 @@ Releases are zips on GitHub Releases; see Releases. The game files never change 
 - **Source:** each merged pull request's title and body, looked up through the GitHub API, not commit messages. A commit with no pull request counts by its subject.
 - **Release note:** every PR body has a `Release note:` line: one plain-English sentence for officers. A `feat`, `fix` or breaking PR always has a real one; `Release note: none` is only for other types. A missing note falls back to the PR title, marked for Robert to reword.
 - **The draft:** after each merge to main, the Release workflow (`.github/workflows/release.yml`) creates or refreshes the one draft release on the repo's Releases page, targeting the merged commit's SHA. A merge that changes nothing in the release leaves the draft, and any edits to it, as it is.
-- **Publishing:** only Robert publishes, by clicking Publish on the draft; no workflow or agent does. Publishing creates the tag `v<version>`, which is never moved or reused: a bad release is fixed by a newer one. If Publish lands in the instant a refresh deletes the old draft, the published release is deleted; the run then fails and its error says how to restore it from the tag, which is kept.
+- **Publishing:** an agent publishes the draft once it is built and its zip and notes are checked (/git/maestro/docs/git-workflow.md, Releases, Drafts and publishing); a merge to main only refreshes the draft. Publishing creates the tag `v<version>`, which is never moved or reused: a bad release is fixed by a newer one. If Publish lands in the instant a refresh deletes the old draft, the published release is deleted; the run then fails and its error says how to restore it from the tag, which is kept.
 - **Dry run:** the workflow also runs on every PR and by hand (Actions, Release, Run workflow): it builds the zip as a downloadable artifact and creates no release or draft.
 - **Convention:** /git/maestro/docs/git-workflow.md, Releases. This section holds this repo's whole rule set, so it applies even where that file isn't at hand.
 
 ## Needs Robert's own merge
-Agents may merge reviewed PRs into a `package/*` branch or a Building branch below,
-except these, which only Robert merges (docs/git-workflow.md, Merging). Robert also merges
-every PR into a Live branch.
+"Robert's own merge" means Robert says "merge" for it in chat and an agent then merges it;
+he never presses Merge (docs/git-workflow.md, Merging). Agents merge reviewed PRs into a
+`package/*` branch or a Building branch below without his word, except these, which wait
+for it. Every PR into a Live branch waits for his word too.
 - Any change to `AGENTS.md` or `CLAUDE.md`. A `risk:high` PR is merged by an agent only
   after the `risky-review` role has passed it; in a package, the walkthrough marks steps
-  Robert follows himself before he merges the package.
+  Robert follows himself before he says "merge" for the package.
 - Changes that reach beyond their branch: real data, live hosting or DNS settings, logins
   and secrets, outside accounts. On a Building branch, deploying this repo's own code from
   it is accepted.
-- Publishing a release stays Robert's alone. A merge to main only refreshes the draft
-  release (see Releases).
+
+In Robert's own repos (a blank Client column in /git/maestro/docs/projects.md; #820) agents
+merge everything above once it is reviewed, Live branches and releases included, and changes
+to `AGENTS.md`, `CLAUDE.md` or the `paths` list once `risky-review` has passed them. Only a
+change that could lose real data for good, secrets and logins, and hosting, DNS or
+outside-account settings wait for him there, as questions; the other lines are checked by
+`risky-review` (docs/git-workflow.md, Robert's own repos). This add-on is one of them.
 
 Each branch's stage, read from this file on `main`. Building: its work reaches no one yet,
-so agents merge into it. Live: people rely on it, so Robert merges into it. A branch not
-listed counts as Live. One line per branch, `<branch>: Building` or `<branch>: Live`, with
+so agents merge into it. Live: people rely on it, so every merge into it waits for Robert's
+word. A branch not
+listed counts as Live. The standing `release` branch counts as Building unless the repo's `stages` list names it; then the list wins, Live or Building. One line per branch, `<branch>: Building` or `<branch>: Live`, with
 an exact name (no patterns, no `package/` branches); lines starting with `#` are skipped.
 ```stages
 main: Building
 ```
 
-The guardrail refuses an agent's merge of a PR that changes a file matching a line
-below, read from this file on `main`. Paths start at the repo root; `**` crosses
+A PR that changes a file matching a line below, read from this file on `main`, waits for
+Robert's word (in Robert's own repos, for a `risky-review` pass instead). Paths start at the repo root; `**` crosses
 folders, `*` and `?` stay within one folder; end a folder with `/**`.
 ```paths
 .github/workflows/**
