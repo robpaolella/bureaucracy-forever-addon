@@ -157,6 +157,7 @@ local function isLootMaster()
   local name = IsInRaid() and raidIndex and raidIndex > 0 and GetRaidRosterInfo(raidIndex)
   return name and bare(name) == bare(UnitName("player")) or false
 end
+Popup.IsLootMaster = isLootMaster
 
 -- Practice: the item's made-up reserves, made the first time they're asked for and the same on every
 -- redraw of the window. A Test drop asks too (TestDrop), before the pop-up draws.

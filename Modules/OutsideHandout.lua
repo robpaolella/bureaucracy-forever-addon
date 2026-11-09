@@ -11,6 +11,9 @@
 -- A raid's saved hand-outs go when the raid is no longer loaded (Raids.DropHandouts, #143).
 -- In the open world (instance type "none") a menu hand-out is skipped and logged (#167); it is checked when
 -- the hand-out happens, so one made in an instance and still waiting is asked after leaving.
+-- Only the loot master's hand-out is asked: under any other loot method, or with another loot master,
+-- a cleared slot is the player picking the item up, which is skipped and logged (#173), checked at the
+-- same moment.
 -- Several hand-outs are asked one at a time, in order; in a boss fight the question waits until the
 -- fight ends, as notices do. On a run that is not a guild run nothing is asked or kept.
 -- Practice mode (#135): a Test drop's made-up menu hand-out is asked too ({ practice = true, kind, user,
@@ -474,6 +477,13 @@ ns.Tracking.On("outside", function(info)
         return
       end
     end
+  end
+  -- Only the loot master's own hand-out from the menu is one: picking up an item yourself (group loot,
+  -- a full bag, another loot master) is not.
+  if not ns.Popup.IsLootMaster() then
+    ns.Log("Skipped a loot pick-up of " .. info.link .. " by " .. tostring(info.winner)
+      .. ": not handed out by you as loot master.")
+    return
   end
   if ns.Selection.IsQuiet() then return end
   -- In the open world there is no guild run to record it in; checked now, not when the question shows.
