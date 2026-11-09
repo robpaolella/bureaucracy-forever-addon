@@ -962,6 +962,81 @@ describe("a menu hand-out in the open world (#167)", function()
   end)
 end)
 
+describe("picking an item up yourself (#173)", function()
+  local ns, O
+  local MEMBERS = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
+
+  -- A dungeon with a loaded raid, the player in a party, the given loot method.
+  local function start(method, raid)
+    ns = wow.start()
+    O = ns.OutsideHandout
+    wow.state.group = MEMBERS
+    wow.state.groupIsRaid = raid or false
+    wow.state.lootMethod = method
+    wow.state.instance = { name = "The Hall of Thanes", type = "party", id = 70 }
+    ns.Raids.Load(assert(ns.Snapshot.Validate(tree(), "0.1.0")), "pasted")
+    assert(ns.Selection.ChooseRaid("raid00001"))
+    for _ = 1, 30 do wow.advance(1) end
+  end
+
+  -- A green item cleared from the corpse's loot window, and the "receives loot" line.
+  local function pickUp(winner)
+    local item = link(1)
+    wow.openLoot({ { link = item, quality = 2, sourceGuid = "corpse1", candidates = MEMBERS } })
+    wow.fire("LOOT_SLOT_CLEARED", 1)
+    wow.fire("LOOT_SLOT_CLEARED", 1)
+    wow.fire("CHAT_MSG_LOOT", winner .. " receives loot: " .. item .. ".")
+  end
+
+  local function logged()
+    local n = 0
+    for _, entry in ipairs(ns.log) do
+      if entry.text:find("not handed out by you as loot master", 1, true) then n = n + 1 end
+    end
+    return n
+  end
+
+  local function skipped()
+    assert.is_nil(O.Shown())
+    assert.are.same({}, O.Unanswered())
+    assert.is_nil(ns.db.outside)
+    assert.are.same({}, ns.Raids.Awards("raid00001"))
+    assert.are.equal(1, logged())
+  end
+
+  it("asks nothing, keeps nothing and logs one line under group loot", function()
+    start({ "group", 0, 0 })
+    pickUp("Masterlooter")
+    skipped()
+  end)
+
+  it("asks nothing when another member is the loot master", function()
+    start({ "master", 2, 0 })
+    pickUp("Masterlooter")
+    skipped()
+  end)
+
+  it("asks nothing when another raid member is the loot master", function()
+    start({ "master", nil, 2 }, true)
+    pickUp("Masterlooter")
+    skipped()
+  end)
+
+  it("asks nothing when the loot method can't be read", function()
+    start({ "master", 0, 0 })
+    _G.C_PartyInfo = nil
+    pickUp("Masterlooter")
+    skipped()
+  end)
+
+  it("still asks about the loot master's own menu hand-out in a dungeon", function()
+    start({ "master", 0, 0 })
+    pickUp("Ashla Brightwater")
+    assert.is_table(O.Shown())
+    assert.are.equal(0, logged())
+  end)
+end)
+
 describe("practice mode's menu hand-out (#135)", function()
   local ns, O
   local MEMBERS = { "Masterlooter", "Ashla Brightwater", "Doran Vale", "Bram Ironvein" }
